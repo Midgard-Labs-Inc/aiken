@@ -2,6 +2,8 @@
 
 ## unreleased
 
+## v1.2.1 - 2026-10-14
+
 ### Changed
 
 - **aiken**: `aiken new` generates a CI workflow that installs Aiken with this repository's release installer, instead of `aiken-lang/setup-aiken`, which installed upstream's releases. @rvcas
