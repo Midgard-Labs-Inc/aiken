@@ -2,6 +2,8 @@
 
 ## unreleased
 
+## v1.2.0 - 2026-10-14
+
 ### Added
 
 - **uplc**: Make `TxInfo::script_context_data` public, so that callers evaluating several redeemers of one transaction can convert the transaction info to `Data` once and share it between every script context. @colll78
