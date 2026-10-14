@@ -259,14 +259,14 @@ fn create_github_action(root: &Path) -> miette::Result<()> {
               build:
                 runs-on: ubuntu-latest
                 steps:
-                  - uses: actions/checkout@v3
-                  - uses: aiken-lang/setup-aiken@v1
-                    with:
-                      version: {version}
+                  - uses: actions/checkout@v6
+                  - name: Install Aiken
+                    run: curl --proto '=https' --tlsv1.2 -LsSf {repository}/releases/download/{version}/aiken-installer.sh | sh
                   - run: aiken fmt --check
                   - run: aiken check -D
                   - run: aiken build
             "#,
+            repository = env!("CARGO_PKG_REPOSITORY"),
             version = config::compiler_version(false),
         },
     )

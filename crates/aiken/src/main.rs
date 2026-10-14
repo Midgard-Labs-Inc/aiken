@@ -64,12 +64,13 @@ fn panic_handler() {
             r#"{fatal}
                 Whoops! You found a bug in the Aiken compiler.
 
-                Please report this error at https://github.com/aiken-lang/aiken/issues/new.
+                Please report this error at {repository}/issues/new.
                 In your bug report please provide the information below and if possible the code
                 that produced it.
                 {info}
 
                 {location}{message}"#,
+            repository = env!("CARGO_PKG_REPOSITORY"),
             info = config::compiler_info(),
             fatal = "aiken::fatal::error".red().bold(),
             location = location.purple(),

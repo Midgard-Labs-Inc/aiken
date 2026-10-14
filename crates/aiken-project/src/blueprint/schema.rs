@@ -1120,7 +1120,8 @@ impl Error {
 
 ╰─▶ {signature}
 
-This is likely a bug. I should know. May you be kind enough and report this on <https://github.com/aiken-lang/aiken>."#,
+This is likely a bug. I should know. May you be kind enough and report this on <{repository}>."#,
+                repository = env!("CARGO_PKG_REPOSITORY"),
                 signature = Error::fmt_breadcrumbs(&[self
                     .breadcrumbs
                     .last()

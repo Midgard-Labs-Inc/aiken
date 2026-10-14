@@ -7,17 +7,17 @@
   <hr />
     <h2 align="center" style="border-bottom: none">A modern smart contract platform for Cardano</h2>
 
-[![Licence](https://img.shields.io/github/license/aiken-lang/aiken?style=for-the-badge)](https://github.com/aiken-lang/aiken/blob/main/LICENSE)
-[![Tests](https://img.shields.io/github/actions/workflow/status/aiken-lang/aiken/tests.yml?style=for-the-badge)](https://github.com/aiken-lang/aiken/actions/workflows/tests.yml)
+[![Licence](https://img.shields.io/github/license/Midgard-Labs-Inc/aiken?style=for-the-badge)](./LICENSE)
+[![Tests](https://img.shields.io/github/actions/workflow/status/Midgard-Labs-Inc/aiken/tests.yml?style=for-the-badge)](https://github.com/Midgard-Labs-Inc/aiken/actions/workflows/tests.yml)
 
-[![Crates.io](https://img.shields.io/crates/v/aiken?style=for-the-badge)](https://crates.io/crates/aiken)
-[![NPM](https://img.shields.io/npm/v/%40aiken-lang%2Faiken?style=for-the-badge)](https://www.npmjs.com/package/@aiken-lang/aiken)
+[![Release](https://img.shields.io/github/v/release/Midgard-Labs-Inc/aiken?style=for-the-badge)](https://github.com/Midgard-Labs-Inc/aiken/releases/latest)
+[![NPM](https://img.shields.io/npm/v/%40orbistry%2Faiken?style=for-the-badge)](https://www.npmjs.com/package/@orbistry/aiken)
   <hr/>
 </div>
 
 ## Getting Started
 
-- [Installation instructions](https://aiken-lang.org/installation-instructions)
+- [Installation instructions](./crates/aiken/README.md#install)
 
 - [Online playground](https://play.aiken-lang.org/)
 
@@ -33,7 +33,7 @@ Want to contribute? See [CONTRIBUTING.md](./CONTRIBUTING.md) to know how.
 
 ## Changelog
 
-Be on top of any updates using the [CHANGELOG](https://github.com/aiken-lang/aiken/blob/main/CHANGELOG.md) and the [Project Tracking](https://github.com/orgs/aiken-lang/projects/2/views/1).
+Be on top of any updates using the [CHANGELOG](./CHANGELOG.md).
 
 > [!NOTE]
 >

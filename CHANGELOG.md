@@ -2,6 +2,16 @@
 
 ## unreleased
 
+### Changed
+
+- **aiken**: `aiken new` generates a CI workflow that installs Aiken with this repository's release installer, instead of `aiken-lang/setup-aiken`, which installed upstream's releases. @rvcas
+- **aiken**, **aiken-project**: Ask to report compiler crashes and blueprint generation bugs on `Midgard-Labs-Inc/aiken` instead of `aiken-lang/aiken`. @rvcas
+
+### Fixed
+
+- **aiken**: Download binaries from this repository's releases in the shell and PowerShell installers, the Homebrew formula, and the npm package. In v1.2.0 they pointed at `aiken-lang/aiken`, which has no such release, so every installer failed. @rvcas
+- **aiken**: Replace the npm package README with install instructions for this fork. @rvcas
+
 ## v1.2.0 - 2026-10-14
 
 ### Added

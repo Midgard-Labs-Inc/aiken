@@ -10,15 +10,15 @@
 
 2. **Documentation**
 
-   Any updates, typo fixes, or expansion of the documentation is more than welcome. At the moment,
-   we are using [nextra](https://nextra.site) to run https://github.com/aiken-lang/site.
-   That can be considered user level documentation but that is not strict. There is also doc comments in the Rust code, which can be considered strictly developer level documentation.
+   Any updates, typo fixes, or expansion of the documentation is more than welcome. The user level
+   documentation is an [Astro](https://astro.build) site built with [Nimbus](https://nimbus-docs.com). It lives in [`site/`](./site) and is published at https://aiken-lang.com.
+   There is also doc comments in the Rust code, which can be considered strictly developer level documentation.
 
 3. **Code**
 
    **Getting started**
 
-   - `git clone git@github.com:aiken-lang/aiken.git`
+   - `git clone git@github.com:Midgard-Labs-Inc/aiken.git`
    - `cd aiken`
    - `cargo test`
    - `cargo run -- help`
@@ -38,7 +38,7 @@
 
    If you're not sure how to get started, this is a good low-friction path:
 
-   1. Pick a small issue from [Help Welcomed](https://github.com/aiken-lang/aiken/discussions/categories/help-welcomed) or a well-scoped bug report.
+   1. Pick a small [issue](https://github.com/Midgard-Labs-Inc/aiken/issues) or a well-scoped bug report.
    2. Reproduce it on current `main` before changing code.
    3. Inspect the smallest relevant source path.
    4. Add or update a focused regression test.
@@ -60,59 +60,50 @@
 
    **Changelog**
 
-   Please add an entry into [CHANGELOG.md](./CHANGELOG.md) when submitting changes. New entries should go into the `[next] YYYY-MM-DD` section. This let's us keep track of unreleased changes
-   for use in release notes.
+   Please add an entry into [CHANGELOG.md](./CHANGELOG.md) when submitting changes. New entries should go into the `## unreleased` section, which becomes the release notes of the next release.
 
-   Once a release is ready `[next] YYYY-MM-DD` gets replaced with a version number and a the release date `[0.0.0] 2009-01-03`. Usually the maintainers will handle the section renaming along with creating a new _empty_ `[next] YYYY-MM-DD` section at the top of the changelog.
+   When a release is cut, the release workflow renames `## unreleased` to the version number and release date (e.g. `## v1.2.1 - 2026-10-15`) and creates a new _empty_ `## unreleased` section at the top of the changelog.
 
-   Each release section will be further broken down into three sections named `Added`, `Changed`, and `Removed`. Please put the associated crate's name in **bold** followed by a `:` as a prefix to the new entry.
+   Each release section is further broken down into the sections `Added`, `Changed`, `Fixed`, and `Removed`. Please put the associated crate's name in **bold** followed by a `:` as a prefix to the new entry, and end it with your GitHub handle.
 
    ```md
-   ## [next] - YYYY-MM-DD
+   ## unreleased
 
    ### Added
 
-   - **crate**: some new thing
+   - **crate**: some new thing @you
 
    ### Changed
 
-   - **crate**: fixed or updated something
+   - **crate**: updated something @you
+
+   ### Fixed
+
+   - **crate**: fixed something @you
 
    ### Removed
 
-   - **crate**: something is gone now
+   - **crate**: something is gone now @you
    ```
 
 ## Releasing
 
-To be able to create a release you need to be on the [maintainers](https://github.com/orgs/aiken-lang/teams/maintainers) team.
-This means that only core team members can create releases. We have a
-[github action](https://github.com/aiken-lang/aiken/blob/main/.github/workflows/release.yml) for creating the binaries and a github release.
-The process follows these steps:
+Releases are cut from CI and require write access to the repository. The process follows these steps:
 
-1. `cargo release --execute`
-2. After a release is created by the github action fill in the release notes. Try to tag contributors so that they show up in the release.
-3. Screenshot the result of `aikup` and post on [X (@aiken_dev)](https://x.com/aiken_dev) saying "We've just released vx.x.x".
-
-> `cargo release` takes arguments and flags to tell it how to bump the version number. Examples include `cargo release 1.0.16-alpha` and `cargo release major`.
->
-> The root `Cargo.toml` in the repo contains this configuration for `cargo release`:
->
-> ```toml
-> [workspace.metadata.release]
-> shared-version = true
-> tag-name = "v{{version}}"
-> ```
+1. Make sure the `## unreleased` section of [CHANGELOG.md](./CHANGELOG.md) describes everything going out; it becomes the release notes.
+2. Run the [Create Release Tag](./.github/workflows/tag.yml) workflow from the Actions tab and pick a `major`, `minor`, or `patch` bump. It runs `cargo release`, which bumps the workspace version, renames the changelog section, commits, and pushes a `vX.Y.Z` tag.
+3. The tag triggers the [Release](./.github/workflows/release.yml) workflow (generated by [dist](https://github.com/axodotdev/cargo-dist) from `dist-workspace.toml`). It builds the binaries and installers, creates the GitHub release, publishes to Homebrew and npm, and then deploys the documentation site.
+4. Post on [X (@aiken_dev)](https://x.com/aiken_dev) saying "We've just released vX.Y.Z".
 
 ## About Issues
 
 ### :bug: How To Report A Bug
 
-Open a [Bug Issue](https://github.com/aiken-lang/aiken/issues/new?template=bug.md).
+Open a [Bug Issue](https://github.com/Midgard-Labs-Inc/aiken/issues/new?template=bug.md).
 
 ### :bulb: How To Propose An Idea
 
-Feel free to bring any idea as a [discussion [category: idea]](https://github.com/aiken-lang/aiken/discussions/new?category=ideas). Make sure to highlight your use case so we can understand the design space and agree on a solution.
+Feel free to bring any idea as an [Idea Issue](https://github.com/Midgard-Labs-Inc/aiken/issues/new?template=idea.md). Make sure to highlight your use case so we can understand the design space and agree on a solution.
 
 > [!NOTE]
 > Ideally, follow this simple template:
@@ -123,10 +114,7 @@ Feel free to bring any idea as a [discussion [category: idea]](https://github.co
 
 ### :question: How To Ask a Question
 
-Open a [Q&A Discussion](https://github.com/aiken-lang/aiken/discussions/new?category=q-a).
-
-> [!IMPORTANT]
-> Make sure to mark your question as _Answered_ once resolved!
+Ask it on [Discord (#aiken)](https://discord.gg/TTCjYCtYf9).
 
 ## Need Help Getting Started?
 

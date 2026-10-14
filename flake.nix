@@ -69,7 +69,7 @@
 
         meta = with pkgs.lib; {
           description = "Cardano smart contract language and toolchain";
-          homepage = "https://github.com/aiken-lang/aiken";
+          homepage = "https://aiken-lang.com";
           license = licenses.asl20;
           mainProgram = "aiken";
         };
