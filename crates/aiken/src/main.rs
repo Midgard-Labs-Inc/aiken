@@ -15,13 +15,6 @@ mod cmd;
 fn main() -> miette::Result<()> {
     panic_handler();
 
-    #[cfg(target_env = "musl")]
-    if !openssl_probe::has_ssl_cert_env_vars() {
-        unsafe {
-            openssl_probe::try_init_openssl_env_vars();
-        }
-    }
-
     match Cmd::default() {
         Cmd::New(args) => new::exec(args),
         Cmd::Fmt(args) => fmt::exec(args),

@@ -15,61 +15,11 @@ authors = [
     "Kasey White <kwhitemsg@gmail.com>",
     "KtorZ <matthias.benkort@gmail.com>",
 ]
-rust-version = "1.94.1" # If changing, also change in workflow/release.yml
+rust-version = "1.94.1" # If changing, also change in .github/build-setup.yml
 
 [workspace.metadata.release]
 shared-version = true
 tag-name = "v{{version}}"
-
-# Config for 'cargo dist'
-[workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.22.1"
-# CI backends to support
-ci = "github"
-# The installers to generate for each app
-installers = ["shell", "powershell", "npm", "homebrew"]
-# A GitHub repo to push Homebrew formulas to
-tap = "aiken-lang/homebrew-tap"
-# Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-    "aarch64-apple-darwin",
-    "x86_64-unknown-linux-musl",
-    "aarch64-unknown-linux-musl",
-    "x86_64-pc-windows-msvc",
-]
-# The archive format to use for windows builds (defaults .zip)
-windows-archive = ".tar.gz"
-# The archive format to use for non-windows builds (defaults .tar.xz)
-unix-archive = ".tar.gz"
-# A namespace to use when publishing this package to the npm registry
-npm-scope = "@aiken-lang"
-# Publish jobs to run in CI
-publish-jobs = ["homebrew", "npm"]
-# Which actions to run on pull requests
-pr-run-mode = "plan"
-# Whether to install an updater program
-install-updater = false
-# Path that installers should place binaries in
-install-path = "~/.aiken/bin"
-# Whether to publish prereleases to package managers
-publish-prereleases = true
-# Inject build steps into the build-local-artifacts job to prepare the container.
-# This is needed to install libssl-dev and musl tools for producing statically linked
-# binary on Linux and avoid weird segfaults.
-#
-# Note: should be a path relative to the .github/workflows/ directory, and
-# which should point to a .yml file containing the github workflow steps just
-# as one would normally write them in a workflow.
-github-build-setup = "../musl-build-setup.yml"
-
-# Cargo-dist uses ubuntu-20.04 by default, causing issues in various cases
-# because it links with openssl-1.1 whereas recent distro ships with 3.x
-[workspace.metadata.dist.github-custom-runners]
-aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
-x86_64-unknown-linux-musl = "ubuntu-24.04"
-x86_64-pc-windows-msvc = "windows-2022"
-aarch64-apple-darwin = "macos-15"
 
 [workspace.dependencies]
 askama = "0.12.0"
@@ -108,8 +58,6 @@ num-integer = "0.1.45"
 num-traits = "0.2.15"
 numfmt = "1.1.1"
 once_cell = "1.18.0"
-openssl = "0.10.80"
-openssl-probe = "0.2.1"
 ordinal = "0.4.0"
 owo-colors = "3.5.0"
 pallas-addresses = "0.35.0"
@@ -127,7 +75,7 @@ pulldown-cmark = "0.12.0"
 rand = "0.9.2"
 rayon = "1.11.0"
 regex = "1.12.2"
-reqwest = "0.11.14"
+reqwest = "0.13.5"
 rgb = "0.8.50"
 secp256k1 = "0.26.0"
 semver = "1.0.23"

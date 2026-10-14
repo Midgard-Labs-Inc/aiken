@@ -44,7 +44,3 @@ uplc.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 xdg.workspace = true
-
-[target.'cfg(target_env = "musl")'.dependencies]
-openssl = { workspace = true, features = ["vendored"] }
-openssl-probe.workspace = true

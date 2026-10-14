@@ -42,8 +42,7 @@
 
         pname = "aiken";
 
-        buildInputs = [pkgs.openssl];
-        nativeBuildInputs = [pkgs.pkg-config pkgs.openssl.dev];
+        nativeBuildInputs = [pkgs.pkg-config];
 
         src = pkgs.lib.cleanSourceWith {src = self;};
         doCheck = false; # don’t run cargo test
@@ -87,7 +86,6 @@
       devShells.default = pkgs.mkShell {
         buildInputs = [
           pkgs.pkg-config
-          pkgs.openssl
           pkgs.cargo-insta
           (rustToolchain.override {
             extensions = ["rust-src" "clippy" "rustfmt" "rust-analyzer"];
