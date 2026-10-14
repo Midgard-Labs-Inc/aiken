@@ -40,6 +40,19 @@ cd examples/acceptance_tests && ./run 034    # one scenario; `bash ci` runs all
 
 `examples/acceptance_tests/script_context` tests need `jq` and `cbor-diag` (`cargo install cbor-diag-cli`).
 
+## Docs site
+
+`site/` is the documentation website, built with Astro and Cloudflare's Nimbus and managed with pnpm. `site/AGENT.md` is the guidance for working in it.
+
+```sh
+cd site
+pnpm install
+pnpm dev          # dev server with hot reload
+pnpm build        # static build to site/dist
+pnpm typecheck
+pnpm lint:docs
+```
+
 ## Architecture
 
 Crates in `crates/`, from the CLI down:

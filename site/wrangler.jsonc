@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aiken-docs",
+  "account_id": "2d8cbc00d882161c23403db386b1dee7",
+  "compatibility_date": "2026-10-12",
+  "routes": [{ "pattern": "aiken-lang.com", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}
