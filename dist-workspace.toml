@@ -30,3 +30,5 @@ install-updater = false
 install-path = "~/.aiken/bin"
 # Whether to publish prereleases to package managers
 publish-prereleases = false
+# Custom jobs to run after the release is announced
+post-announce-jobs = ["./deploy-site"]
