@@ -10,7 +10,7 @@ ci = "github"
 # The installers to generate for each app
 installers = ["shell", "powershell", "npm", "homebrew"]
 # A GitHub repo to push Homebrew formulas to
-tap = "aiken-lang/homebrew-tap"
+tap = "Midgard-Labs-Inc/homebrew-tap"
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
   "aarch64-apple-darwin",
@@ -18,12 +18,8 @@ targets = [
   "aarch64-unknown-linux-gnu",
   "x86_64-pc-windows-msvc",
 ]
-# The archive format to use for windows builds (defaults .zip)
-windows-archive = ".tar.gz"
-# The archive format to use for non-windows builds (defaults .tar.xz)
-unix-archive = ".tar.gz"
 # A namespace to use when publishing this package to the npm registry
-npm-scope = "@aiken-lang"
+npm-scope = "@orbistry"
 # Publish jobs to run in CI
 publish-jobs = ["homebrew", "npm"]
 # Which actions to run on pull requests
@@ -33,4 +29,4 @@ install-updater = false
 # Path that installers should place binaries in
 install-path = "~/.aiken/bin"
 # Whether to publish prereleases to package managers
-publish-prereleases = true
+publish-prereleases = false

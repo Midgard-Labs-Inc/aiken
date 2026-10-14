@@ -14,6 +14,13 @@ publish.workspace = true
 # publish = false would otherwise exclude this package from dist
 dist = true
 
+# Set on this crate only so the CHANGELOG is rewritten once per release, not
+# once per workspace member.
+[package.metadata.release]
+pre-release-replacements = [
+  { file = "../../CHANGELOG.md", search = "## unreleased", replace = "## unreleased\n\n## v{{version}} - {{date}}", exactly = 1 },
+]
+
 [package.metadata.wix]
 upgrade-guid = "288B160D-418A-4558-91B9-7C38CFD789C7"
 path-guid = "4EB8FCD6-261B-4F6C-B7DB-CFA67B4E6960"
