@@ -14,6 +14,7 @@ const nimbusConfig = defineNimbusConfig({
   locale: "en",
   github: "https://github.com/Midgard-Labs-Inc/aiken",
   socialImageAlt: "Aiken documentation preview",
+  head: [{ tag: "meta", attrs: { name: "twitter:site", content: "@aiken_dev" } }],
 });
 
 export default defineConfig({
