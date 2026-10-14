@@ -8,7 +8,11 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-rust-version.workspace = true
+publish.workspace = true
+
+[package.metadata.dist]
+# publish = false would otherwise exclude this package from dist
+dist = true
 
 [package.metadata.wix]
 upgrade-guid = "288B160D-418A-4558-91B9-7C38CFD789C7"

@@ -34,10 +34,3 @@ install-updater = false
 install-path = "~/.aiken/bin"
 # Whether to publish prereleases to package managers
 publish-prereleases = true
-# Inject build steps into the build-local-artifacts job to pin the Rust
-# toolchain used for release builds.
-#
-# Note: should be a path relative to the .github/workflows/ directory, and
-# which should point to a .yml file containing the github workflow steps just
-# as one would normally write them in a workflow.
-github-build-setup = "../build-setup.yml"

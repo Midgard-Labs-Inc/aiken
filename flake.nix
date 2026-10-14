@@ -23,9 +23,8 @@
 
       cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
       version = cargoToml.workspace.package.version;
-      rustVersion = cargoToml.workspace.package."rust-version";
 
-      rustToolchain = pkgs.rust-bin.stable.${rustVersion}.default;
+      rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
       rustPlatform = pkgs.makeRustPlatform {
         cargo = rustToolchain;

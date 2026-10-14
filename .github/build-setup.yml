@@ -1,4 +1,0 @@
-- name: Configure rust
-  run: |
-    rustup toolchain install 1.95.0 --profile minimal
-    rustup default 1.95.0

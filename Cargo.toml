@@ -1,25 +1,21 @@
 [workspace]
-members = ["crates/*"]
 resolver = "2"
+members = ["crates/*"]
 
 [workspace.package]
+version = "1.1.24"
+authors = [
+  "Lucas Rosa <x@rvcas.dev>",
+  "Kasey White <kwhitemsg@gmail.com>",
+  "Riley Kilgore <riley_kilgore@outlook.com>",
+]
+edition = "2024"
 description = "Cardano smart contract language and toolchain"
 documentation = "https://aiken-lang.org"
-version = "1.1.24"
-edition = "2024"
-repository = "https://github.com/aiken-lang/aiken"
 homepage = "https://github.com/aiken-lang/aiken"
+repository = "https://github.com/aiken-lang/aiken"
 license = "Apache-2.0"
-authors = [
-    "Lucas Rosa <x@rvcas.dev>",
-    "Kasey White <kwhitemsg@gmail.com>",
-    "KtorZ <matthias.benkort@gmail.com>",
-]
-rust-version = "1.94.1" # If changing, also change in .github/build-setup.yml
-
-[workspace.metadata.release]
-shared-version = true
-tag-name = "v{{version}}"
+publish = false
 
 [workspace.dependencies]
 askama = "0.12.0"
@@ -97,10 +93,14 @@ walkdir = "2.3.2"
 xdg = "2.5.2"
 zip = "0.6.4"
 
-uplc = { path = 'crates/uplc', version = "1.1.24" }
-aiken-lang = { path = "crates/aiken-lang", version = "1.1.24" }
-aiken-lsp = { path = "crates/aiken-lsp", version = "1.1.24" }
-aiken-project = { path = 'crates/aiken-project', version = "1.1.24" }
+aiken-lang = { path = "crates/aiken-lang" }
+aiken-lsp = { path = "crates/aiken-lsp" }
+aiken-project = { path = "crates/aiken-project" }
+uplc = { path = "crates/uplc" }
+
+[workspace.metadata.release]
+shared-version = true
+tag-name = "v{{version}}"
 
 [profile.dev.package.insta]
 opt-level = 3
