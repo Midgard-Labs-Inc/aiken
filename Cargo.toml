@@ -11,9 +11,9 @@ authors = [
 ]
 edition = "2024"
 description = "Cardano smart contract language and toolchain"
-documentation = "https://aiken-lang.org"
-homepage = "https://github.com/aiken-lang/aiken"
-repository = "https://github.com/aiken-lang/aiken"
+documentation = "https://aiken-lang.com"
+homepage = "https://aiken-lang.com"
+repository = "https://github.com/Midgard-Labs-Inc/aiken"
 license = "Apache-2.0"
 publish = false
 
