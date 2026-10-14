@@ -12,6 +12,7 @@
 
 [![Release](https://img.shields.io/github/v/release/Midgard-Labs-Inc/aiken?style=for-the-badge)](https://github.com/Midgard-Labs-Inc/aiken/releases/latest)
 [![NPM](https://img.shields.io/npm/v/%40orbistry%2Faiken?style=for-the-badge)](https://www.npmjs.com/package/@orbistry/aiken)
+
   <hr/>
 </div>
 

@@ -17,7 +17,6 @@
 3. **Code**
 
    **Getting started**
-
    - `git clone git@github.com:Midgard-Labs-Inc/aiken.git`
    - `cd aiken`
    - `cargo test`
@@ -37,7 +36,6 @@
    **Suggested first contribution loop**
 
    If you're not sure how to get started, this is a good low-friction path:
-
    1. Pick a small [issue](https://github.com/Midgard-Labs-Inc/aiken/issues) or a well-scoped bug report.
    2. Reproduce it on current `main` before changing code.
    3. Inspect the smallest relevant source path.

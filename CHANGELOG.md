@@ -44,6 +44,7 @@
     }
   }
   ```
+
   @KtorZ
 
 ### Changed
@@ -114,8 +115,8 @@
 - **aiken-project**: Use less ambiguous separators for generic params in blueprint's JSON references. @KtorZ
 - **aiken-project**: Do not require a full project when simulating passing an explicit `--blueprint` file. @KtorZ
 - **aiken-lsp**: More flexible and robust lsp diagnostic hints. @KtorZ
-    - return a generic error message when no help is available on the error (still showing the location of the problem)
-    - use related errors to find labels on where to report errors for those with no immediate location (e.g. UnknownLabels).
+  - return a generic error message when no help is available on the error (still showing the location of the problem)
+  - use related errors to find labels on where to report errors for those with no immediate location (e.g. UnknownLabels).
 - **aiken-lang**: Recover from assignment as last expression in trace args. @KtorZ
 - **aiken-lang**: Reify generics in-place and avoid crashing when trying to reify values with conflicting generic instantiations. @KtorZ
 - **aiken-lang**: Do not fail when only one positional argument is after labeled ones (in particular, allows for labelled arguments with backpassing). @KtorZ
