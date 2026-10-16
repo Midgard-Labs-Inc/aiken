@@ -5,12 +5,12 @@ pub mod docs;
 pub mod error;
 pub mod export;
 pub mod format;
-pub mod github;
 pub mod module;
 pub mod options;
 pub mod package_name;
 pub mod paths;
 pub mod pretty;
+pub mod stdlib;
 pub mod telemetry;
 pub mod watch;
 
@@ -711,19 +711,30 @@ where
     fn with_dependencies(&mut self, parsed_packages: &mut ParsedModules) -> Result<(), Vec<Error>> {
         let manifest = deps::download(&self.event_listener, &self.root, &self.config)?;
 
-        for package in manifest.packages {
-            let lib = self.root.join(paths::build_deps_package(&package.name));
+        let mut packages = manifest
+            .packages
+            .into_iter()
+            .map(|package| (package.name, package.version))
+            .collect::<Vec<_>>();
+
+        // The standard library ships with the compiler, unless we're compiling it.
+        if self.config.name != stdlib::package_name() {
+            packages.push((stdlib::package_name(), config::compiler_version(false)));
+        }
+
+        for (name, version) in packages {
+            let lib = self.root.join(paths::build_deps_package(&name));
 
             self.event_listener
                 .handle_event(Event::StartingCompilation {
                     root: lib.clone(),
-                    name: package.name.to_string(),
-                    version: package.version.clone(),
+                    name: name.to_string(),
+                    version,
                 });
 
             self.read_package_source_files(&lib.join("lib"))?;
 
-            let mut parsed_modules = self.parse_sources(package.name)?;
+            let mut parsed_modules = self.parse_sources(name)?;
 
             use rayon::prelude::*;
 

@@ -14,11 +14,13 @@ publish.workspace = true
 # publish = false would otherwise exclude this package from dist
 dist = true
 
-# Set on this crate only so the CHANGELOG is rewritten once per release, not
-# once per workspace member.
+# Set on this crate only so these files are rewritten once per release, not
+# once per workspace member. The standard library is versioned with the compiler.
 [package.metadata.release]
 pre-release-replacements = [
   { file = "../../CHANGELOG.md", search = "## unreleased", replace = "## unreleased\n\n## v{{version}} - {{date}}", exactly = 1 },
+  { file = "../../stdlib/aiken.toml", search = "version = \"v[^\"]+\"", replace = "version = \"v{{version}}\"", exactly = 1 },
+  { file = "../../stdlib/aiken.toml", search = "compiler = \"v[^\"]+\"", replace = "compiler = \"v{{version}}\"", exactly = 1 },
 ]
 
 [package.metadata.wix]

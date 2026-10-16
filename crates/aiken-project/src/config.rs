@@ -1,6 +1,4 @@
-use crate::{
-    Error, error::TomlLoadingContext, github::repo::LatestRelease, package_name::PackageName, paths,
-};
+use crate::{Error, error::TomlLoadingContext, package_name::PackageName, paths, stdlib};
 use aiken_lang::{
     ast::{Annotation, ByteArrayFormatPreference, ModuleConstant, Span, UntypedDefinition},
     expr::UntypedExpr,
@@ -44,7 +42,7 @@ pub struct ProjectConfig {
 
     pub repository: Option<Repository>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<Dependency>,
 
     #[serde(default)]
@@ -382,17 +380,7 @@ impl ProjectConfig {
                 project: name.repo.clone(),
                 platform: Platform::Github,
             }),
-            dependencies: vec![Dependency {
-                name: PackageName {
-                    owner: "aiken-lang".to_string(),
-                    repo: "stdlib".to_string(),
-                },
-                version: match LatestRelease::of("aiken-lang/stdlib") {
-                    Ok(stdlib) => stdlib.tag_name,
-                    _ => "1.5.0".to_string(),
-                },
-                source: Platform::Github,
-            }],
+            dependencies: vec![],
             config: BTreeMap::new(),
         }
     }
@@ -415,6 +403,35 @@ impl ProjectConfig {
         })?;
 
         Ok(result)
+    }
+
+    /// The standard library ships with the compiler, so it (or any package now part of it)
+    /// can no longer be declared as a dependency.
+    #[allow(clippy::result_large_err)]
+    pub fn check_bundled_dependencies(&self, dir: &Path) -> Result<(), Error> {
+        let Some(dependency) = self
+            .dependencies
+            .iter()
+            .find(|dependency| stdlib::is_bundled(&dependency.name))
+        else {
+            return Ok(());
+        };
+
+        let name = dependency.name.to_string();
+        let path = dir.join(paths::project_config());
+        let src = fs::read_to_string(&path).unwrap_or_default();
+        let location = src.find(&name).map(|start| Span {
+            start,
+            end: start + name.len(),
+        });
+
+        Err(Error::BundledDependency {
+            name: Box::new(name),
+            named: NamedSource::new(path.display().to_string(), src.clone()).into(),
+            path: Box::new(path),
+            src: Box::new(src),
+            location,
+        })
     }
 
     pub fn insert(mut self, dependency: &Dependency, and_replace: bool) -> Option<Self> {

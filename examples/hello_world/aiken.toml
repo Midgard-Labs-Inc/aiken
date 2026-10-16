@@ -3,8 +3,3 @@ version = "1.0.0"
 plutusVersion = "v3"
 licences = ["Apache-2.0"]
 description = "Aiken contracts for project 'aiken-lang/hello_world'"
-
-[[dependencies]]
-name = "aiken-lang/stdlib"
-version = "v2"
-source = "github"

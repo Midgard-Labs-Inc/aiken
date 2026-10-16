@@ -9,7 +9,7 @@ use crate::{
     config::{Dependency, ProjectConfig},
     error::{Error, TomlLoadingContext},
     package_name::PackageName,
-    paths,
+    paths, stdlib,
     telemetry::{DownloadSource, Event, EventListener},
 };
 
@@ -145,6 +145,8 @@ pub fn download<T>(
 where
     T: EventListener,
 {
+    config.check_bundled_dependencies(root_path)?;
+
     let build_path = root_path.join(paths::build());
 
     if !build_path.is_dir() {
@@ -186,6 +188,10 @@ where
     }
 
     LocalPackages::from(&manifest).save(root_path)?;
+
+    if config.name != stdlib::package_name() {
+        stdlib::materialize(root_path)?;
+    }
 
     Ok(manifest)
 }

@@ -30,25 +30,25 @@ pub fn add(left v0: Value, right v1: Value) -> Value {
   dict.union_with(
     v0.inner,
     v1.inner,
-    fn(_, a0, a1) {
+    fn(_, a0, a1, keep, discard) {
       let result =
         dict.union_with(
           a0,
           a1,
-          fn(_, q0, q1) {
+          fn(_, q0, q1, keep, discard) {
             let q = q0 + q1
             if q == 0 {
-              None
+              discard()
             } else {
-              Some(q)
+              keep(q)
             }
           },
         )
 
       if dict.is_empty(result) {
-        None
+        discard()
       } else {
-        Some(result)
+        keep(result)
       }
     },
   )

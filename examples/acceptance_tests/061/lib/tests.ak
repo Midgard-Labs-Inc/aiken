@@ -1,12 +1,8 @@
-use aiken/dict
+use aiken/collection/dict
 use aiken/interval.{Interval, IntervalBound, PositiveInfinity}
-use aiken/transaction.{
-  InlineDatum, Input, Output, OutputReference, Transaction, TransactionId,
-}
-use aiken/transaction/credential.{
-  Address, ScriptCredential, StakeCredential, VerificationKeyCredential,
-}
-use aiken/transaction/value
+use cardano/address.{Address, Script, StakeCredential, VerificationKey}
+use cardano/assets
+use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction}
 
 const keyhash = #"010203040506"
 
@@ -14,14 +10,14 @@ const scripthash = #"060504030201"
 
 pub fn keyhash_address(with_stake_credential: Option<StakeCredential>) {
   Address {
-    payment_credential: VerificationKeyCredential(keyhash),
+    payment_credential: VerificationKey(keyhash),
     stake_credential: with_stake_credential,
   }
 }
 
 pub fn scripthash_address(with_stake_credential: Option<StakeCredential>) {
   Address {
-    payment_credential: ScriptCredential(scripthash),
+    payment_credential: Script(scripthash),
     stake_credential: with_stake_credential,
   }
 }
@@ -38,12 +34,12 @@ pub fn tx_1() -> Transaction {
       inputs: [
         Input {
           output_reference: OutputReference {
-            transaction_id: TransactionId { hash: #"" },
+            transaction_id: #"",
             output_index: 0,
           },
           output: Output {
             address: scripthash_address(None),
-            value: value.zero(),
+            value: assets.zero,
             datum: InlineDatum(sample_datum),
             reference_script: None,
           },
@@ -53,13 +49,13 @@ pub fn tx_1() -> Transaction {
       outputs: [
         Output {
           address: keyhash_address(None),
-          value: value.from_lovelace(10000),
+          value: assets.from_lovelace(10000),
           datum: InlineDatum(sample_datum),
           reference_script: None,
         },
       ],
-      fee: value.zero(),
-      mint: value.from_asset(#"000000", #"00", -1) |> value.to_minted_value,
+      fee: 0,
+      mint: assets.from_asset(#"000000", #"00", -1),
       certificates: [],
       withdrawals: [],
       validity_range: Interval {
@@ -74,8 +70,12 @@ pub fn tx_1() -> Transaction {
       },
       extra_signatories: [keyhash],
       redeemers: [],
-      datums: dict.new(),
-      id: TransactionId { hash: #"" },
+      datums: dict.empty,
+      id: #"",
+      votes: [],
+      proposal_procedures: [],
+      current_treasury_amount: None,
+      treasury_donation: None,
     }
   tx
 }

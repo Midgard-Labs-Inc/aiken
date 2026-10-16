@@ -98,6 +98,18 @@ pub enum Error {
         help: Box<String>,
     },
 
+    #[error(
+        "I found '{}' among your dependencies, but the standard library now ships with the compiler.",
+        name.if_supports_color(Stdout, |s| s.bright_blue())
+    )]
+    BundledDependency {
+        name: Box<String>,
+        path: Box<PathBuf>,
+        src: Box<String>,
+        named: Box<NamedSource<String>>,
+        location: Option<Span>,
+    },
+
     #[error("I couldn't find any 'aiken.toml' manifest in {path}.")]
     MissingManifest { path: Box<PathBuf> },
 
@@ -360,6 +372,7 @@ impl ExtraData for Error {
             | Error::CodeGen { .. }
             | Error::MissingManifest { .. }
             | Error::TomlLoading { .. }
+            | Error::BundledDependency { .. }
             | Error::ImportCycle { .. }
             | Error::Parse { .. }
             | Error::TestFailure { .. }
@@ -411,6 +424,7 @@ impl GetSource for Error {
             Error::DuplicateModule { second: path, .. }
             | Error::MissingManifest { path }
             | Error::TomlLoading { path, .. }
+            | Error::BundledDependency { path, .. }
             | Error::Parse { path, .. }
             | Error::Type { path, .. }
             | Error::TestFailure { path, .. } => Some(path.to_path_buf()),
@@ -441,9 +455,10 @@ impl GetSource for Error {
             | Error::Module { .. }
             | Error::ScriptOverrideNotFound { .. }
             | Error::ScriptOverrideArgumentParseError { .. } => None,
-            Error::TomlLoading { src, .. } | Error::Parse { src, .. } | Error::Type { src, .. } => {
-                Some(src.to_string())
-            }
+            Error::TomlLoading { src, .. }
+            | Error::BundledDependency { src, .. }
+            | Error::Parse { src, .. }
+            | Error::Type { src, .. } => Some(src.to_string()),
         }
     }
 }
@@ -475,6 +490,7 @@ impl Diagnostic for Error {
                 error.code().map(|s| format!("::{s}")).unwrap_or_default()
             )))),
             Error::TomlLoading { .. } => Some(boxed(Box::new("aiken::loading::toml"))),
+            Error::BundledDependency { .. } => Some(boxed(Box::new("aiken::packages::bundled"))),
             Error::TestFailure { path, .. } => Some(boxed(Box::new(path.to_str().unwrap_or("")))),
             Error::Http(_) => Some(Box::new("aiken::packages::download")),
             Error::UnknownPackageVersion { .. } => {
@@ -523,6 +539,9 @@ impl Diagnostic for Error {
                 "Environment module names are free, but there must be at least one named 'default.ak'.",
             )),
             Error::TomlLoading { help, .. } => Some(Box::new(help)),
+            Error::BundledDependency { .. } => Some(Box::new(
+                "Remove it from your aiken.toml. Modules such as aiken/collection/list, cardano/transaction or aiken/fuzz are available without declaring any dependency.",
+            )),
 
             Error::ModuleNotFound { known_modules, .. } => Some(Box::new(format!(
                 "I know about the following modules:\n{}",
@@ -572,7 +591,7 @@ impl Diagnostic for Error {
             Error::CodeGen(e) => e.labels(),
             Error::Parse { error, .. } => error.labels(),
             Error::Type { error, .. } => error.labels(),
-            Error::TomlLoading { location, .. } => {
+            Error::TomlLoading { location, .. } | Error::BundledDependency { location, .. } => {
                 if let Some(location) = location {
                     Some(Box::new(
                         vec![LabeledSpan::new_with_span(None, *location)].into_iter(),
@@ -611,7 +630,9 @@ impl Diagnostic for Error {
             Error::CodeGen(e) => e.source_code(),
             Error::Parse { named, .. } => Some(named.as_ref()),
             Error::Type { named, .. } => Some(named.as_ref()),
-            Error::TomlLoading { named, .. } => Some(named.as_ref()),
+            Error::TomlLoading { named, .. } | Error::BundledDependency { named, .. } => {
+                Some(named.as_ref())
+            }
             Error::DuplicateModule { .. }
             | Error::FileIo { .. }
             | Error::ImportCycle { .. }
@@ -649,6 +670,7 @@ impl Diagnostic for Error {
             | Error::StandardIo(_)
             | Error::MissingManifest { .. }
             | Error::TomlLoading { .. }
+            | Error::BundledDependency { .. }
             | Error::Format { .. }
             | Error::TestFailure { .. }
             | Error::Http { .. }
@@ -681,6 +703,7 @@ impl Diagnostic for Error {
             | Error::NoDefaultEnvironment
             | Error::MissingManifest { .. }
             | Error::TomlLoading { .. }
+            | Error::BundledDependency { .. }
             | Error::Format { .. }
             | Error::TestFailure { .. }
             | Error::Http { .. }

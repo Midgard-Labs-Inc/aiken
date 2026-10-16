@@ -68,8 +68,6 @@ fn print_success_message(package_name: &PackageName) {
                    {cd} {folder}
                    {aiken} check
                    {aiken} build
-
-               {hint} You may want to update the {stdlib} version in {toml}.
             "#,
             s = "successfully"
                 .if_supports_color(Stderr, |s| s.bright_green())
@@ -83,14 +81,6 @@ fn print_success_message(package_name: &PackageName) {
                 .if_supports_color(Stderr, |s| s.bright_blue()),
             aiken = "aiken"
                 .if_supports_color(Stderr, |s| s.purple())
-                .if_supports_color(Stderr, |s| s.bold()),
-            hint = "hint:"
-                .if_supports_color(Stderr, |s| s.cyan())
-                .if_supports_color(Stderr, |s| s.bold()),
-            stdlib = "stdlib"
-                .if_supports_color(Stderr, |s| s.purple())
-                .if_supports_color(Stderr, |s| s.bold()),
-            toml = "aiken.toml"
                 .if_supports_color(Stderr, |s| s.bold()),
         }
     )

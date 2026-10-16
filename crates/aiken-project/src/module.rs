@@ -1,4 +1,4 @@
-use crate::{Error, Warning};
+use crate::{Error, Warning, stdlib};
 use aiken_lang::{
     IdGenerator,
     ast::{
@@ -86,6 +86,15 @@ impl ParsedModule {
         // Unless we're compiling prelude documentation, prevent keywords in module name
         if validate_module_name {
             ast.validate_module_name()?;
+
+            // The standard library's namespaces are off-limits to the project being compiled.
+            // Dependencies may still use them (and collisions are caught as duplicate modules).
+            if self.package == package
+                && package != stdlib::package_name().to_string()
+                && stdlib::is_reserved_module(&self.name)
+            {
+                return Err(aiken_lang::ast::Error::ReservedModuleName { name: self.name }.into());
+            }
         }
 
         // Register module sources for an easier access later.

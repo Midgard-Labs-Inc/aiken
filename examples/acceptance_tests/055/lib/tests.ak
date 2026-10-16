@@ -1,9 +1,9 @@
-use aiken/bytearray
-use aiken/dict
-use aiken/hash.{Hash, Sha2_256, sha2_256}
+use aiken/collection/dict
+use aiken/collection/list
+use aiken/crypto.{Hash, Sha2_256, sha2_256}
 use aiken/interval.{between, entirely_between, intersection, is_empty}
-use aiken/list
-use aiken/transaction.{InlineDatum}
+use aiken/primitive/bytearray
+use cardano/transaction.{InlineDatum}
 
 //  MerkleTree in Aiken (ported from: https://github.com/input-output-hk/hydra/blob/master/plutus-merkle-tree/src/Plutus/MerkleTree.hs)
 
@@ -84,11 +84,11 @@ const fooz = #"666f6f"
 const bar = #"626172"
 
 fn fixture_1() {
-  dict.new()
+  dict.empty
     |> dict.insert(fooz, 42)
     |> dict.insert(bar, 14)
 }
 
 test union_1() {
-  dict.union(fixture_1(), dict.new()) == fixture_1()
+  dict.union(fixture_1(), dict.empty) == fixture_1()
 }
