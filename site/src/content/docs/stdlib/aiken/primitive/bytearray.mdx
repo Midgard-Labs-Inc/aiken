@@ -269,7 +269,7 @@ bytearray.compare(#"FF", #"00") == Greater
 foldl(self: ByteArray, zero: result, with: fn(Int, result) -> result) -> result
 ```
 
-Left-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+Left-fold over bytes of a [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
 
 ```aiken
 bytearray.foldl(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 44203
@@ -282,7 +282,7 @@ bytearray.foldl(#[1, 2, 3], #"", flip(bytearray.push)) == #[3, 2, 1]
 foldr(self: ByteArray, zero: result, with: fn(Int, result) -> result) -> result
 ```
 
-Right-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+Right-fold over bytes of a [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
 
 ```aiken
 bytearray.foldr(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 43948

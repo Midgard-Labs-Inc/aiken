@@ -7,6 +7,7 @@
 - **stdlib**: The standard library now lives in this repository (`stdlib/`) and ships with the compiler, so its version is the compiler's version. It starts from aiken-lang/stdlib v4.0.0, with aiken-lang/fuzz v3.0.0 merged in, so the `aiken/fuzz`, `aiken/fuzz/scenario` and `cardano/fuzz` modules are available too. Projects get it without declaring any dependency, and without fetching anything over the network. @rvcas
 - **stdlib**: The standard library's documentation is published on [aiken-lang.com](https://aiken-lang.com/stdlib/), generated from its doc comments with each release. @rvcas
 - **aiken**: `aiken docs --format markdown --base <path>` generates MDX pages for a [Nimbus](https://nimbus-docs.com) documentation site, one per module, instead of a standalone HTML site. @rvcas
+- **aiken-project**, **stdlib**: The prelude (`aiken`) and builtins (`aiken/builtin`) are documented on [aiken-lang.com](https://aiken-lang.com/prelude/), and links in generated HTML documentation and stdlib doc comments point there instead of aiken-lang.github.io. @rvcas
 
 ### Changed
 

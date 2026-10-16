@@ -1,0 +1,986 @@
+---
+title: "aiken/builtin"
+description: "Low-level Plutus builtins recognized by Aiken."
+sidebar:
+  label: "builtin"
+---
+
+This modules contains all the Plutus builtins recognized by Aiken.
+
+It's important to note that many of those functions are partial and will halt the execution
+of the Plutus virtual machine on failure. They also all rely on call-by-value, which means
+that function arguments are eagerly evaluated.
+
+## Functions
+
+### Bytearray
+
+#### Constructing
+
+### `append_bytearray` {#append_bytearray}
+
+```aiken
+append_bytearray(left: ByteArray, right: ByteArray) -> ByteArray
+```
+
+Concatenate two bytearrays together.
+
+### `cons_bytearray` {#cons_bytearray}
+
+```aiken
+cons_bytearray(byte: Int, bytes: ByteArray) -> ByteArray
+```
+
+Push a byte in front of a bytearray.
+
+### `replicate_byte` {#replicate_byte}
+
+```aiken
+replicate_byte(length: Int, byte: Int) -> ByteArray
+```
+
+Construct a `ByteArray` from the repetition of the same byte a specific number of times. Fails if the byte is out-of-bound or if the length is negative.
+
+#### Inspecting
+
+### `count_set_bits` {#count_set_bits}
+
+```aiken
+count_set_bits(self: ByteArray) -> Int
+```
+
+Count the number of bits set in the given `ByteArray`.
+
+### `find_first_set_bit` {#find_first_set_bit}
+
+```aiken
+find_first_set_bit(self: ByteArray) -> Int
+```
+
+Find the index of the first bit set. Note that bits are indexed _from the end_ (see also [`read_bit`](#read_bit) for more details).
+
+### `index_bytearray` {#index_bytearray}
+
+```aiken
+index_bytearray(bytes: ByteArray, index: Int) -> Int
+```
+
+Access the byte at the given index in the bytearray.
+
+### `length_of_bytearray` {#length_of_bytearray}
+
+```aiken
+length_of_bytearray(bytes: ByteArray) -> Int
+```
+
+Number of bytes in a bytearray.
+
+### `read_bit` {#read_bit}
+
+```aiken
+read_bit(self: ByteArray, index: Int) -> Bool
+```
+
+Read a particular bit (`True` if set) at the given index. Fails if the
+index is out-of-bounds. Note that the index reads _from the end_. For
+example, consider the byte `0xF4` and an index `i`:
+
+i=7 | i=6 | i=5 | i=4 | i=3 | i=2 | i=1 | i=0
+--- | --- | --- | --- | --- | --- | --- | ---
+ 1  |  1  |  1  |  1  |  0  |  1  |  0  |  0
+
+So, we have:
+
+```aiken
+read_bit(#[0xF4], 0) == False
+read_bit(#[0xF4], 1) == False
+read_bit(#[0xF4], 2) == True
+read_bit(#[0xF4], 3) == False
+read_bit(#[0xF4], 4) == True
+read_bit(#[0xF4], 5) == True
+read_bit(#[0xF4], 6) == True
+read_bit(#[0xF4], 7) == True
+read_bit(#[0xF4, 0xF4], 8) == False
+```
+
+### `slice_bytearray` {#slice_bytearray}
+
+```aiken
+slice_bytearray(start: Int, len: Int, bytes: ByteArray) -> ByteArray
+```
+
+Extract a sub-array from a bytearray given starting and length of the sub-array.
+
+### `write_bits` {#write_bits}
+
+```aiken
+write_bits(self: ByteArray, indices: List<Int>, value: Bool) -> ByteArray
+```
+
+Write a bit each index in the list of indices. Writes 1 if value is True and 0 if value is False.
+Fails if the index is out-of-bounds. Note that the index reads _from the end_.
+For example, consider the byte `0xF4` and an index `i`:
+
+i=7 | i=6 | i=5 | i=4 | i=3 | i=2 | i=1 | i=0
+--- | --- | --- | --- | --- | --- | --- | ---
+ 1  |  1  |  1  |  1  |  0  |  1  |  0  |  0
+
+So, we have:
+
+```aiken
+write_bits(#[0xF4], [0, 1], True) == #[0xF7]
+```
+
+#### Comparing
+
+### `equals_bytearray` {#equals_bytearray}
+
+```aiken
+equals_bytearray(left: ByteArray, right: ByteArray) -> Bool
+```
+
+Bytearray equality.
+
+### `less_than_bytearray` {#less_than_bytearray}
+
+```aiken
+less_than_bytearray(left: ByteArray, right: ByteArray) -> Bool
+```
+
+Bytearray strict inequality.
+
+### `less_than_equals_bytearray` {#less_than_equals_bytearray}
+
+```aiken
+less_than_equals_bytearray(left: ByteArray, right: ByteArray) -> Bool
+```
+
+Bytearray inequality.
+
+#### Bitwise
+
+### `and_bytearray` {#and_bytearray}
+
+```aiken
+and_bytearray(padding: Bool, left: ByteArray, right: ByteArray) -> ByteArray
+```
+
+Logical AND applied to two bytearrays. The first argument indicates whether padding semantics should be used. If this argument is `False`, truncation semantics are used instead.
+
+:::note
+All bitwise operations are processed in little-endian bit order. For
+example, ANDing `#"F0"` with `#"0FFF"` will yield a `#"00"` (or `#"00FF"`
+if `padding` is `True`).
+:::
+
+### `complement_bytearray` {#complement_bytearray}
+
+```aiken
+complement_bytearray(self: ByteArray) -> ByteArray
+```
+
+Logical bitwise complement of the bytearray (set becomes unset, and unset becomes set).
+
+### `or_bytearray` {#or_bytearray}
+
+```aiken
+or_bytearray(padding: Bool, left: ByteArray, right: ByteArray) -> ByteArray
+```
+
+Logical OR applied to two bytearrays. The first argument indicates whether padding semantics should be used. If this argument is `False`, truncation semantics are used instead.
+
+:::note
+All bitwise operations are processed in little-endian bit order. For
+example, ORing `#"FF"` with `#"00FF"` will yield a `#"FF"` (or `#"FFFF"`
+if `padding` is `True`).
+:::
+
+### `xor_bytearray` {#xor_bytearray}
+
+```aiken
+xor_bytearray(padding: Bool, left: ByteArray, right: ByteArray) -> ByteArray
+```
+
+Logical XOR applied to two bytearrays. The first argument indicates whether padding semantics should be used. If this argument is `False`, truncation semantics are used instead.
+
+:::note
+All bitwise operations are processed in little-endian bit order. For
+example, XORing `#"0F"` with `#"0000"` will yield a `#"0F"` (or `#"0F00"`
+if `padding` is `True`).
+:::
+
+#### Shifting
+
+### `rotate_bytearray` {#rotate_bytearray}
+
+```aiken
+rotate_bytearray(self: ByteArray, offset: Int) -> ByteArray
+```
+
+Like [`shift_bytearray`](#shift_bytearray) but instead of introducing zeroes in holes, use the bits that are dropped from either ends.
+
+```aiken
+rotate_bytearray(#[0xEB, 0xFC], 5) == #[0x7F, 0x9D]
+rotate_bytearray(#[0xEB, 0xFC], -8) == #[0xFC, 0xEB]
+rotate_bytearray(#[0xEB, 0xFC], 8) == #[0xFC, 0xEB]
+```
+
+### `shift_bytearray` {#shift_bytearray}
+
+```aiken
+shift_bytearray(self: ByteArray, offset: Int) -> ByteArray
+```
+
+Shift bits in a `ByteArray` by the given offset, replacing holes with zeroes. The offset can be positive (left-shift) or negative (right-shift).
+
+```aiken
+shift_bytearray(#[0xEB, 0xFC], 5) == #[0x7F, 0x80]
+shift_bytearray(#[0xEB, 0xFC], -8) == #[0x00, 0xEB]
+shift_bytearray(#[0xEB, 0xFC], 8) == #[0xFC, 0x00]
+```
+
+:::note
+Size of the given `ByteArray` remains unchanged, e.g. performing a
+left-shift of `1` on `#"80"` results in `#"00"`.
+:::
+
+#### Transforming
+
+### `bytearray_to_integer` {#bytearray_to_integer}
+
+```aiken
+bytearray_to_integer(endianness: Bool, bytes: ByteArray) -> Int
+```
+
+Convert a [ByteArray](/prelude/#ByteArray) to an integer value. The first argument
+specifies the endianness:
+
+boolean value | endianness
+----          | ----
+True          | Big endian
+False         | Little endian
+
+### Data
+
+#### To Data
+
+### `b_data` {#b_data}
+
+```aiken
+b_data(bytes: ByteArray) -> Data
+```
+
+Construct a `Data` from a `ByteArray`
+
+### `constr_data` {#constr_data}
+
+```aiken
+constr_data(index: Int, fields: List<Data>) -> Data
+```
+
+Construct a `Data` from a constructor index and a list of fields.
+
+### `i_data` {#i_data}
+
+```aiken
+i_data(i: Int) -> Data
+```
+
+Construct a `Data` from an integer.
+
+### `list_data` {#list_data}
+
+```aiken
+list_data(items: List<Data>) -> Data
+```
+
+Construct a `Data` from a list of elements.
+
+### `map_data` {#map_data}
+
+```aiken
+map_data(items: List<Pair<Data, Data>>) -> Data
+```
+
+Construct a `Data` from a list of pairs.
+
+### `value_data` {#value_data}
+
+```aiken
+value_data(value: Value) -> Data
+```
+
+Convert a `Value` into a `Data`
+
+#### From Data
+
+### `un_b_data` {#un_b_data}
+
+```aiken
+un_b_data(data: Data) -> ByteArray
+```
+
+Interpret a `Data` as a `ByteArray`. Fails if it's not a array of bytes...
+
+### `un_constr_data` {#un_constr_data}
+
+```aiken
+un_constr_data(data: Data) -> Pair<Int, List<Data>>
+```
+
+Interpret a `Data` as a constructor. Fails if it's not a constructor.
+
+### `unconstr_fields` {#unconstr_fields}
+
+```aiken
+unconstr_fields(data: Data) -> List<Data>
+```
+
+Interpret a `Data` as a constructor and extract its fields. Slightly more efficient than using [`un_constr_data`](#un_constr_data).
+
+### `unconstr_index` {#unconstr_index}
+
+```aiken
+unconstr_index(data: Data) -> Int
+```
+
+Interpret a `Data` as a constructor and extract its index. Slightly more efficient than using [`un_constr_data`](#un_constr_data).
+
+### `un_i_data` {#un_i_data}
+
+```aiken
+un_i_data(data: Data) -> Int
+```
+
+Interpret a `Data` as a integer. Fails if it's not an integer.
+
+### `un_list_data` {#un_list_data}
+
+```aiken
+un_list_data(data: Data) -> List<Data>
+```
+
+Interpret a `Data` as a list. Fails if it's not a list.
+
+### `un_map_data` {#un_map_data}
+
+```aiken
+un_map_data(data: Data) -> List<Pair<Data, Data>>
+```
+
+Interpret a `Data` as a map. Fails if it's not a map.
+
+### `un_value_data` {#un_value_data}
+
+```aiken
+un_value_data(data: Data) -> Value
+```
+
+Interpret a `Data` as a `Value`.
+
+:::caution
+Fails if the underlying data isn't a valid `Value`:
+
+- must be isomorphic to a CBOR map
+- all keys must be lexicographically ordered (ascending)
+- keys should not contain any duplicate
+- keys must not contain more than 32 bytes (policies are allowed to be more than 28 bytes!)
+- quantities must be in the interval $[-2^{127}, 2^{127} - 1]$ (i.e. fits in a `i128`).
+- no quantity must be null or asset maps empty.
+:::
+
+#### Miscellaneous
+
+### `choose_data` {#choose_data}
+
+```aiken
+choose_data(
+  data: Data,
+  when_constr: a,
+  when_map: a,
+  when_list: a,
+  when_int: a,
+  when_bytearray: a,
+) -> a
+```
+
+Select a branch to continue with based on what the Data actually is.
+
+:::important
+Except `data`, all fields are lazily evaluated.
+:::
+
+### `equals_data` {#equals_data}
+
+```aiken
+equals_data(left: Data, right: Data) -> Bool
+```
+
+Equality on Data.
+
+### `serialise_data` {#serialise_data}
+
+```aiken
+serialise_data(data: Data) -> ByteArray
+```
+
+Serialise a Data to bytes, using CBOR.
+
+### Integer
+
+### `add_integer` {#add_integer}
+
+```aiken
+add_integer(left: Int, right: Int) -> Int
+```
+
+Adds two integers (+).
+
+### `divide_integer` {#divide_integer}
+
+```aiken
+divide_integer(numerator: Int, denominator: Int) -> Int
+```
+
+Integer division truncated towards negative infinity (/).
+
+### `equals_integer` {#equals_integer}
+
+```aiken
+equals_integer(left: Int, right: Int) -> Bool
+```
+
+Integer equality.
+
+### `exp_mod_integer` {#exp_mod_integer}
+
+```aiken
+exp_mod_integer(base: Int, exponent: Int, modulus: Int) -> Int
+```
+
+Integer modular exponentation
+
+### `less_than_integer` {#less_than_integer}
+
+```aiken
+less_than_integer(left: Int, right: Int) -> Bool
+```
+
+Integer strict inequality.
+
+### `less_than_equals_integer` {#less_than_equals_integer}
+
+```aiken
+less_than_equals_integer(left: Int, right: Int) -> Bool
+```
+
+Integer inequality.
+
+### `mod_integer` {#mod_integer}
+
+```aiken
+mod_integer(numerator: Int, denominator: Int) -> Int
+```
+
+Integer modulus (%), satisfying
+
+```aiken
+divide_integer(x, y) * y + mod_integer(x, y) == x
+```
+
+### `multiply_integer` {#multiply_integer}
+
+```aiken
+multiply_integer(left: Int, right: Int) -> Int
+```
+
+Multiple two integers (*).
+
+### `quotient_integer` {#quotient_integer}
+
+```aiken
+quotient_integer(numerator: Int, denominator: Int) -> Int
+```
+
+Integer division truncated towards zero.
+
+### `remainder_integer` {#remainder_integer}
+
+```aiken
+remainder_integer(numerator: Int, denominator: Int) -> Int
+```
+
+Integer remainder, satisfying
+
+```aiken
+quotient_integer(x, y) * y + remainder_integer(x, y) == x
+```
+
+### `subtract_integer` {#subtract_integer}
+
+```aiken
+subtract_integer(left: Int, right: Int) -> Int
+```
+
+Subtract two integers (-).
+
+### `integer_to_bytearray` {#integer_to_bytearray}
+
+```aiken
+integer_to_bytearray(endianness: Bool, size: Int, value: Int) -> ByteArray
+```
+
+Convert an integer value into a [ByteArray](/prelude/#ByteArray).
+
+- The first arguments / specifies the endianness:
+
+  boolean value | endianness
+  ----          | ----
+  True          | Big endian
+  False         | Little endian
+
+- The second argument indicates the target `size` (in bytes) of the final [ByteArray](/prelude/#ByteArray). This allows to allocate a specific number of bytes in advance. The function fails if the given value cannot fit in the requested size or if the `value` is negative. However, a size of 0 will yield a [ByteArray](/prelude/#ByteArray) that is precisely as large as necessary to fit the `value`.
+
+### List
+
+### `choose_list` {#choose_list}
+
+```aiken
+choose_list(list: List<a>, when_empty: b, when_non_empty: b) -> b
+```
+
+Select a branch to continue with depending on whether the list is empty or not.
+
+:::important
+The fields `when_empty` and `when_non_empty` are lazily evaluated.
+:::
+
+### `cons_list` {#cons_list}
+
+```aiken
+cons_list(elem: a, list: List<a>) -> List<a>
+```
+
+Push an element in front of a list.
+
+### `drop_list` {#drop_list}
+
+```aiken
+drop_list(n: Int, list: List<a>) -> List<a>
+```
+
+Drop `n` elements from a list.
+
+### `head_list` {#head_list}
+
+```aiken
+head_list(list: List<a>) -> a
+```
+
+The head of a list. Fails if empty.
+
+### `new_list` {#new_list}
+
+```aiken
+new_list() -> List<Data>
+```
+
+Construct an empty list of Data.
+
+### `null_list` {#null_list}
+
+```aiken
+null_list(list: List<a>) -> Bool
+```
+
+True when a list is empty.
+
+### `tail_list` {#tail_list}
+
+```aiken
+tail_list(list: List<a>) -> List<a>
+```
+
+The tail of a list. Fails if empty.
+
+### Pair
+
+### `fst_pair` {#fst_pair}
+
+```aiken
+fst_pair(pair: Pair<a, b>) -> a
+```
+
+Get the first element of a pair.
+
+### `new_pair` {#new_pair}
+
+```aiken
+new_pair(left: Data, right: Data) -> Pair<Data, Data>
+```
+
+Construct a Data from a pair of elements.
+
+### `new_pairs` {#new_pairs}
+
+```aiken
+new_pairs() -> Pairs<Data, Data>
+```
+
+Construct an empty list of pairs of data.
+
+### `snd_pair` {#snd_pair}
+
+```aiken
+snd_pair(pair: Pair<a, b>) -> b
+```
+
+Get the second element of a pair.
+
+### String
+
+### `append_string` {#append_string}
+
+```aiken
+append_string(left: String, right: String) -> String
+```
+
+Concatenate two strings.
+
+### `decode_utf8` {#decode_utf8}
+
+```aiken
+decode_utf8(bytes: ByteArray) -> String
+```
+
+Interpret a UTF-8 encoded array of bytes as a String. Fails if the bytes aren't UTF-8 encoded.
+
+### `encode_utf8` {#encode_utf8}
+
+```aiken
+encode_utf8(str: String) -> ByteArray
+```
+
+Convert a string into a UTF-8 encoded array of bytes.
+
+### `equals_string` {#equals_string}
+
+```aiken
+equals_string(left: String, right: String) -> Bool
+```
+
+String equality.
+
+### Value
+
+### `contains_value` {#contains_value}
+
+```aiken
+contains_value(self: Value, other: Value) -> Value
+```
+
+Assess whether the `other` value is contained in `self`.
+
+:::caution
+Fails if either `Value` contains negative quantities.
+:::
+
+### `insert_value` {#insert_value}
+
+```aiken
+insert_value(
+  policy_id: ByteArray,
+  asset_name: ByteArray,
+  quantity: Int,
+  value: Value,
+) -> Value
+```
+
+Insert (and replace!) a quantity at the given policy id and asset name.
+
+:::caution
+Fails if:
+- quantities are larger outside the interval $[-2^{127}, 2^{127} - 1]$
+- keys are longer than 32 bytes
+:::
+
+### `lookup_value` {#lookup_value}
+
+```aiken
+lookup_value(policy_id: ByteArray, asset_name: ByteArray, value: Value) -> Int
+```
+
+Lookup the quantity of a given asset; returns 0 if not present.
+
+### `scale_value` {#scale_value}
+
+```aiken
+scale_value(scalar: Int, value: Value) -> Value
+```
+
+Multiply all quantities in a `Value` by a given scalar.
+
+:::caution
+Fails if it grows quantities outside of the interval $[-2^{127}, 2^{127} - 1]$.
+:::
+
+### `union_value` {#union_value}
+
+```aiken
+union_value(left_value: Value, right_value: Value) -> Value
+```
+
+Merge two values together, summing quantities.
+
+### Crypto
+
+#### Hashing
+
+### `blake2b_256` {#blake2b_256}
+
+```aiken
+blake2b_256(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the blake2b-256 hash digest value of a given bytearray. Output is always 32-byte long.
+
+### `blake2b_224` {#blake2b_224}
+
+```aiken
+blake2b_224(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the blake2b-224 hash digest value of a given bytearray. Output is always 28-byte long.
+
+### `keccak_256` {#keccak_256}
+
+```aiken
+keccak_256(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the keccak-256 hash digest value of a given bytearray. Output is always 32-byte long.
+
+### `ripemd_160` {#ripemd_160}
+
+```aiken
+ripemd_160(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the ripemd-160 hash digest value of a given bytearray. Output is always 20-byte long.
+
+### `sha2_256` {#sha2_256}
+
+```aiken
+sha2_256(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the SHA2-256 hash digest value of a given bytearray. Output is always 32-byte long.
+
+### `sha3_256` {#sha3_256}
+
+```aiken
+sha3_256(preimage: ByteArray) -> ByteArray
+```
+
+Calculate the SHA3-256 hash digest value of a given bytearray. Output is always 32-byte long.
+
+#### ECDSA
+
+### `verify_ed25519_signature` {#verify_ed25519_signature}
+
+```aiken
+verify_ed25519_signature(
+  verification_key: ByteArray,
+  message: ByteArray,
+  signature: ByteArray,
+) -> Bool
+```
+
+Verify an Ed25519 signature from a associated verification key.
+
+### `verify_ecdsa_secp256k1_signature` {#verify_ecdsa_secp256k1_signature}
+
+```aiken
+verify_ecdsa_secp256k1_signature(
+  verification_key: ByteArray,
+  message: ByteArray,
+  signature: ByteArray,
+) -> Bool
+```
+
+Verify an ECDSA-SECP256k1 signature from a associated verification key.
+
+### `verify_schnorr_secp256k1_signature` {#verify_schnorr_secp256k1_signature}
+
+```aiken
+verify_schnorr_secp256k1_signature(
+  verification_key: ByteArray,
+  message: ByteArray,
+  signature: ByteArray,
+) -> Bool
+```
+
+Verify a SCHNORR-SECP256k1 signature from a associated verification key.
+
+#### Pairing
+
+##### G1
+
+### `bls12_381_g1_add` {#bls12_381_g1_add}
+
+```aiken
+bls12_381_g1_add(a: G1Element, b: G1Element) -> G1Element
+```
+
+### `bls12_381_g1_compress` {#bls12_381_g1_compress}
+
+```aiken
+bls12_381_g1_compress(self: G1Element) -> ByteArray
+```
+
+### `bls12_381_g1_equal` {#bls12_381_g1_equal}
+
+```aiken
+bls12_381_g1_equal(self: G1Element, other: G1Element) -> Bool
+```
+
+### `bls12_381_g1_hash_to_group` {#bls12_381_g1_hash_to_group}
+
+```aiken
+bls12_381_g1_hash_to_group(
+  group: ByteArray,
+  domain_separation_tag: ByteArray,
+) -> G1Element
+```
+
+### `bls12_381_g1_neg` {#bls12_381_g1_neg}
+
+```aiken
+bls12_381_g1_neg(self: G1Element) -> G1Element
+```
+
+### `bls12_381_g1_multi_scalar_mul` {#bls12_381_g1_multi_scalar_mul}
+
+```aiken
+bls12_381_g1_multi_scalar_mul(
+  scalars: List<Int>,
+  points: List<G1Element>,
+) -> G1Element
+```
+
+### `bls12_381_g1_scalar_mul` {#bls12_381_g1_scalar_mul}
+
+```aiken
+bls12_381_g1_scalar_mul(scalar: Int, self: G1Element) -> G1Element
+```
+
+### `bls12_381_g1_uncompress` {#bls12_381_g1_uncompress}
+
+```aiken
+bls12_381_g1_uncompress(self: ByteArray) -> G1Element
+```
+
+##### G2
+
+### `bls12_381_g2_add` {#bls12_381_g2_add}
+
+```aiken
+bls12_381_g2_add(a: G2Element, b: G2Element) -> G2Element
+```
+
+### `bls12_381_g2_compress` {#bls12_381_g2_compress}
+
+```aiken
+bls12_381_g2_compress(self: G2Element) -> ByteArray
+```
+
+### `bls12_381_g2_equal` {#bls12_381_g2_equal}
+
+```aiken
+bls12_381_g2_equal(self: G2Element, other: G2Element) -> Bool
+```
+
+### `bls12_381_g2_hash_to_group` {#bls12_381_g2_hash_to_group}
+
+```aiken
+bls12_381_g2_hash_to_group(
+  group: ByteArray,
+  domain_separation_tag: ByteArray,
+) -> G2Element
+```
+
+### `bls12_381_g2_neg` {#bls12_381_g2_neg}
+
+```aiken
+bls12_381_g2_neg(self: G2Element) -> G2Element
+```
+
+### `bls12_381_g2_multi_scalar_mul` {#bls12_381_g2_multi_scalar_mul}
+
+```aiken
+bls12_381_g2_multi_scalar_mul(
+  scalars: List<Int>,
+  points: List<G2Element>,
+) -> G2Element
+```
+
+### `bls12_381_g2_scalar_mul` {#bls12_381_g2_scalar_mul}
+
+```aiken
+bls12_381_g2_scalar_mul(scalar: Int, self: G2Element) -> G2Element
+```
+
+### `bls12_381_g2_uncompress` {#bls12_381_g2_uncompress}
+
+```aiken
+bls12_381_g2_uncompress(self: ByteArray) -> G2Element
+```
+
+#### MillerLoop
+
+### `bls12_381_final_verify` {#bls12_381_final_verify}
+
+```aiken
+bls12_381_final_verify(a: MillerLoopResult, b: MillerLoopResult) -> Bool
+```
+
+### `bls12_381_miller_loop` {#bls12_381_miller_loop}
+
+```aiken
+bls12_381_miller_loop(g1: G1Element, g2: G2Element) -> MillerLoopResult
+```
+
+### `bls12_381_mul_miller_loop_result` {#bls12_381_mul_miller_loop_result}
+
+```aiken
+bls12_381_mul_miller_loop_result(
+  a: MillerLoopResult,
+  b: MillerLoopResult,
+) -> MillerLoopResult
+```
+
+### Miscellaneous
+
+### `choose_void` {#choose_void}
+
+```aiken
+choose_void(void: Void, when_void: a) -> a
+```
+
+Continue with the continuation when the given term is Void.
+
+### `debug` {#debug}
+
+```aiken
+debug(message: String, continuation: a) -> a
+```
+
+Trace the provided message, and continue with the continuation.
+
+### `if_then_else` {#if_then_else}
+
+```aiken
+if_then_else(condition: Bool, when_true: a, when_false: a) -> a
+```
+
+Return first computation when the condition is true, and the second otherwise.

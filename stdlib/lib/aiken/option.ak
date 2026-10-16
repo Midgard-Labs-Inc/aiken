@@ -1,6 +1,6 @@
 //// A type to capture optional results; useful for handling errors.
 ////
-//// Note that the `Option` type and its constructors are readily available in Aiken. They are part of the [Prelude](https://aiken-lang.github.io/prelude/aiken.html#Option) module imported by default in every module.
+//// Note that the `Option` type and its constructors are readily available in Aiken. They are part of the [Prelude](https://aiken-lang.com/prelude/#Option) module imported by default in every module.
 
 // ## Inspecting
 

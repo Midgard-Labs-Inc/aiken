@@ -1,0 +1,247 @@
+---
+title: "aiken"
+description: "The prelude: types and functions available in every module, without an import."
+sidebar:
+  group:
+    label: "prelude"
+---
+
+The prelude: types and functions available in every Aiken module, without any import. Low-level Plutus builtins live in [`aiken/builtin`](/prelude/builtin/).
+
+## Types
+
+### `Bool` {#Bool}
+
+A type for booleans values. See [Primitive Types :: Bool](https://aiken-lang.org/language-tour/primitive-types#bool) for details.
+
+#### Constructors
+
+```aiken
+False
+```
+
+```aiken
+True
+```
+
+### `ByteArray` {#ByteArray}
+
+A type for representing bytes. See [Primitive Types :: ByteArray](https://aiken-lang.org/language-tour/primitive-types#bytearray) for details.
+
+### `Data` {#Data}
+
+A type for opaque Plutus data. See [Primitive Types :: Data](https://aiken-lang.org/language-tour/primitive-types#data) for details.
+
+### `Fuzzer<a>` {#Fuzzer}
+
+A type to capture random computation that may depend on one another. Useful
+for constructing (pseudo-)random values for property-based test.
+
+#### Alias
+
+```aiken
+Fuzzer<a> = fn(PRNG) -> Option<(PRNG, a)>
+```
+
+### `G1Element` {#G1Element}
+
+A type for representing G1 element of BLS12_381 curves.
+
+### `G2Element` {#G2Element}
+
+A type for representing G2 element of BLS12_381 curves.
+
+### `Int` {#Int}
+
+A type for signed integers. See [Primitive Types :: Int](https://aiken-lang.org/language-tour/primitive-types#int) for details.
+
+Note: there's no floating numbers in Aiken.
+
+### `List<a>` {#List}
+
+A type for generic lists. See [Primitive Types :: List](https://aiken-lang.org/language-tour/primitive-types#list) for details.
+
+### `MillerLoopResult` {#MillerLoopResult}
+
+A type for representing Miller-loop results.
+
+### `Never` {#Never}
+
+A type that like [`Option`](#Option) but that is always `None`. Fundamentally, we have:
+
+```aiken
+let never: Data = Never
+let none: Data = None
+never == none
+```
+
+#### Constructors
+
+```aiken
+Never
+```
+
+### `Option<a>` {#Option}
+
+A type for returning optional results. See also [stdlib/option](/stdlib/aiken/option/).
+
+#### Constructors
+
+```aiken
+Some(a)
+```
+
+```aiken
+None
+```
+
+### `Ordering` {#Ordering}
+
+A type to compare values.
+
+```aiken
+pub fn compare(left: Int, right: Int) -> Ordering {
+  if left < right {
+    Less
+  } else if less > right {
+    Greater
+  } else {
+    Equal
+  }
+}
+```
+
+#### Constructors
+
+```aiken
+Less
+```
+
+```aiken
+Equal
+```
+
+```aiken
+Greater
+```
+
+### `PRNG` {#PRNG}
+
+A type that represent Pseudo-random generated values.
+
+#### Constructors
+
+```aiken
+Seeded { seed: ByteArray, choices: ByteArray }
+```
+
+```aiken
+Replayed { cursor: Int, choices: ByteArray }
+```
+
+### `Pair<k, v>` {#Pair}
+
+An pair of 2 elements.
+
+### `Pairs<k, v>` {#Pairs}
+
+A associative list as a list of pairs of 2 elements.
+
+#### Alias
+
+```aiken
+Pairs<k, v> = List<Pair<k, v>>
+```
+
+### `Sampler<a>` {#Sampler}
+
+A type to capture scaled fuzzers. Useful for constructing (pseudo-)random
+for benchmarks from a controlled monotically increasing size.
+
+#### Alias
+
+```aiken
+Sampler<a> = fn(Int) -> Fuzzer<a>
+```
+
+### `String` {#String}
+
+A type for text strings. See [Primitive Types :: String](https://aiken-lang.org/language-tour/primitive-types#string) for details.
+
+### `Value` {#Value}
+
+A type for builtins multi-assets values. See [Primitive Types :: Value](https://aiken-lang.org/language-tour/primitive-types#value) for details.
+
+### `Void` {#Void}
+
+A type for nullary constructors. See [Primitive Types :: Void](https://aiken-lang.org/language-tour/primitive-types#void) for details.
+
+## Functions
+
+### `always` {#always}
+
+```aiken
+always(a: a, b) -> a
+```
+
+A function that always return its first argument. Handy in folds and maps.
+
+```aiken
+let always_14 = always(14, _)
+always_14(42) == 14
+always_14(1337) == 14
+always_14(0) == 14
+```
+
+### `as_data` {#as_data}
+
+```aiken
+as_data(data: Data) -> Data
+```
+
+An identity function to upcast any serialisable type into `Data`, in places where the compiler cannot implicitly infer it.
+
+```aiken
+let my_uniform_list: List<Data> = [as_data(Foo(14)), as_data(Bar(True))]
+```
+
+### `flip` {#flip}
+
+```aiken
+flip(f: fn(a, b) -> c) -> fn(b, a) -> c
+```
+
+A function that flips the arguments of a function.
+
+```aiken
+pub fn titleize(left: String, right: String) {}
+
+titleize("Hello", "World") // "Hello, World!"
+
+flip(titleize)("Hello", "World") // "World, Hello!"
+```
+
+### `identity` {#identity}
+
+```aiken
+identity(a: a) -> a
+```
+
+A function that returns its argument. Handy as a default behavior sometimes.
+
+### `not` {#not}
+
+```aiken
+not(self: Bool) -> Bool
+```
+
+Like `!`, but as a function. Handy for chaining using the pipe operator `|>` or to pass as a function.
+
+### `tautology` {#tautology}
+
+```aiken
+tautology(a) -> Bool
+```
+
+Turn any expression into a truthy statement. Useful for tests that are
+meant to fail but needs a predicate.

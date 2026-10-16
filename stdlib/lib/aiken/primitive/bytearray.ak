@@ -240,7 +240,7 @@ pub fn compare(left: ByteArray, right: ByteArray) -> Ordering {
 
 // ## Transforming
 
-/// Left-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+/// Left-fold over bytes of a [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
 ///
 /// ```aiken
 /// bytearray.foldl(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 44203
@@ -274,7 +274,7 @@ fn do_foldl(
   }
 }
 
-/// Right-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+/// Right-fold over bytes of a [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
 ///
 /// ```aiken
 /// bytearray.foldr(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 43948

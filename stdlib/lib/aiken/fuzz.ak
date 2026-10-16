@@ -6,7 +6,7 @@ use aiken/option
 // ## Constructing
 // ### Primitives
 
-/// Generate a random [`Bool`](https://aiken-lang.github.io/prelude/aiken.html#Bool) value from a
+/// Generate a random [`Bool`](https://aiken-lang.com/prelude/#Bool) value from a
 /// uniform distribution.
 ///
 /// ```aiken
@@ -18,7 +18,7 @@ pub fn bool() -> Fuzzer<Bool> {
   rand |> map(fn(n) { n % 2 == 0 })
 }
 
-/// Create a constant [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) from an arbitrary value.
+/// Create a constant [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer) from an arbitrary value.
 pub fn constant(a: a) -> Fuzzer<a> {
   fn(s0) { Some((s0, a)) }
 }
@@ -28,7 +28,7 @@ pub fn byte() -> Fuzzer<Int> {
   rand
 }
 
-/// Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of 32 bytes.
+/// Generate a random [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray) of 32 bytes.
 pub fn bytearray() -> Fuzzer<ByteArray> {
   let lsb <- and_then(rand)
   let msb <- map(rand)
@@ -42,7 +42,7 @@ pub fn bytearray() -> Fuzzer<ByteArray> {
   }
 }
 
-/// Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of
+/// Generate a random [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray) of
 /// size within a lower and upper bounds.
 pub fn bytearray_between(min: Int, max: Int) -> Fuzzer<ByteArray> {
   if max < min {
@@ -56,7 +56,7 @@ pub fn bytearray_between(min: Int, max: Int) -> Fuzzer<ByteArray> {
   }
 }
 
-/// Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of `len` bytes.
+/// Generate a random [`ByteArray`](https://aiken-lang.com/prelude/#ByteArray) of `len` bytes.
 pub fn bytearray_fixed(len: Int) -> Fuzzer<ByteArray> {
   expect len >= 0
   bytearray_fixed_inner(len)
@@ -607,7 +607,7 @@ pub fn tuple9(
 
 // ## Combining
 
-/// Combine a [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) with the result of a another one.
+/// Combine a [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer) with the result of a another one.
 /// This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
 ///
 /// ```aiken
@@ -863,7 +863,7 @@ pub fn either9(
   }
 }
 
-/// Transform the result of a [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) using a function.
+/// Transform the result of a [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer) using a function.
 /// This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
 ///
 /// ```aiken
@@ -881,7 +881,7 @@ pub fn map(fuzz_a: Fuzzer<a>, f: fn(a) -> b) -> Fuzzer<b> {
   }
 }
 
-/// Combine the results of two [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of two [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map2(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -899,7 +899,7 @@ pub fn map2(
   }
 }
 
-/// Combine the results of three [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of three [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map3(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -922,7 +922,7 @@ pub fn map3(
   }
 }
 
-/// Combine the results of four [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of four [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map4(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -950,7 +950,7 @@ pub fn map4(
   }
 }
 
-/// Combine the results of five [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of five [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map5(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -983,7 +983,7 @@ pub fn map5(
   }
 }
 
-/// Combine the results of six [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of six [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map6(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -1022,7 +1022,7 @@ pub fn map6(
   }
 }
 
-/// Combine the results of seven [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of seven [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map7(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -1066,7 +1066,7 @@ pub fn map7(
   }
 }
 
-/// Combine the results of eight [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of eight [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map8(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
@@ -1117,7 +1117,7 @@ pub fn map8(
   }
 }
 
-/// Combine the results of nine [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+/// Combine the results of nine [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer)s.
 pub fn map9(
   fuzz_0: Fuzzer<t0>,
   fuzz_1: Fuzzer<t1>,
