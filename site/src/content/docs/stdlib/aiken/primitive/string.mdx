@@ -1,0 +1,82 @@
+---
+title: "aiken/primitive/string"
+sidebar:
+  label: "string"
+---
+
+## Functions
+
+### Constructing
+
+### `from_bytearray` {#from_bytearray}
+
+```aiken
+from_bytearray(bytes: ByteArray) -> String
+```
+
+Convert a `ByteArray` into a `String`
+
+:::warning
+This function fails if the underlying `ByteArray` isn't UTF-8-encoded. In particular, you cannot convert arbitrary hash digests using this function.
+
+For converting arbitrary `ByteArray`s, use [bytearray.to_hex](/stdlib/aiken/primitive/bytearray/#to_hex).
+:::
+
+```aiken
+string.from_bytearray("foo") == @"foo"
+string.from_bytearray(#"666f6f") == @"foo"
+string.from_bytearray(some_hash) -> 💥
+```
+
+### `from_int` {#from_int}
+
+```aiken
+from_int(n: Int) -> String
+```
+
+Convert an `Int` to its `String` representation.
+
+```aiken
+string.from_int(42) == @"42"
+```
+
+### Combining
+
+### `concat` {#concat}
+
+```aiken
+concat(left: String, right: String) -> String
+```
+
+Combine two `String` together.
+
+```aiken
+string.concat(left: @"Hello", right: @", World!") == @"Hello, World!"
+```
+
+### `join` {#join}
+
+```aiken
+join(list: List<String>, delimiter: String) -> String
+```
+
+Join a list of strings, separated by a given _delimiter_.
+
+```aiken
+string.join([], @"+") == @""
+string.join([@"a", @"b", @"c"], @",") == @"a,b,c"
+```
+
+### Transforming
+
+### `to_bytearray` {#to_bytearray}
+
+```aiken
+to_bytearray(self: String) -> ByteArray
+```
+
+Convert a `String` into a `ByteArray`
+
+```aiken
+string.to_bytearray(@"foo") == "foo"
+```

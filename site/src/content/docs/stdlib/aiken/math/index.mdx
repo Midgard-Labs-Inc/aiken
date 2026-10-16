@@ -1,0 +1,194 @@
+---
+title: "aiken/math"
+sidebar:
+  label: "math"
+  group:
+    label: "math"
+---
+
+This module contains some basic Math utilities. Standard arithmetic
+operations on integers are available through native operators:
+
+Operator | Description
+---      | :---
+`+`      | Arithmetic sum
+`-`      | Arithmetic difference
+`/`      | Whole division
+`*`      | Arithmetic multiplication
+`%`      | Remainder by whole division
+
+Here are a few examples:
+
+```aiken
+1 + 1   // 2
+10 - 2  // 8
+40 / 14 // 2
+3 * 4   // 12
+10 % 3  // 1
+```
+
+## Functions
+
+### `abs` {#abs}
+
+```aiken
+abs(self: Int) -> Int
+```
+
+Calculate the absolute value of an integer.
+
+```aiken
+math.abs(-42) == 42
+math.abs(14) == 14
+```
+
+### `clamp` {#clamp}
+
+```aiken
+clamp(self: Int, min: Int, max: Int) -> Int
+```
+
+Restrict the value of an integer between two min and max bounds
+
+```aiken
+math.clamp(14, min: 0, max: 10) == 10
+```
+
+### `gcd` {#gcd}
+
+```aiken
+gcd(x: Int, y: Int) -> Int
+```
+
+The greatest common divisor of two integers.
+
+```aiken
+math.gcd(42, 14) == 14
+math.gcd(14, 42) == 14
+math.gcd(0, 0) == 0
+```
+
+### `is_sqrt` {#is_sqrt}
+
+```aiken
+is_sqrt(self: Int, x: Int) -> Bool
+```
+
+Checks if an integer has a given integer square root x.
+The check has constant time complexity $O(1)$.
+
+```aiken
+math.is_sqrt(0, 0)
+math.is_sqrt(25, 5)
+!math.is_sqrt(25, -5)
+math.is_sqrt(44203, 210)
+```
+
+### `log` {#log}
+
+```aiken
+log(self: Int, base: Int) -> Int
+```
+
+The logarithm in base `b` of an element using integer divisions.
+
+```aiken
+math.log(10, base: 2) == 3
+math.log(42, base: 2) == 5
+math.log(42, base: 3) == 3
+math.log(5, base: 0) == 0
+math.log(4, base: 4) == 1
+math.log(4, base: 42) == 0
+```
+
+### `log2` {#log2}
+
+```aiken
+log2(x: Int) -> Int
+```
+
+The integer logarithm in base 2. Faster than [`log`](#log) in this particular case.
+
+```aiken
+math.log2(1) == 0
+math.log2(2) == 1
+math.log2(3) == 1
+math.log2(4) == 2
+math.log2(256) == 8
+math.log2(257) == 8
+math.log2(511) == 8
+math.log2(1025) == 10
+```
+
+### `max` {#max}
+
+```aiken
+max(a: Int, b: Int) -> Int
+```
+
+Return the maximum of two integers.
+
+### `min` {#min}
+
+```aiken
+min(a: Int, b: Int) -> Int
+```
+
+Return the minimum of two integers.
+
+### `pow` {#pow}
+
+```aiken
+pow(self: Int, e: Int) -> Int
+```
+
+Calculates a number to the power of `e` using the exponentiation by
+squaring method.
+
+```aiken
+math.pow(3, 5) == 243
+math.pow(7, 2) == 49
+math.pow(3, -4) == 0
+math.pow(0, 0) == 1
+math.pow(513, 3) == 135005697
+```
+
+### `pow2` {#pow2}
+
+```aiken
+pow2(e: Int) -> Int
+```
+
+Calculates the power of 2 for a given exponent `e`. Much cheaper than
+using `pow(2, _)` for small exponents $0 < e < 256$.
+
+```aiken
+math.pow2(-2) == 0
+math.pow2(0) == 1
+math.pow2(1) == 2
+math.pow2(4) == 16
+math.pow2(42) == 4398046511104
+```
+
+### `sqrt` {#sqrt}
+
+```aiken
+sqrt(self: Int) -> Option<Int>
+```
+
+Calculates the square root of an integer using the [Babylonian
+method](https://en.wikipedia.org/wiki/Methods_of_computing_square_roots#Babylonian_method). This returns either the exact result or the smallest integer
+nearest to the square root.
+
+Returns `None` for negative values.
+
+```aiken
+math.sqrt(0) == Some(0)
+math.sqrt(25) == Some(5)
+math.sqrt(44203) == Some(210)
+math.sqrt(-42) == None
+```
+
+:::tip
+This function can be quite expensive to perform on-chain. Prefer using [`is_sqrt`](#is_sqrt) whenever possible.
+:::

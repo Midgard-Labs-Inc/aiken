@@ -1,0 +1,823 @@
+---
+title: "aiken/fuzz"
+sidebar:
+  label: "fuzz"
+  group:
+    label: "fuzz"
+---
+
+## Functions
+
+### Constructing
+
+#### Primitives
+
+### `bool` {#bool}
+
+```aiken
+bool() -> Fuzzer<Bool>
+```
+
+Generate a random [`Bool`](https://aiken-lang.github.io/prelude/aiken.html#Bool) value from a
+uniform distribution.
+
+```aiken
+test prop_bool(is_true via fuzz.bool()) {
+  is_true || !is_true
+}
+```
+
+### `constant` {#constant}
+
+```aiken
+constant(a: a) -> Fuzzer<a>
+```
+
+Create a constant [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) from an arbitrary value.
+
+### `byte` {#byte}
+
+```aiken
+byte() -> Fuzzer<Int>
+```
+
+Generate a byte uniformly across the range `[0; 255]`.
+
+### `bytearray` {#bytearray}
+
+```aiken
+bytearray() -> Fuzzer<ByteArray>
+```
+
+Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of 32 bytes.
+
+### `bytearray_between` {#bytearray_between}
+
+```aiken
+bytearray_between(min: Int, max: Int) -> Fuzzer<ByteArray>
+```
+
+Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of
+size within a lower and upper bounds.
+
+### `bytearray_fixed` {#bytearray_fixed}
+
+```aiken
+bytearray_fixed(len: Int) -> Fuzzer<ByteArray>
+```
+
+Generate a random [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray) of `len` bytes.
+
+### `data` {#data}
+
+```aiken
+data() -> Fuzzer<Data>
+```
+
+Generate an arbitrary `Data`.
+
+### `int` {#int}
+
+```aiken
+int() -> Fuzzer<Int>
+```
+
+Generate a random integer value. It favors small values near zero, but
+generate across the range `[-255; 16383]` with the following distribution:
+
+```
+25.0%  [-255; 0[      ████████████
+ 2.5%  0              █
+50.0%  ]0; 255]       █████████████████████████
+22.5%  [256; 16383]   ██████████
+```
+
+The distribution is uniform within those buckets. If you need larger values, use [`int_between`](#int_between).
+
+### `int_between` {#int_between}
+
+```aiken
+int_between(min: Int, max: Int) -> Fuzzer<Int>
+```
+
+Generate integers values uniformly between a lower and upper bounds (both inclusive).
+
+### `int_at_least` {#int_at_least}
+
+```aiken
+int_at_least(min: Int) -> Fuzzer<Int>
+```
+
+Generate a random integer which is at least `min`.
+
+### `int_at_most` {#int_at_most}
+
+```aiken
+int_at_most(max: Int) -> Fuzzer<Int>
+```
+
+Generate a random integer which is at most `max`.
+
+#### Data-structures
+
+### `list` {#list}
+
+```aiken
+list(fuzzer: Fuzzer<a>) -> Fuzzer<List<a>>
+```
+
+Generate a random list of elements from a given fuzzer. The list contains
+*at most `20`* elements, and has a higher probability of generating smaller lists.
+
+For lists of a specific length, use [`list_between`](#list_between).
+
+### `list_between` {#list_between}
+
+```aiken
+list_between(fuzzer: Fuzzer<a>, min: Int, max: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random list of elements with length within specified bounds. The
+resulting list contains *at least `min`* elements and *at most `max`*
+elements, with a higher probability of generating smaller lists.
+
+More specifically, there's approximately 1/n chance of generating n
+elements within the range. For example, the distribution when generating a
+list between 0 and 10 elements resemble the following:
+
+```
+22.7%   0 elements  ████████
+19.7%   1 element   ███████
+13.5%   2 elements  █████
+ 9.5%   3 elements  ███
+ 6.3%   4 elements  ██
+ 5.6%   5 elements  ██
+ 5.6%   6 elements  ██
+ 4.0%   7 elements  █
+ 3.1%   8 elements  █
+ 2.0%   9 elements  █
+ 8.0%  10 elements  ███
+```
+
+### `list_at_least` {#list_at_least}
+
+```aiken
+list_at_least(fuzzer: Fuzzer<a>, min: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random list of elements from a given fuzzer, with at least `min` elements.
+
+### `list_at_most` {#list_at_most}
+
+```aiken
+list_at_most(fuzzer: Fuzzer<a>, max: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random list of elements from a given fuzzer, with at most `max` elements.
+
+### `list_with_elem` {#list_with_elem}
+
+```aiken
+list_with_elem(fuzzer: Fuzzer<a>) -> Fuzzer<(List<a>, a)>
+```
+
+Generate a random list and pick an element from that list. Return both.
+
+### `pick` {#pick}
+
+```aiken
+pick(xs: List<a>) -> Fuzzer<(Int, a)>
+```
+
+Pick an element from a list, returning its index.
+
+### `set` {#set}
+
+```aiken
+set(fuzzer: Fuzzer<a>) -> Fuzzer<List<a>>
+```
+
+Generate a random list of **unique** elements (a.k.a. a set) from a given fuzzer.
+The list contains *at most `20`* elements, and has a higher probability of
+generating smaller lists.
+
+**Important:** The specified fuzzer must have a high enough entropy to
+yield enough unique values to fill the set with the required size!
+
+For sets of a specific length, use [`set_between`](#set_between).
+
+### `set_between` {#set_between}
+
+```aiken
+set_between(fuzzer: Fuzzer<a>, min: Int, max: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random list of **unique** elements (a.k.a a set) with length
+within specified bounds. The resulting set contains *at least `min`*
+elements and *at most `max`* elements, with a higher probability of
+generating smaller sets.
+
+More specifically, there's approximately 1/n chance of generating n
+elements within the range. For example, the distribution when generating a
+set between 0 and 10 elements resemble the following:
+
+**Important:** The specified fuzzer must have a high enough entropy to
+yield enough unique values to fill the set with the required size!
+
+```
+22.7%   0 elements  ████████
+19.7%   1 element   ███████
+13.5%   2 elements  █████
+ 9.5%   3 elements  ███
+ 6.3%   4 elements  ██
+ 5.6%   5 elements  ██
+ 5.6%   6 elements  ██
+ 4.0%   7 elements  █
+ 3.1%   8 elements  █
+ 2.0%   9 elements  █
+ 8.0%  10 elements  ███
+```
+
+### `set_at_least` {#set_at_least}
+
+```aiken
+set_at_least(fuzzer: Fuzzer<a>, min: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random set of elements from a given fuzzer, with at least `min` elements.
+
+### `set_at_most` {#set_at_most}
+
+```aiken
+set_at_most(fuzzer: Fuzzer<a>, max: Int) -> Fuzzer<List<a>>
+```
+
+Generate a random set of elements from a given fuzzer, with at most `max` elements.
+
+### `set_with_elem` {#set_with_elem}
+
+```aiken
+set_with_elem(fuzzer: Fuzzer<a>) -> Fuzzer<(List<a>, a)>
+```
+
+Generate a random set and pick an element from that set. Return both.
+
+### `tuple` {#tuple}
+
+```aiken
+tuple(a: Fuzzer<a>, b: Fuzzer<b>) -> Fuzzer<(a, b)>
+```
+
+A convenient way of generating tuples instead of doing [`map2`](#map2)
+```aiken
+map2(
+  fuzzer_a, fuzzer_b,
+  fn(a, b) { (a, b) }
+)
+```
+
+### `tuple3` {#tuple3}
+
+```aiken
+tuple3(a: Fuzzer<a>, b: Fuzzer<b>, c: Fuzzer<c>) -> Fuzzer<(a, b, c)>
+```
+
+A convenient way of generating tuple3 instead of doing [`map3`](#map3)
+```aiken
+map3(
+  fuzzer_a, fuzzer_b, fuzzer_c,
+  fn(a, b, c) { (a, b, c) }
+)
+```
+
+### `tuple4` {#tuple4}
+
+```aiken
+tuple4(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+) -> Fuzzer<(a, b, c, d)>
+```
+
+A convenient way of generating tuple4 instead of doing [`map4`](#map4)
+```aiken
+map4(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d,
+  fn(a, b, c, d) { (a, b, c, d) }
+)
+```
+
+### `tuple5` {#tuple5}
+
+```aiken
+tuple5(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+  e: Fuzzer<e>,
+) -> Fuzzer<(a, b, c, d, e)>
+```
+
+A convenient way of generating tuple5 instead of doing [`map5`](#map5)
+```aiken
+map5(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d, fuzzer_e,
+  fn(a, b, c, d, e) { (a, b, c, d, e) }
+)
+```
+
+### `tuple6` {#tuple6}
+
+```aiken
+tuple6(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+  e: Fuzzer<e>,
+  f: Fuzzer<f>,
+) -> Fuzzer<(a, b, c, d, e, f)>
+```
+
+A convenient way of generating tuple6 instead of doing [`map6`](#map6)
+```aiken
+map6(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d, fuzzer_e, fuzzer_f,
+  fn(a, b, c, d, e, f) { (a, b, c, d, e, f) }
+)
+```
+
+### `tuple7` {#tuple7}
+
+```aiken
+tuple7(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+  e: Fuzzer<e>,
+  f: Fuzzer<f>,
+  g: Fuzzer<g>,
+) -> Fuzzer<(a, b, c, d, e, f, g)>
+```
+
+A convenient way of generating tuple7 instead of doing [`map7`](#map7)
+```aiken
+map7(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d, fuzzer_e, fuzzer_f, fuzzer_g,
+  fn(a, b, c, d, e, f, g) { (a, b, c, d, e, f, g) }
+)
+```
+
+### `tuple8` {#tuple8}
+
+```aiken
+tuple8(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+  e: Fuzzer<e>,
+  f: Fuzzer<f>,
+  g: Fuzzer<g>,
+  h: Fuzzer<h>,
+) -> Fuzzer<(a, b, c, d, e, f, g, h)>
+```
+
+A convenient way of generating tuple8 instead of doing [`map8`](#map8)
+```aiken
+map8(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d, fuzzer_e, fuzzer_f, fuzzer_g, fuzzer_h,
+  fn(a, b, c, d, e, f, g, h) { (a, b, c, d, e, f, g, h) }
+)
+```
+
+### `tuple9` {#tuple9}
+
+```aiken
+tuple9(
+  a: Fuzzer<a>,
+  b: Fuzzer<b>,
+  c: Fuzzer<c>,
+  d: Fuzzer<d>,
+  e: Fuzzer<e>,
+  f: Fuzzer<f>,
+  g: Fuzzer<g>,
+  h: Fuzzer<h>,
+  i: Fuzzer<i>,
+) -> Fuzzer<(a, b, c, d, e, f, g, h, i)>
+```
+
+A convenient way of generating tuple9 instead of doing [`map9`](#map9)
+```aiken
+map9(
+  fuzzer_a, fuzzer_b, fuzzer_c, fuzzer_d, fuzzer_e, fuzzer_f, fuzzer_g, fuzzer_h, fuzzer_i,
+  fn(a, b, c, d, e, f, g, h, i) { (a, b, c, d, e, f, g, h, i) }
+)
+```
+
+### Combining
+
+### `and_then` {#and_then}
+
+```aiken
+and_then(fuzz_a: Fuzzer<a>, f: fn(a) -> Fuzzer<b>) -> Fuzzer<b>
+```
+
+Combine a [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) with the result of a another one.
+This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
+
+```aiken
+pub fn either(left: Fuzzer<a>, right: Fuzzer<a>) -> Fuzzer<a> {
+  let pick_left <- fuzz.and_then(fuzz.bool())
+  if pick_left {
+    left
+  } else {
+    right
+  }
+}
+```
+
+### `both` {#both}
+
+```aiken
+both(left: Fuzzer<a>, right: Fuzzer<b>) -> Fuzzer<(a, b)>
+```
+
+Combine two fuzzers into a 2-tuple.
+
+### `either` {#either}
+
+```aiken
+either(left: Fuzzer<a>, right: Fuzzer<a>) -> Fuzzer<a>
+```
+
+Choose either of two fuzzers with an equal probability.
+
+### `either3` {#either3}
+
+```aiken
+either3(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of three fuzzers with an equal probability.
+
+### `either4` {#either4}
+
+```aiken
+either4(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of four fuzzers with an equal probability.
+
+### `either5` {#either5}
+
+```aiken
+either5(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+  e: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of five fuzzers with an equal probability.
+
+### `either6` {#either6}
+
+```aiken
+either6(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+  e: Fuzzer<result>,
+  f: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of six fuzzers with an equal probability.
+
+### `either7` {#either7}
+
+```aiken
+either7(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+  e: Fuzzer<result>,
+  f: Fuzzer<result>,
+  g: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of seven fuzzers with an equal probability.
+
+### `either8` {#either8}
+
+```aiken
+either8(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+  e: Fuzzer<result>,
+  f: Fuzzer<result>,
+  g: Fuzzer<result>,
+  h: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of height fuzzers with an equal probability.
+
+### `either9` {#either9}
+
+```aiken
+either9(
+  a: Fuzzer<result>,
+  b: Fuzzer<result>,
+  c: Fuzzer<result>,
+  d: Fuzzer<result>,
+  e: Fuzzer<result>,
+  f: Fuzzer<result>,
+  g: Fuzzer<result>,
+  h: Fuzzer<result>,
+  i: Fuzzer<result>,
+) -> Fuzzer<result>
+```
+
+Choose either of nine fuzzers with an equal probability.
+
+### `map` {#map}
+
+```aiken
+map(fuzz_a: Fuzzer<a>, f: fn(a) -> b) -> Fuzzer<b>
+```
+
+Transform the result of a [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer) using a function.
+This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
+
+```aiken
+fn bool() -> Fuzzer<Bool> {
+  let n <- map(int_between(1, 100))
+  n % 2
+}
+```
+
+### `map2` {#map2}
+
+```aiken
+map2(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  f: fn(t0, t1) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of two [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map3` {#map3}
+
+```aiken
+map3(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  f: fn(t0, t1, t2) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of three [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map4` {#map4}
+
+```aiken
+map4(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  f: fn(t0, t1, t2, t3) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of four [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map5` {#map5}
+
+```aiken
+map5(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  fuzz_4: Fuzzer<t4>,
+  f: fn(t0, t1, t2, t3, t4) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of five [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map6` {#map6}
+
+```aiken
+map6(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  fuzz_4: Fuzzer<t4>,
+  fuzz_5: Fuzzer<t5>,
+  f: fn(t0, t1, t2, t3, t4, t5) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of six [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map7` {#map7}
+
+```aiken
+map7(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  fuzz_4: Fuzzer<t4>,
+  fuzz_5: Fuzzer<t5>,
+  fuzz_6: Fuzzer<t6>,
+  f: fn(t0, t1, t2, t3, t4, t5, t6) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of seven [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map8` {#map8}
+
+```aiken
+map8(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  fuzz_4: Fuzzer<t4>,
+  fuzz_5: Fuzzer<t5>,
+  fuzz_6: Fuzzer<t6>,
+  fuzz_7: Fuzzer<t7>,
+  f: fn(t0, t1, t2, t3, t4, t5, t6, t7) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of eight [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `map9` {#map9}
+
+```aiken
+map9(
+  fuzz_0: Fuzzer<t0>,
+  fuzz_1: Fuzzer<t1>,
+  fuzz_2: Fuzzer<t2>,
+  fuzz_3: Fuzzer<t3>,
+  fuzz_4: Fuzzer<t4>,
+  fuzz_5: Fuzzer<t5>,
+  fuzz_6: Fuzzer<t6>,
+  fuzz_7: Fuzzer<t7>,
+  fuzz_8: Fuzzer<t8>,
+  f: fn(t0, t1, t2, t3, t4, t5, t6, t7, t8) -> result,
+) -> Fuzzer<result>
+```
+
+Combine the results of nine [Fuzzer](https://aiken-lang.github.io/prelude/aiken.html#Fuzzer)s.
+
+### `one_of` {#one_of}
+
+```aiken
+one_of(xs: List<a>) -> Fuzzer<a>
+```
+
+Pick a value from a (non-empty!) list with equal probability.
+
+```aiken
+let any_bool = fuzz.one_of([True, False])
+```
+
+### `option` {#option}
+
+```aiken
+option(fuzz_a: Fuzzer<a>) -> Fuzzer<Option<a>>
+```
+
+Choose between `None` or `Some` value with an equal probability.
+
+### `sublist` {#sublist}
+
+```aiken
+sublist(xs: List<a>) -> Fuzzer<List<a>>
+```
+
+Take a random sublist from an existing list.
+
+### `subset` {#subset}
+
+```aiken
+subset(xs: List<a>) -> Fuzzer<List<a>>
+```
+
+Take a random subset from an existing set.
+
+### `such_that` {#such_that}
+
+```aiken
+such_that(fuzzer: Fuzzer<a>, predicate: fn(a) -> Bool) -> Fuzzer<a>
+```
+
+Generate a value that satisfies a given predicate. Beware that this
+function may heavily impact the performances of your fuzzers. In general, you
+should prefer constraining the fuzzers beforehand than trying to discard
+values after the fact!
+
+Use with caution.
+
+### Inspecting
+
+### `label` {#label}
+
+```aiken
+label(str: String) -> Void
+```
+
+Label a test case. Labels are collected at the end of a property run and a
+distribution amongst all labels is computed and shown. This is particularly
+useful to assert that specific scenarios are met or to test your fuzzers.
+
+```aiken
+test prop_bool_distribution(is_true via bool()) {
+  label(
+    if is_true {
+      @"True"
+    } else {
+      @"False"
+    },
+  )
+
+  True
+}
+```
+
+### `label_when` {#label_when}
+
+```aiken
+label_when(predicate: Bool, str: String, default: String) -> Void
+```
+
+Apply a label when a predicate is true, or fallback to a default label.
+Useful for labelling dichotomies while ensuring that the final label
+distribution reflects all cases.
+
+```aiken
+test prop_u16(operands via fuzz.both(byte(), byte())) {
+  let (msb, lsb) = operands
+  fuzz.label_when(msb == 0, @"msb = 0", @"default")
+  fuzz.label_when(lsb == 0, @"lsb = 0", @"default")
+  builtin.bytearray_to_integer(
+    False,
+    ""
+      |> builtin.cons_bytearray(msb, _)
+      |> builtin.cons_bytearray(lsb, _),
+  ) == msb * 256 + lsb
+}
+```
+
+### `label_if` {#label_if}
+
+```aiken
+label_if(str: String, predicate: Bool) -> Void
+```
+
+Apply a label when a predicate is true, or do nothing. Useful for
+conditionally labelling scenarios in a single line.
+
+```aiken
+test post_conditions(steps via any_scenario()) {
+  let (is_register, is_reregister, is_unregister, is_forward) =
+    classify_steps(steps)
+
+  @"contains solo registration" |> label_if(is_register)
+  @"contains re-registration" |> label_if(is_reregister)
+  @"contains solo unregistration" |> label_if(is_unregister)
+  @"contains forward-only" |> label_if(is_forward)
+}
+```

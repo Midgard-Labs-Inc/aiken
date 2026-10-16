@@ -1,0 +1,24 @@
+---
+title: "cardano/transaction/script_purpose"
+sidebar:
+  label: "script_purpose"
+---
+
+## Functions
+
+### `compare` {#compare}
+
+```aiken
+compare(left: ScriptPurpose, right: ScriptPurpose) -> Ordering
+```
+
+Compare two script purposes, using the same ordering as the one used by
+the ledger when constructing the
+[redeemers](/stdlib/cardano/transaction/#Transaction) list:
+
+[`Spend`](/stdlib/cardano/transaction/#ScriptPurpose) \< [`Mint`](/stdlib/cardano/transaction/#ScriptPurpose) \< [`Publish`](/stdlib/cardano/transaction/#ScriptPurpose) \< [`Withdraw`](/stdlib/cardano/transaction/#ScriptPurpose) \< [`Vote`](/stdlib/cardano/transaction/#ScriptPurpose) \< [`Propose`](/stdlib/cardano/transaction/#ScriptPurpose)
+
+Note that this ordering follows the internal ledger types, and thus
+differs from the constructor order of
+[ScriptPurpose](/stdlib/cardano/transaction/#ScriptPurpose): `Spend` comes before
+`Mint`, and `Publish` comes before `Withdraw`.

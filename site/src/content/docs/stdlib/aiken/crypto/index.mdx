@@ -1,0 +1,211 @@
+---
+title: "aiken/crypto"
+sidebar:
+  label: "crypto"
+  group:
+    label: "crypto"
+---
+
+## Types
+
+### `Blake2b_224` {#Blake2b_224}
+
+A blake2b-224 hash algorithm.
+
+Typically used for:
+
+- [`Credential`](/stdlib/cardano/address/#Credential)
+- [`PolicyId`](/stdlib/cardano/assets/#PolicyId)
+
+### `Blake2b_256` {#Blake2b_256}
+
+A blake2b-256 hash algorithm.
+
+Typically used for:
+
+- [`TransactionId`](/stdlib/cardano/transaction/#TransactionId)
+
+### `DataHash` {#DataHash}
+
+#### Alias
+
+```aiken
+DataHash = Hash<Blake2b_256, Data>
+```
+
+### `Hash<alg, a>` {#Hash}
+
+A `Hash` is nothing more than a `ByteArray`, but it carries extra
+information for readability.
+
+On-chain, any hash digest value is represented as a plain 'ByteArray'.
+Though in practice, hashes come from different sources and have
+different semantics.
+
+Hence, while this type-alias doesn't provide any strong type-guarantees,
+it helps writing functions signatures with more meaningful types than mere
+'ByteArray'.
+
+Compare for example:
+
+```aiken
+pub type Credential {
+  VerificationKey(ByteArray)
+  Script(ByteArray)
+}
+```
+
+with
+
+```aiken
+pub type Credential {
+  VerificationKey(Hash<Blake2b_224, VerificationKey>)
+  Script(Hash<Blake2b_224, Script>)
+}
+```
+
+Both are strictly equivalent, but the second reads much better.
+
+#### Alias
+
+```aiken
+Hash<alg, a> = ByteArray
+```
+
+### `Keccak_256` {#Keccak_256}
+
+A Keccak-256 hash algorithm.
+
+### `Script` {#Script}
+
+#### Alias
+
+```aiken
+Script = ByteArray
+```
+
+### `ScriptHash` {#ScriptHash}
+
+#### Alias
+
+```aiken
+ScriptHash = Hash<Blake2b_224, Script>
+```
+
+### `Sha2_256` {#Sha2_256}
+
+A SHA2-256 hash algorithm.
+
+### `Sha3_256` {#Sha3_256}
+
+A SHA3-256 hash algorithm.
+
+### `Signature` {#Signature}
+
+#### Alias
+
+```aiken
+Signature = ByteArray
+```
+
+### `VerificationKey` {#VerificationKey}
+
+#### Alias
+
+```aiken
+VerificationKey = ByteArray
+```
+
+### `VerificationKeyHash` {#VerificationKeyHash}
+
+#### Alias
+
+```aiken
+VerificationKeyHash = Hash<Blake2b_224, VerificationKey>
+```
+
+## Functions
+
+### Hashing
+
+### `blake2b_224` {#blake2b_224}
+
+```aiken
+blake2b_224(bytes: ByteArray) -> Hash<Blake2b_224, a>
+```
+
+Compute the blake2b-224 hash digest (28 bytes) of some data.
+Minimum Plutus Version: 3
+
+### `blake2b_256` {#blake2b_256}
+
+```aiken
+blake2b_256(bytes: ByteArray) -> Hash<Blake2b_256, a>
+```
+
+Compute the blake2b-256 hash digest (32 bytes) of some data.
+
+### `keccak_256` {#keccak_256}
+
+```aiken
+keccak_256(bytes: ByteArray) -> Hash<Keccak_256, a>
+```
+
+Compute the keccak-256 hash digest (32 bytes) of some data.
+
+### `sha2_256` {#sha2_256}
+
+```aiken
+sha2_256(bytes: ByteArray) -> Hash<Sha2_256, a>
+```
+
+Compute the sha2-256 hash digest (32 bytes) of some data.
+
+### `sha3_256` {#sha3_256}
+
+```aiken
+sha3_256(bytes: ByteArray) -> Hash<Sha3_256, a>
+```
+
+Compute the sha3-256 hash digest (32 bytes) of some data.
+
+### Verifying signatures
+
+### `verify_ecdsa_signature` {#verify_ecdsa_signature}
+
+```aiken
+verify_ecdsa_signature(
+  key: VerificationKey,
+  msg: ByteArray,
+  sig: Signature,
+) -> Bool
+```
+
+Verify an ECDCA signature (over secp256k1) using the given verification key.
+Returns `True` when the signature is valid.
+
+### `verify_ed25519_signature` {#verify_ed25519_signature}
+
+```aiken
+verify_ed25519_signature(
+  key: VerificationKey,
+  msg: ByteArray,
+  sig: Signature,
+) -> Bool
+```
+
+Verify an Ed25519 signature using the given verification key.
+Returns `True` when the signature is valid.
+
+### `verify_schnorr_signature` {#verify_schnorr_signature}
+
+```aiken
+verify_schnorr_signature(
+  key: VerificationKey,
+  msg: ByteArray,
+  sig: Signature,
+) -> Bool
+```
+
+Verify a Schnorr signature (over secp256k1) using the given verification key.
+Returns `True` when the signature is valid.

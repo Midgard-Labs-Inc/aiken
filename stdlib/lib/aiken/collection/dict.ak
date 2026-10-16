@@ -1,16 +1,16 @@
 //// A module for working with bytearray dictionaries.
 ////
 ////
-//// > [!IMPORTANT]
-//// >
-//// > Dictionaries are **ordered sets** of key-value pairs, which thus
-//// > preserve some invariants. Specifically, each key is only present once in
-//// > the dictionary and all keys are stored in ascending lexicographic order.
-//// >
-//// > These invariants allow for more optimized functions to operate on `Dict`,
-//// > but as a trade-offs, prevent `Dict` from being serializable. To recover a `Dict`
-//// > from an unknown `Data`, you must first recover an `Pairs<k, v>` and use
-//// > [`dict.from_ascending_list`](#from_ascending_list).
+//// :::important
+//// Dictionaries are **ordered sets** of key-value pairs, which thus
+//// preserve some invariants. Specifically, each key is only present once in
+//// the dictionary and all keys are stored in ascending lexicographic order.
+////
+//// These invariants allow for more optimized functions to operate on `Dict`,
+//// but as a trade-offs, prevent `Dict` from being serializable. To recover a `Dict`
+//// from an unknown `Data`, you must first recover an `Pairs<k, v>` and use
+//// [`dict.from_ascending_list`](#from_ascending_list).
+//// :::
 
 use aiken/builtin
 use aiken/collection/dict/strategy.{InsertStrategy, UnionStrategy}
@@ -59,7 +59,7 @@ pub const empty: Dict<key, value> = Dict { inner: [] }
 /// This is meant to be used to turn a list constructed off-chain into a `Dict`
 /// which has taken care of maintaining interval invariants. This function still
 /// performs a sanity check on all keys to avoid silly mistakes. It is, however,
-/// considerably faster than ['from_pairs'](from_pairs)
+/// considerably faster than [`from_pairs`](#from_pairs)
 pub fn from_ascending_pairs(xs: Pairs<ByteArray, value>) -> Dict<key, value> {
   let Void = check_ascending_list(xs)
   Dict { inner: xs }

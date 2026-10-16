@@ -1,0 +1,566 @@
+---
+title: "aiken/fuzz/scenario"
+sidebar:
+  label: "scenario"
+---
+
+A testing framework for running valid and invalid scenarii on a validator. The
+framework instruments the generation and execution of arbitrarily generated test
+scenarii working at the transaction-level for maximum reproducibility.
+
+A full tutorial is coming soon. For now, see examples:
+
+- [pragma-org/amaru-treasury](https://github.com/pragma-org/amaru-treasury/blob/main/validators)
+- [mpizenberg/cardano-badges](https://github.com/mpizenberg/cardano-badges/tree/main/aiken-badges/validators/check_badges.tests.ak)
+- [cardanosolutions/zhuli](https://github.com/CardanoSolutions/zhuli/blob/main/validators/zhuli.test.ak)
+
+## Types
+
+### `Label` {#Label}
+
+#### Alias
+
+```aiken
+Label = String
+```
+
+### `MintHandler` {#MintHandler}
+
+#### Alias
+
+```aiken
+MintHandler = fn(Data, PolicyId, Transaction) -> Bool
+```
+
+### `Outcome` {#Outcome}
+
+#### Constructors
+
+```aiken
+Ok
+```
+
+```aiken
+Ko
+```
+
+### `PublishHandler` {#PublishHandler}
+
+#### Alias
+
+```aiken
+PublishHandler = fn(Data, Certificate, Transaction) -> Bool
+```
+
+### `Scenario<st>` {#Scenario}
+
+#### Constructors
+
+```aiken
+Done
+```
+
+```aiken
+Step(List<Label>, st, Transaction)
+```
+
+### `SpendHandler` {#SpendHandler}
+
+#### Alias
+
+```aiken
+SpendHandler = fn(Option<Data>, Data, OutputReference, Transaction) -> Bool
+```
+
+### `VoteHandler` {#VoteHandler}
+
+#### Alias
+
+```aiken
+VoteHandler = fn(Data, Voter, Transaction) -> Bool
+```
+
+### `WithdrawHandler` {#WithdrawHandler}
+
+#### Alias
+
+```aiken
+WithdrawHandler = fn(Data, Credential, Transaction) -> Bool
+```
+
+## Functions
+
+### Running
+
+### `run` {#run}
+
+```aiken
+run(
+  scenario: List<Transaction>,
+  script: ScriptHash,
+  mint: MintHandler,
+  spend: SpendHandler,
+  withdraw: WithdrawHandler,
+  publish: PublishHandler,
+  vote: VoteHandler,
+) -> Void
+```
+
+Run a given scenario for a given set of handlers. See also: [`ok`](#ok) and
+[`ko`](#ko) for generating scenarii.
+
+Any missing handler from the validator can be plucked using one of the following:
+
+- [`into_mint_handler`](#into_mint_handler)
+- [`into_spend_handler`](#into_spend_handler)
+- [`into_withdraw_handler`](#into_withdraw_handler)
+- [`into_publish_handler`](#into_publish_handler)
+- [`into_vote_handler`](#into_vote_handler)
+
+### `ko` {#ko}
+
+```aiken
+ko(
+  initial_state: st,
+  step: fn(st) -> Fuzzer<Scenario<st>>,
+) -> Fuzzer<(List<Label>, List<Transaction>)>
+```
+
+Generate only _K.O._ scenarii from an initial state and a stepping function.
+
+```aiken
+test prop_end_to_end_ko((labels, scenario) via scenario.ko(initial_state, step)) {
+  list.for_each(labels, fuzz.label)
+  scenario.run(
+    scenario,
+    my_script,
+    handlers.mint,
+    handlers.spend,
+    scenario.into_withdraw_handler(handlers.else),
+    scenario.into_publish_handler(handlers.else),
+    scenario.into_vote_handler(handlers.else),
+  )
+}
+```
+
+### `ok` {#ok}
+
+```aiken
+ok(
+  initial_state: st,
+  step: fn(st) -> Fuzzer<Scenario<st>>,
+) -> Fuzzer<List<Transaction>>
+```
+
+Generate only _O.K._ scenarii from an initial state and a stepping function.
+
+```aiken
+test prop_end_to_end_ok(scenario via scenario.ok(initial_state, step)) {
+  scenario.run(
+    scenario,
+    my_script,
+    handlers.mint,
+    handlers.spend,
+    scenario.into_withdraw_handler(handlers.else),
+    scenario.into_publish_handler(handlers.else),
+    scenario.into_vote_handler(handlers.else),
+  )
+}
+```
+
+### Inspecting
+
+### `report_coverage` {#report_coverage}
+
+```aiken
+report_coverage(
+  initial_state: st,
+  step: fn(st) -> Fuzzer<Scenario<st>>,
+) -> Fuzzer<Outcome>
+```
+
+A generator meant to analyze the scenario generator, to control that it is
+relatively well-balanced between O.K. and K.O. scenarios.
+
+```aiken
+test prop_scenario_coverage(
+  outcome via scenario.report_coverage(initial_state, step),
+) {
+  fuzz.label_when(outcome == scenario.Ok, @"O.K.", @"K.O.")
+}
+```
+
+### `check_coverage` {#check_coverage}
+
+```aiken
+check_coverage(labels: List<String>, fuzzer: Fuzzer<(List<String>, a)>) -> Void
+```
+
+Repeatedly run a K.O. scenario fuzzer to ensure that all labels eventually
+appear in scenarii. Fails after a while if it takes too long.
+
+```aiken
+const all_failures: List<String> = [ @"...", @"..." ]
+
+test ko_coverage() {
+  scenario.check_coverage(
+    all_failures,
+    scenario.ko(default_state, step)
+  )
+}
+```
+
+### `classify` {#classify}
+
+```aiken
+classify(labels: List<Label>, label: String, predicate: Bool) -> List<Label>
+```
+
+A helper for classifying scenarios based on some given predicates.
+
+```aiken
+[]
+  |> classify(
+      @"✓ more authorizations than necessary",
+      spent_badges_count + ref_badges_count > list.length(policies),
+    )
+  |> classify(
+      @"✓ at least one spent authorization",
+      spent_badges_count > 0,
+    )
+  |> classify(
+      @"✓ at least one reference authorization",
+      ref_badges_count > 0,
+    )
+  |> classify(
+      @"✓ more than one badge checked",
+      list.length(policies) > 1,
+    )
+  |> for_each(label)
+```
+
+#### Plumbing
+
+### `into_mint_handler` {#into_mint_handler}
+
+```aiken
+into_mint_handler(fallback: fn(ScriptContext) -> Bool) -> MintHandler
+```
+
+Turn a `else` handler into a [`MintHandler`](#MintHandler).
+
+### `into_spend_handler` {#into_spend_handler}
+
+```aiken
+into_spend_handler(fallback: fn(ScriptContext) -> Bool) -> SpendHandler
+```
+
+Turn a `else` handler into a [`SpendHandler`](#SpendHandler).
+
+### `into_withdraw_handler` {#into_withdraw_handler}
+
+```aiken
+into_withdraw_handler(fallback: fn(ScriptContext) -> Bool) -> WithdrawHandler
+```
+
+Turn a `else` handler into a [`WithdrawHandler`](#WithdrawHandler).
+
+### `into_publish_handler` {#into_publish_handler}
+
+```aiken
+into_publish_handler(fallback: fn(ScriptContext) -> Bool) -> PublishHandler
+```
+
+Turn a `else` handler into a [`PublishHandler`](#PublishHandler).
+
+### `into_vote_handler` {#into_vote_handler}
+
+```aiken
+into_vote_handler(fallback: fn(ScriptContext) -> Bool) -> VoteHandler
+```
+
+Turn a `else` handler into a [`VoteHandler`](#VoteHandler).
+
+### Fuzzing
+
+### `fork` {#fork}
+
+```aiken
+fork(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Fork between two scenarios using with a frequency proportional to the given
+pivot.
+
+The `pivot` must be value between $0$ and $255$ which represents the
+probability of NOT forking the baseline scenario into a branch.
+
+It needs to be high enough to have a high probability chance of
+generating valid scenarios despite many forks, but small enough that forks
+still occur. Use [`report_coverage`](#report_coverage) to analyze your scenarios
+and tweak the weights accordingly.
+
+Ideally, if $f$ is the total number of forks one wants:
+
+$$
+\frac{255 - pivot}{255}^{f} \approx 0.5
+$$
+
+### `fork_and_then` {#fork_and_then}
+
+```aiken
+fork_and_then(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork`](#fork), but take a continuation immediately. This is mostly a
+convenient way to avoid wrapping all calls to `.fork` inside `and_then(...)`.
+
+```aiken
+let (st, inputs) <- fork_and_then(
+  weights.scenario_input,
+  scenario_baseline(st),
+  scenario_inject_fault(st),
+)
+
+// equivalent to
+
+let (st, inputs) <- fuzz.and_then(fork(
+  weights.scenario_input,
+  scenario_baseline(st),
+  scenario_inject_fault(st),
+))
+```
+
+### `fork_if` {#fork_if}
+
+```aiken
+fork_if(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork`](#fork), but only forks if the `predicate` is `True`. Runs the
+`baseline` scenario otherwise.
+
+Useful to selectively fork into a scenario only when specific conditions are
+verified.
+
+### `fork_if_and_then` {#fork_if_and_then}
+
+```aiken
+fork_if_and_then(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_if`](#fork_if) but takes a continuation.
+
+See also [`fork_and_then`](#fork_and_then).
+
+### `fork2` {#fork2}
+
+```aiken
+fork2(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork2_and_then` {#fork2_and_then}
+
+```aiken
+fork2_and_then(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_and_then`](#fork_and_then), but allows multiple alternative
+scenarios with an equal probability.
+
+### `fork2_if` {#fork2_if}
+
+```aiken
+fork2_if(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork_if`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork2_if_and_then` {#fork2_if_and_then}
+
+```aiken
+fork2_if_and_then(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_if_and_then`](#fork_if_and_then), but allows multiple
+alternative scenarios with an equal probability.
+
+### `fork3` {#fork3}
+
+```aiken
+fork3(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork3_and_then` {#fork3_and_then}
+
+```aiken
+fork3_and_then(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_and_then`](#fork_and_then), but allows multiple alternative
+scenarios with an equal probability.
+
+### `fork3_if` {#fork3_if}
+
+```aiken
+fork3_if(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork_if`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork3_if_and_then` {#fork3_if_and_then}
+
+```aiken
+fork3_if_and_then(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_if_and_then`](#fork_if_and_then), but allows multiple
+alternative scenarios with an equal probability.
+
+### `fork4` {#fork4}
+
+```aiken
+fork4(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  branch4: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork4_and_then` {#fork4_and_then}
+
+```aiken
+fork4_and_then(
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  branch4: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_and_then`](#fork_and_then), but allows multiple alternative
+scenarios with an equal probability.
+
+### `fork4_if` {#fork4_if}
+
+```aiken
+fork4_if(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  branch4: fn() -> Fuzzer<a>,
+) -> Fuzzer<a>
+```
+
+Like [`fork_if`](#fork), but allows multiple alternative scenarios with an equal
+probability.
+
+### `fork4_if_and_then` {#fork4_if_and_then}
+
+```aiken
+fork4_if_and_then(
+  predicate: Bool,
+  pivot: Int,
+  baseline: fn() -> Fuzzer<a>,
+  branch1: fn() -> Fuzzer<a>,
+  branch2: fn() -> Fuzzer<a>,
+  branch3: fn() -> Fuzzer<a>,
+  branch4: fn() -> Fuzzer<a>,
+  continue: fn(a) -> Fuzzer<b>,
+) -> Fuzzer<b>
+```
+
+Like [`fork_if_and_then`](#fork_if_and_then), but allows multiple
+alternative scenarios with an equal probability.

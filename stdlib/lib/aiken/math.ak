@@ -17,6 +17,7 @@
 //// 40 / 14 // 2
 //// 3 * 4   // 12
 //// 10 % 3  // 1
+//// ```
 
 use aiken/builtin
 
@@ -218,8 +219,9 @@ pub fn pow2(e: Int) -> Int {
 /// math.sqrt(-42) == None
 /// ```
 ///
-/// > [!TIP]
-/// > This function can be quite expensive to perform on-chain. Prefer using [`is_sqrt`](#is_sqrt) whenever possible.
+/// :::tip
+/// This function can be quite expensive to perform on-chain. Prefer using [`is_sqrt`](#is_sqrt) whenever possible.
+/// :::
 pub fn sqrt(self: Int) -> Option<Int> {
   if self < 0 {
     None

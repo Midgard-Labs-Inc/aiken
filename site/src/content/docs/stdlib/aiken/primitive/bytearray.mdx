@@ -1,0 +1,394 @@
+---
+title: "aiken/primitive/bytearray"
+sidebar:
+  label: "bytearray"
+---
+
+## Types
+
+### `Byte` {#Byte}
+
+#### Alias
+
+```aiken
+Byte = Int
+```
+
+## Functions
+
+### Constructing
+
+### `from_int_big_endian` {#from_int_big_endian}
+
+```aiken
+from_int_big_endian(self: Int, size: Int) -> ByteArray
+```
+
+Encode an integer value as a Big-Endian (most-significant bytes first) `ByteArray`.
+The size is the expected size in number of bytes.
+
+:::important
+This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
+size is _too large_, the array is left-padded with zeroes.
+:::
+
+```aiken
+bytearray.from_int_big_endian(1_000_000, 3) == #"0f4240"
+bytearray.from_int_big_endian(1_000_000, 5) == #"00000f4240"
+bytearray.from_int_big_endian(0, 8) == #"0000000000000000"
+bytearray.from_int_big_endian(1_000_000, 1) → 💥
+```
+
+### `from_int_little_endian` {#from_int_little_endian}
+
+```aiken
+from_int_little_endian(self: Int, size: Int) -> ByteArray
+```
+
+Encode an integer value as a Little-Endian (least-significant bytes first) `ByteArray`.
+The size is the expected size in number of bytes.
+
+:::important
+This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
+size is _too large_, the array is right-padded with zeroes.
+:::
+
+```aiken
+bytearray.from_int_little_endian(1_000_000, 3) == #"40420f"
+bytearray.from_int_little_endian(1_000_000, 5) == #"40420f0000"
+bytearray.from_int_little_endian(0, 8) == #"0000000000000000"
+bytearray.from_int_little_endian(1_000_000, 1) → 💥
+```
+
+### `from_string` {#from_string}
+
+```aiken
+from_string(str: String) -> ByteArray
+```
+
+Convert a `String` into a `ByteArray`.
+
+```aiken
+bytearray.from_string(@"ABC") == #"414243"
+```
+
+### `replicate` {#replicate}
+
+```aiken
+replicate(length: Int, byte: Int) -> ByteArray
+```
+
+Replicate a byte a certain number of times.
+
+```aiken
+bytearray.replicate(10, 0) == #"00000000000000000000"
+bytearray.replicate(8193, 0) → 💥
+bytearray.replicate(3, 256) → 💥
+```
+
+:::caution
+This function fails (i.e. halts the program) the given 'byte' is out of
+bounds $[0, 255]$ or if the length is greater than $2^{13} = 8192$.
+:::
+
+### Inspecting
+
+### `at` {#at}
+
+```aiken
+at(self: ByteArray, index: Int) -> Byte
+```
+
+Get the `Byte` at the given index, or crash.
+
+:::caution
+This function fails (i.e. halts the program) if there's no byte at the given index.
+:::
+
+### `index_of` {#index_of}
+
+```aiken
+index_of(self: ByteArray, bytes: ByteArray) -> Option<(Int, Int)>
+```
+
+Search the start and end positions of a sub-array in a `ByteArray`.
+
+```aiken
+bytearray.index_of("Hello, World!", "World") == Some((7, 11))
+bytearray.index_of("Hello, World!", "foo") == None
+bytearray.index_of("Hello, World!", "!") == Some((12, 12))
+bytearray.index_of("Hello, World!", "o") == Some((4, 4))
+bytearray.index_of("Hello, World!", "Hello, World!") == Some((0, 12))
+```
+
+### `is_empty` {#is_empty}
+
+```aiken
+is_empty(self: ByteArray) -> Bool
+```
+
+Returns `True` when the given `ByteArray` is empty.
+
+```aiken
+bytearray.is_empty(#"") == True
+bytearray.is_empty(#"00ff") == False
+```
+
+### `length` {#length}
+
+```aiken
+length(self: ByteArray) -> Int
+```
+
+Returns the number of bytes in a `ByteArray`.
+
+```aiken
+bytearray.length(#[1, 2, 3]) == 3
+```
+
+### `test_bit` {#test_bit}
+
+```aiken
+test_bit(self: ByteArray, ix: Int) -> Bool
+```
+
+Checks whether a bit (Most-Significant-Bit first) is set in the given 'ByteArray'.
+
+For example, consider the following bytearray: `#"8b765f"`. It can also be written as the
+following bits sequence:
+
+`8`    | `b`    | `7`    | `6`    | `5`    | `f`
+---    | ---    | ---    | ---    | ---    | ---
+`1000` | `1011` | `0111` | `0110` | `0101` | `1111`
+
+And thus, we have:
+
+```aiken
+test_bit(#"8b765f", 0) == True
+test_bit(#"8b765f", 1) == False
+test_bit(#"8b765f", 2) == False
+test_bit(#"8b765f", 3) == False
+test_bit(#"8b765f", 7) == True
+test_bit(#"8b765f", 8) == False
+test_bit(#"8b765f", 20) == True
+test_bit(#"8b765f", 21) == True
+test_bit(#"8b765f", 22) == True
+test_bit(#"8b765f", 23) == True
+```
+
+### Modifying
+
+### `drop` {#drop}
+
+```aiken
+drop(self: ByteArray, n: Int) -> ByteArray
+```
+
+Returns the suffix of a `ByteArray` after `n` elements.
+
+```aiken
+bytearray.drop(#[1, 2, 3], n: 2) == #[3]
+```
+
+### `push` {#push}
+
+```aiken
+push(self: ByteArray, byte: Byte) -> ByteArray
+```
+
+Add a byte element in front of a `ByteArray`. When the given byte is
+greater than 255, it wraps-around. **PlutusV2 behavior** So 256 is mapped to 0, 257 to 1, and so
+forth.
+In PlutusV3 this will error instead of wrapping around.
+
+```aiken
+bytearray.push(#"", 0) == #"00"
+bytearray.push(#"0203", 1) == #"010203"
+bytearray.push(#"0203", 257) == #"010203"
+```
+
+### `slice` {#slice}
+
+```aiken
+slice(self: ByteArray, start: Int, end: Int) -> ByteArray
+```
+
+Extract a `ByteArray` as a slice of another `ByteArray`.
+
+Indexes are 0-based and inclusive.
+
+```aiken
+bytearray.slice(#[0, 1, 2, 3, 4, 5, 6], start: 1, end: 3) == #[1, 2, 3]
+```
+
+### `take` {#take}
+
+```aiken
+take(self: ByteArray, n: Int) -> ByteArray
+```
+
+Returns the n-length prefix of a `ByteArray`.
+
+```aiken
+bytearray.take(#[1, 2, 3], n: 2) == #[1, 2]
+```
+
+### Combining
+
+### `concat` {#concat}
+
+```aiken
+concat(left: ByteArray, right: ByteArray) -> ByteArray
+```
+
+Combine two `ByteArray` together.
+
+```aiken
+bytearray.concat(left: #[1, 2, 3], right: #[4, 5, 6]) == #[1, 2, 3, 4, 5, 6]
+```
+
+### `compare` {#compare}
+
+```aiken
+compare(left: ByteArray, right: ByteArray) -> Ordering
+```
+
+Compare two bytearrays lexicographically.
+
+```aiken
+bytearray.compare(#"00", #"FF") == Less
+bytearray.compare(#"42", #"42") == Equal
+bytearray.compare(#"FF", #"00") == Greater
+```
+
+### Transforming
+
+### `foldl` {#foldl}
+
+```aiken
+foldl(self: ByteArray, zero: result, with: fn(Int, result) -> result) -> result
+```
+
+Left-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+
+```aiken
+bytearray.foldl(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 44203
+bytearray.foldl(#[1, 2, 3], #"", flip(bytearray.push)) == #[3, 2, 1]
+```
+
+### `foldr` {#foldr}
+
+```aiken
+foldr(self: ByteArray, zero: result, with: fn(Int, result) -> result) -> result
+```
+
+Right-fold over bytes of a [`ByteArray`](https://aiken-lang.github.io/prelude/aiken.html#ByteArray). Note that every byte given to the callback function is comprised between 0 and 255.
+
+```aiken
+bytearray.foldr(#"acab", 0, fn(byte, acc) { acc * 256 + byte }) == 43948
+bytearray.foldr(#[1, 2, 3], #"", flip(bytearray.push)) == #[1, 2, 3]
+```
+
+### `reduce` {#reduce}
+
+```aiken
+reduce(self: ByteArray, zero: result, with: fn(result, Int) -> result) -> result
+```
+
+Reduce bytes in a ByteArray from left to right using the accumulator as left operand.
+Said differently, this is [`foldl`](#foldl) with callback arguments swapped.
+
+```aiken
+bytearray.reduce(#[1,2,3], #[], bytearray.push) == #[3, 2, 1]
+```
+
+### `to_int_big_endian` {#to_int_big_endian}
+
+```aiken
+to_int_big_endian(self: ByteArray) -> Int
+```
+
+Interpret a Big-Endian (most-significant bytes first) `ByteArray` as an `Int`.
+
+```aiken
+bytearray.to_int_big_endian(#"0f4240") == 1_000_000
+bytearray.to_int_big_endian(#"00000f4240") == 1_000_000
+bytearray.to_int_big_endian(#"0000000000000000") == 0
+```
+
+### `to_int_little_endian` {#to_int_little_endian}
+
+```aiken
+to_int_little_endian(self: ByteArray) -> Int
+```
+
+Interpret a Little-Endian (least-significant bytes first) `ByteArray` as an `Int`.
+
+```aiken
+bytearray.to_int_big_endian(#"40420f") == 1_000_000
+bytearray.to_int_big_endian(#"40420f0000") == 1_000_000
+bytearray.to_int_big_endian(#"0000000000000000") == 0
+```
+
+### `to_string` {#to_string}
+
+```aiken
+to_string(self: ByteArray) -> String
+```
+
+Convert a `ByteArray` into a `String`.
+
+:::caution
+This function fails (i.e. halts the program) if the underlying `ByteArray` isn't UTF-8-encoded. In particular, you cannot convert arbitrary hash digests using this function.
+
+For converting arbitrary `ByteArray`s, use [bytearray.to_hex](#to_hex).
+:::
+
+```aiken
+bytearray.to_string(#"414243") == "ABC"
+bytearray.to_string(some_hash) → 💥
+```
+
+### `to_hex` {#to_hex}
+
+```aiken
+to_hex(self: ByteArray) -> String
+```
+
+Encode a `ByteArray` as a hexidecimal `String`.
+
+```aiken
+bytearray.to_hex("Hello world!") == @"48656c6c6f20776f726c6421"
+```
+
+### `starts_with` {#starts_with}
+
+```aiken
+starts_with(self: ByteArray, prefix: ByteArray) -> Bool
+```
+
+Checks whether a `ByteArray` starts with a given prefix.
+
+```aiken
+bytearray.starts_with("Hello, World!", prefix: "Hello") == True
+bytearray.starts_with("", prefix: "") == True
+bytearray.starts_with("Hello", prefix: "Hello, World!") == False
+```
+
+### `and_bytes` {#and_bytes}
+
+```aiken
+and_bytes(left: ByteArray, right: ByteArray, pad_end: Bool) -> ByteArray
+```
+
+### `or_bytes` {#or_bytes}
+
+```aiken
+or_bytes(left: ByteArray, right: ByteArray, pad_end: Bool) -> ByteArray
+```
+
+### `xor_bytes` {#xor_bytes}
+
+```aiken
+xor_bytes(left: ByteArray, right: ByteArray, pad_end: Bool) -> ByteArray
+```

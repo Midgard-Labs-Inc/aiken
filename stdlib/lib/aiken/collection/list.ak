@@ -43,8 +43,9 @@ pub fn repeat(elem: a, n_times: Int) -> List<a> {
 
 /// Determine if all elements of the list satisfy the given predicate.
 ///
-/// > [!NOTE]
-/// > An empty list always satisfies the predicate.
+/// :::note
+/// An empty list always satisfies the predicate.
+/// :::
 ///
 /// ```aiken
 /// list.all([], fn(n) { n > 0 }) == True
@@ -60,8 +61,9 @@ pub fn all(self: List<a>, predicate: fn(a) -> Bool) -> Bool {
 
 /// Determine if at least one element of the list satisfies the given predicate.
 ///
-/// > [!NOTE]
-/// > An empty list NEVER satisfies the predicate.
+/// :::note
+/// An empty list NEVER satisfies the predicate.
+/// :::
 ///
 /// ```aiken
 /// list.any([], fn(n) { n > 2 }) == False
@@ -154,6 +156,7 @@ pub fn find(self: List<a>, predicate: fn(a) -> Bool) -> Option<a> {
 ///     None
 ///   }
 /// })
+/// ```
 pub fn find_map(
   self: List<a>,
   predicate: fn(a) -> Option<result>,
@@ -263,8 +266,9 @@ pub fn length(self: List<a>) -> Int {
 
 /// More efficient version of [`any`](#any), but fails if no element satisfies the predicate.
 ///
-/// > [!NOTE]
-/// > An empty list NEVER satisfies the predicate.
+/// :::note
+/// An empty list NEVER satisfies the predicate.
+/// :::
 ///
 /// ```aiken
 /// list.expect_any([], fn(n) { n > 2 }) → 💥
@@ -772,8 +776,9 @@ pub fn map(self: List<a>, with: fn(a) -> result) -> List<result> {
 
 /// Apply a function of two arguments, combining elements from two lists.
 ///
-/// > [!NOTE]
-/// > If one list is longer, the extra elements are dropped.
+/// :::note
+/// If one list is longer, the extra elements are dropped.
+/// :::
 ///
 /// ```aiken
 /// list.map2([1, 2, 3], [1, 2], fn(a, b) { a + b }) == [2, 4]
@@ -795,8 +800,9 @@ pub fn map2(
 
 /// Apply a function of three arguments, combining elements from three lists.
 ///
-/// > [!NOTE]
-/// > If one list is longer, the extra elements are dropped.
+/// :::note
+/// If one list is longer, the extra elements are dropped.
+/// :::
 ///
 /// ```aiken
 /// list.map3([1, 2, 3], [1, 2], [1, 2, 3], fn(a, b, c) { a + b + c }) == [3, 6]
@@ -904,8 +910,9 @@ pub fn difference(self: List<a>, with: List<a>) -> List<a> {
 
 /// Combine two lists together.
 ///
-/// > [!NOTE]
-/// > If one list is longer, the extra elements are dropped.
+/// :::note
+/// If one list is longer, the extra elements are dropped.
+/// :::
 ///
 /// ```aiken
 /// list.zip([1, 2], ["a", "b", "c"]) == [(1, "a"), (2, "b")]
@@ -943,8 +950,9 @@ pub type Fold2<a, b, result> =
 /// Reduce a list from left to right, while accumulating two results. This is
 /// faster (albeit equivalent) than accumulating both results in a `Pair` or tuple.
 ///
-/// > [!TIP]
-/// > Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// :::tip
+/// Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// :::
 ///
 /// ```aiken
 /// let len, sum <-
@@ -992,8 +1000,9 @@ pub fn foldr(self: List<a>, zero: b, with: fn(a, b) -> b) -> b {
 /// Reduce a list from right to left, while accumulating two results. This is
 /// faster (albeit equivalent) than accumulating both results in a `Pair` or tuple.
 ///
-/// > [!TIP]
-/// > Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// :::tip
+/// Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// :::
 ///
 /// ```aiken
 /// let len, sum <-

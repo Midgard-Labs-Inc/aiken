@@ -1,0 +1,300 @@
+---
+title: "cardano/transaction"
+sidebar:
+  label: "transaction"
+  group:
+    label: "transaction"
+---
+
+## Types
+
+### `Datum` {#Datum}
+
+An output `Datum`.
+
+#### Constructors
+
+```aiken
+NoDatum
+```
+
+```aiken
+DatumHash(DataHash)
+```
+
+A datum referenced by its hash digest.
+
+```aiken
+InlineDatum(Data)
+```
+
+A datum completely inlined in the output.
+
+### `Input` {#Input}
+
+An `Input` made of an output reference and, the resolved value associated with that output.
+
+#### Constructors
+
+```aiken
+Input { output_reference: OutputReference, output: Output }
+```
+
+### `Output` {#Output}
+
+A transaction `Output`, with an address, a value and optional datums and script references.
+
+#### Constructors
+
+```aiken
+Output {
+  address: Address,
+  value: Assets,
+  datum: Datum,
+  reference_script: Option<ScriptHash>,
+}
+```
+
+### `OutputReference` {#OutputReference}
+
+An `OutputReference` is a unique reference to an output on-chain. The `output_index`
+corresponds to the position in the output list of the transaction (identified by its id)
+that produced that output
+
+#### Constructors
+
+```aiken
+OutputReference {
+  transaction_id: Hash<Blake2b_256, Transaction>,
+  output_index: Int,
+}
+```
+
+### `Redeemer` {#Redeemer}
+
+A type-alias for Redeemers, passed to scripts for validation. The `Data` is
+opaque because it is user-defined and it is the script's responsibility to
+parse it into its expected form.
+
+#### Alias
+
+```aiken
+Redeemer = Data
+```
+
+### `ScriptPurpose` {#ScriptPurpose}
+
+Characterizes the script purpose.
+
+#### Constructors
+
+```aiken
+Mint(PolicyId)
+```
+
+For scripts executed as minting/burning policies, to insert
+or remove assets from circulation. It's parameterized by the identifier
+of the associated policy.
+
+```aiken
+Spend(OutputReference)
+```
+
+For scripts that are used as payment credentials for addresses in
+transaction outputs. They govern the rule by which the output they
+reference can be spent.
+
+```aiken
+Withdraw(Credential)
+```
+
+For scripts that validate reward withdrawals from a reward account.
+
+The argument identifies the target reward account.
+
+```aiken
+Publish { at: Index, certificate: Certificate }
+```
+
+Needed when delegating to a pool using stake credentials defined as a
+custom script. This purpose is also triggered when de-registering such
+stake credentials.
+
+The Int is a 0-based index of the given `Certificate` in `certificates`.
+
+```aiken
+Vote(Voter)
+```
+
+Voting for a type of voter using a governance action id to vote
+yes / no / abstain inside a transaction.
+
+The voter is who is doing the governance action.
+
+```aiken
+Propose { at: Index, proposal_procedure: ProposalProcedure }
+```
+
+Used to propose a governance action.
+
+A 0-based index of the given `ProposalProcedure` in `proposal_procedures`.
+
+### `Transaction` {#Transaction}
+
+A Cardano `Transaction`, as seen by on-chain scripts.
+
+Note that this is a representation of a transaction, and not the 1:1
+translation of the transaction as seen by the ledger. In particular,
+on-chain scripts can't see inputs locked by bootstrap addresses, outputs
+to bootstrap addresses or just transaction metadata.
+
+#### Constructors
+
+```aiken
+Transaction {
+  inputs: List<Input>,
+  reference_inputs: List<Input>,
+  outputs: List<Output>,
+  fee: Lovelace,
+  mint: Assets,
+  certificates: List<Certificate>,
+  withdrawals: Pairs<Credential, Lovelace>,
+  validity_range: ValidityRange,
+  extra_signatories: List<VerificationKeyHash>,
+  redeemers: Pairs<ScriptPurpose, Redeemer>,
+  datums: Dict<DataHash, Data>,
+  id: TransactionId,
+  votes: Pairs<Voter, Pairs<GovernanceActionId, Vote>>,
+  proposal_procedures: List<ProposalProcedure>,
+  current_treasury_amount: Option<Lovelace>,
+  treasury_donation: Option<Lovelace>,
+}
+```
+
+#### `.withdrawals`
+:::important
+Withdrawals are ordered by ascending [Credential](/stdlib/cardano/address/#Credential). Yet, note that [`Script`](/stdlib/cardano/address/#Credential) credentials are treated as **lower values** than [`VerificationKey`](/stdlib/cardano/address/#Credential) credentials.
+:::
+<hr/>
+
+#### `.redeemers`
+:::important
+Redeemers are ordered by ascending [ScriptPurpose](#ScriptPurpose), following the internal ledger's ordering of script purposes: [`Spend`](#ScriptPurpose) \< [`Mint`](#ScriptPurpose) \< [`Publish`](#ScriptPurpose) \< [`Withdraw`](#ScriptPurpose) \< [`Vote`](#ScriptPurpose) \< [`Propose`](#ScriptPurpose). Note that this ordering **differs from the constructor order** of [ScriptPurpose](#ScriptPurpose); see [script_purpose.compare](/stdlib/cardano/transaction/script_purpose/#compare).
+:::
+<hr/>
+
+#### `.votes`
+:::important
+Votes are ordered by ascending [Voter](/stdlib/cardano/governance/#Voter) and [GovernanceActionId](/stdlib/cardano/governance/#GovernanceActionId).<br/>First constructor variants in a type are treated as lower indices; except for [Credential](/stdlib/cardano/address/#Credential) where [`Script`](/stdlib/cardano/address/#Credential) credentials are treated as **lower values** than [`VerificationKey`](/stdlib/cardano/address/#Credential) credentials.
+:::
+<hr/>
+
+### `TransactionId` {#TransactionId}
+
+#### Alias
+
+```aiken
+TransactionId = Hash<Blake2b_256, Transaction>
+```
+
+### `ValidityRange` {#ValidityRange}
+
+An interval of POSIX time, measured in **number of milliseconds** since 1970-01-01T00:00:00Z.
+
+#### Alias
+
+```aiken
+ValidityRange = Interval
+```
+
+## Constants
+
+### `placeholder` {#placeholder}
+
+```aiken
+placeholder: Transaction
+```
+
+A placeholder / empty `Transaction` to serve as a base in a transaction
+builder. This is particularly useful for constructing test transactions.
+
+Every field is empty or null, and we have in particular:
+
+```aiken
+use aiken/interval
+
+transaction.placeholder.id ==
+  #"0000000000000000000000000000000000000000000000000000000000000000"
+
+transaction.placeholder.validity_range == interval.everything
+```
+
+## Functions
+
+### Querying
+
+### `find_input` {#find_input}
+
+```aiken
+find_input(
+  inputs: List<Input>,
+  output_reference: OutputReference,
+) -> Option<Input>
+```
+
+Find an input by its [`OutputReference`](#OutputReference). This is typically used in
+combination with the `Spend` [`ScriptPurpose`](#ScriptPurpose) to find a script's own
+input.
+
+```aiken
+validator {
+  spend(datum, redeemer, my_output_reference, self) {
+    expect Some(input) =
+      self.inputs |> transaction.find_input(my_output_reference)
+  }
+}
+```
+
+### `resolve_input` {#resolve_input}
+
+```aiken
+resolve_input(inputs: List<Input>, output_reference: OutputReference) -> Output
+```
+
+Find the output corresponding to an output reference in a list of inputs.
+**Fails** when no matching output is found.
+
+```aiken
+validator {
+  spend(datum, redeemer, my_output_reference, self) {
+    let output =
+      self.inputs |> transaction.resolve_input(my_output_reference)
+  }
+}
+```
+
+### `find_datum` {#find_datum}
+
+```aiken
+find_datum(
+  outputs: List<Output>,
+  datums: Dict<DataHash, Data>,
+  datum_hash: DataHash,
+) -> Option<Data>
+```
+
+Find a [`Datum`](#Datum) by its hash, if present. The function looks first for
+datums in the witness set, and then for inline datums if it doesn't find any in
+witnesses.
+
+### `find_script_outputs` {#find_script_outputs}
+
+```aiken
+find_script_outputs(
+  outputs: List<Output>,
+  script_hash: ScriptHash,
+) -> List<Output>
+```
+
+Find all outputs that are paying into the given script hash, if any. This is useful for
+contracts running over multiple transactions.

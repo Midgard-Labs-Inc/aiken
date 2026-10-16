@@ -1,14 +1,15 @@
 //// This module contains utilities for manually dealing with [`ScriptContext`](#ScriptContext). This is only ever useful for writing custom `else` handlers in validators.
 ////
-//// > [!NOTE]
-//// > Unless you know what you're doing, you should prefer using named handlers:
-//// >
-//// > - `mint`
-//// > - `spend`
-//// > - `withdraw`
-//// > - `publish`
-//// > - `vote`
-//// > - `propose`
+//// :::note
+//// Unless you know what you're doing, you should prefer using named handlers:
+////
+//// - `mint`
+//// - `spend`
+//// - `withdraw`
+//// - `publish`
+//// - `vote`
+//// - `propose`
+//// :::
 
 use aiken/collection.{Index}
 use cardano/address.{Credential}

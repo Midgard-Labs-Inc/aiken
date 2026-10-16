@@ -31,9 +31,10 @@ pub const zero: Value = {}
 /// value.from_assets(assets.from_asset("", bytearray.replicate(33, 0))) → 💥
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails if any policy id or asset name is longer than 32
-/// > bytes, or if any quantity falls outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::caution
+/// This function fails if any policy id or asset name is longer than 32
+/// bytes, or if any quantity falls outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::
 pub fn from_assets(assets: Assets) -> Value {
   builtin.un_value_data(assets)
 }
@@ -54,10 +55,11 @@ pub fn from_assets(assets: Assets) -> Value {
 /// value.from_data([Pair(my_policy, [Pair("foo", 1), Pair("foo", 1)])]) → 💥
 /// ```
 ///
-/// > [!CAUTION]
-/// > A correctly shaped value still fails if it has unsorted or duplicate
-/// > keys, empty token maps, zero quantities, keys longer than 32 bytes, or
-/// > quantities outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::caution
+/// A correctly shaped value still fails if it has unsorted or duplicate
+/// keys, empty token maps, zero quantities, keys longer than 32 bytes, or
+/// quantities outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::
 pub fn from_data(assets: Data) -> Option<Value> {
   if assets is Pairs<PolicyId, Pairs<AssetName, Int>> {
     Some(builtin.un_value_data(assets))
@@ -76,11 +78,12 @@ pub fn from_data(assets: Data) -> Option<Value> {
 /// // All other failing cases from `from_data` still apply.
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails for malformed or non-canonical data. In particular,
-/// > keys must be strictly sorted and no token map or quantity may be empty or
-/// > zero. Keys are limited to 32 bytes and quantities to signed 128-bit
-/// > integers.
+/// :::caution
+/// This function fails for malformed or non-canonical data. In particular,
+/// keys must be strictly sorted and no token map or quantity may be empty or
+/// zero. Keys are limited to 32 bytes and quantities to signed 128-bit
+/// integers.
+/// :::
 pub fn expect_from_data(assets: Data) -> Value {
   builtin.un_value_data(assets)
 }
@@ -106,8 +109,9 @@ pub fn expect_from_data(assets: Data) -> Value {
 /// value.contains({ policy_a: { "token": -1 } }, {}) → 💥
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails if either value contains a negative quantity.
+/// :::caution
+/// This function fails if either value contains a negative quantity.
+/// :::
 pub fn contains(self: Value, other: Value) -> Bool {
   builtin.contains_value(self, other)
 }
@@ -148,10 +152,11 @@ pub fn lovelace_of(self: Value) -> Int {
 /// value.policies({ lovelace: 42 }) == [ada_policy_id]
 /// ```
 ///
-/// > [!IMPORTANT]
-/// > This function is expensive and converts the entire `Value` to `Data`. It
-/// > is more expensive than direct inspection functions and fails for values
-/// > with more than ~40,000 assets.
+/// :::important
+/// This function is expensive and converts the entire `Value` to `Data`. It
+/// is more expensive than direct inspection functions and fails for values
+/// with more than ~40,000 assets.
+/// :::
 pub fn policies(self: Value) -> List<PolicyId> {
   expect assets: Pairs<PolicyId, Data> = to_data(self)
   list.map(assets, builtin.fst_pair)
@@ -198,14 +203,16 @@ pub fn delete(self: Value, policy_id: PolicyId, asset_name: AssetName) -> Value 
 /// (my_value |> value.insert("a", "token", 14) |> value.quantity_of("a", "token")) == 14
 /// ```
 ///
-/// > [!IMPORTANT]
-/// > Unlike [`assets.add`](./assets.html#add), this function replaces an
-/// > existing quantity instead of adding to it. Use [`merge`](#merge) to add
-/// > quantities from two values.
+/// :::important
+/// Unlike [`assets.add`](./assets.html#add), this function replaces an
+/// existing quantity instead of adding to it. Use [`merge`](#merge) to add
+/// quantities from two values.
+/// :::
 ///
-/// > [!CAUTION]
-/// > This function fails when inserting a key longer than 32 bytes or a
-/// > quantity outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::caution
+/// This function fails when inserting a key longer than 32 bytes or a
+/// quantity outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::
 pub fn insert(
   self: Value,
   policy_id: PolicyId,
@@ -225,8 +232,9 @@ pub fn insert(
 /// value.negate({ lovelace: min_quantity }) → 💥
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails when negating the minimum signed 128-bit quantity.
+/// :::caution
+/// This function fails when negating the minimum signed 128-bit quantity.
+/// :::
 pub fn negate(self: Value) -> Value {
   scale(self, -1)
 }
@@ -248,9 +256,10 @@ pub fn negate(self: Value) -> Value {
 /// value.restricted_to(my_value, [#"cccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]) == {}
 /// ```
 ///
-/// > [!IMPORTANT]
-/// > This function is expensive, for it traverses and rebuilds the entire
-/// > `Value`. It fails for values with more than ~40,000 assets.
+/// :::important
+/// This function is expensive, for it traverses and rebuilds the entire
+/// `Value`. It fails for values with more than ~40,000 assets.
+/// :::
 pub fn restricted_to(self: Value, mask: List<PolicyId>) -> Value {
   reduce(
     self,
@@ -274,9 +283,10 @@ pub fn restricted_to(self: Value, mask: List<PolicyId>) -> Value {
 /// value.scale(any_value, -1) == value.negate(any_value)
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails if a resulting quantity falls outside the signed
-/// > 128-bit range.
+/// :::caution
+/// This function fails if a resulting quantity falls outside the signed
+/// 128-bit range.
+/// :::
 pub fn scale(self: Value, factor: Int) -> Value {
   builtin.scale_value(factor, self)
 }
@@ -314,9 +324,10 @@ pub fn without_lovelace(self: Value) -> Value {
 /// }
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails if negation or subtraction produces a quantity
-/// > outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::caution
+/// This function fails if negation or subtraction produces a quantity
+/// outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::
 pub fn difference(left: Value, right: Value) -> Value {
   builtin.union_value(left, builtin.scale_value(-1, right))
 }
@@ -342,8 +353,9 @@ pub fn difference(left: Value, right: Value) -> Value {
 /// }
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails if a sum falls outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::caution
+/// This function fails if a sum falls outside of the interval $[-2^{127},2^{127}-1]$.
+/// :::
 pub fn merge(left: Value, right: Value) -> Value {
   builtin.union_value(left, right)
 }
@@ -358,9 +370,10 @@ pub fn merge(left: Value, right: Value) -> Value {
 /// value.reduce(assets, 0, fn(_, _, quantity, total) { quantity + total }) == 42
 /// ```
 ///
-/// > [!IMPORTANT]
-/// > This function converts the entire `Value` to `Data` before traversing it,
-/// > and fails for values with more than ~40,000 assets.
+/// :::important
+/// This function converts the entire `Value` to `Data` before traversing it,
+/// and fails for values with more than ~40,000 assets.
+/// :::
 pub fn reduce(
   self: Value,
   start: result,
@@ -387,8 +400,9 @@ pub fn reduce(
 /// value.to_data({ lovelace: 42 }) == [Pair(#"", [Pair(#"", 42)])]
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails for values with more than ~40,000 assets.
+/// :::caution
+/// This function fails for values with more than ~40,000 assets.
+/// :::
 pub fn to_data(self: Value) -> Data {
   builtin.value_data(self)
 }
@@ -401,9 +415,10 @@ pub fn to_data(self: Value) -> Data {
 /// value.to_pairs(value.insert({}, "a", "token", 42)) == [Pair("a", Pair("token", 42))]
 /// ```
 ///
-/// > [!IMPORTANT]
-/// > This function converts the entire `Value` to `Data`. It is relatively
-/// > expensive and fails for values with more than ~40,000 assets.
+/// :::important
+/// This function converts the entire `Value` to `Data`. It is relatively
+/// expensive and fails for values with more than ~40,000 assets.
+/// :::
 pub fn to_pairs(self: Value) -> Pairs<PolicyId, Pairs<AssetName, Int>> {
   expect assets: Pairs<PolicyId, Pairs<AssetName, Int>> = to_data(self)
   assets

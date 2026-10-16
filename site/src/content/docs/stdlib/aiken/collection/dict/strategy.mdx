@@ -1,0 +1,218 @@
+---
+title: "aiken/collection/dict/strategy"
+sidebar:
+  label: "strategy"
+---
+
+This module contains strategies used to transform [`Dict`](/stdlib/aiken/collection/dict/#Dict). You can safely ignore this module if you aren't using [`union_with`](/stdlib/aiken/collection/dict/#union_with) nor [`insert_with`](/stdlib/aiken/collection/dict/#insert_with).
+
+## Types
+
+### `DiscardValue<key, value>` {#DiscardValue}
+
+A callback to discard a value at a given key
+
+#### Alias
+
+```aiken
+DiscardValue<key, value> = fn() -> Pairs<key, value>
+```
+
+### `InsertStrategy<key, value>` {#InsertStrategy}
+
+A strategy for inserting a value from a dictionary into another.
+
+#### Alias
+
+```aiken
+InsertStrategy<key, value> = fn(
+    key,
+    value,
+    KeepValue<key, value>,
+    DiscardValue<key, value>,
+  ) ->
+    Pairs<key, value>
+```
+
+### `KeepValue<key, value>` {#KeepValue}
+
+A callback to keep a combined value at a given key
+
+#### Alias
+
+```aiken
+KeepValue<key, value> = fn(value) -> Pairs<key, value>
+```
+
+### `UnionStrategy<key, value>` {#UnionStrategy}
+
+A strategy for combining two values in a dictionary that belong to the same key.
+
+#### Alias
+
+```aiken
+UnionStrategy<key, value> = fn(
+    key,
+    value,
+    value,
+    KeepValue<key, value>,
+    DiscardValue<key, value>,
+  ) ->
+    Pairs<key, value>
+```
+
+## Functions
+
+#### Insert Strategies
+
+### `discard` {#discard}
+
+```aiken
+discard() -> InsertStrategy<key, value>
+```
+
+Discard the value
+
+```aiken
+fn(_key, _right, _keep, discard) { discard() }
+```
+
+### `keep` {#keep}
+
+```aiken
+keep() -> InsertStrategy<key, value>
+```
+
+Keep and insert the value.
+
+```aiken
+fn(_key, right, keep, _discard) { keep(right) }
+```
+
+### `negate` {#negate}
+
+```aiken
+negate() -> InsertStrategy<key, Int>
+```
+
+Keep the value and negate it, effectively treating the left-side as `0`.
+
+```aiken
+fn(_key, right, keep, _discard) { keep(-right) }
+```
+
+### `never` {#never}
+
+```aiken
+never() -> InsertStrategy<ByteArray, value>
+```
+
+A strategy which always fail, indicating that values should always be present
+on the left dictionary.
+
+```aiken
+fn(_key, _right, _keep, _discard) { fail }
+```
+
+#### Union Strategies
+
+### `difference` {#difference}
+
+```aiken
+difference() -> UnionStrategy<key, Int>
+```
+
+Combine values by taking their difference.
+
+```aiken
+fn(_key, left, right, keep, _discard) { keep(left - right) }
+```
+
+### `difference_if_non_zero` {#difference_if_non_zero}
+
+```aiken
+difference_if_non_zero() -> UnionStrategy<key, Int>
+```
+
+Keep the resulting difference only if it's non zero; otherwise discard the key entirely.
+
+```aiken
+fn(_key, left, right, keep, discard) {
+  let value = left - right
+  if value != 0 {
+    keep(value)
+  } else {
+    discard()
+  }
+}
+```
+
+### `expect_no_duplicate` {#expect_no_duplicate}
+
+```aiken
+expect_no_duplicate() -> UnionStrategy<ByteArray, value>
+```
+
+A strategy which always fail, enforcing the dict contains no duplicate.
+
+```aiken
+fn(_, _, _, _, _) {
+  fail @"unexpected duplicate key found in dict."
+}
+```
+
+### `keep_left` {#keep_left}
+
+```aiken
+keep_left() -> UnionStrategy<key, value>
+```
+
+Combine values by keeping the values present in the left-most dict.
+
+```aiken
+fn(_key, left, _right, keep, _discard) { keep(left) }
+```
+
+### `keep_right` {#keep_right}
+
+```aiken
+keep_right() -> UnionStrategy<key, value>
+```
+
+Combine values by keeping the values present in the right-most dict.
+
+```aiken
+fn(_key, _left, right, keep, _discard) { keep(right) }
+```
+
+### `sum` {#sum}
+
+```aiken
+sum() -> UnionStrategy<key, Int>
+```
+
+Combine values by taking their sum.
+
+```aiken
+fn(_key, left, right, keep, _discard) { keep(left + right) }
+```
+
+### `sum_if_non_zero` {#sum_if_non_zero}
+
+```aiken
+sum_if_non_zero() -> UnionStrategy<key, Int>
+```
+
+Combine values by taking their sum, only if it is non-null. If the
+resulting sum is 0, discard the key/value entirely.
+
+```aiken
+fn(_key, left, right, keep, discard) {
+  let value = left + right
+  if value == 0 {
+    discard()
+  } else {
+    keep(value)
+  }
+}
+```

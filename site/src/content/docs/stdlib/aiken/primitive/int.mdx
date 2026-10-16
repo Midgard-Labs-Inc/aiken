@@ -1,0 +1,82 @@
+---
+title: "aiken/primitive/int"
+sidebar:
+  label: "int"
+---
+
+## Functions
+
+### Combining
+
+### `compare` {#compare}
+
+```aiken
+compare(left: Int, right: Int) -> Ordering
+```
+
+Compare two integers.
+
+```aiken
+int.compare(14, 42) == Less
+int.compare(14, 14) == Equal
+int.compare(42, 14) == Greater
+```
+
+### Transforming
+
+### `from_bytearray_big_endian` {#from_bytearray_big_endian}
+
+```aiken
+from_bytearray_big_endian(self: ByteArray) -> Int
+```
+
+Interpret a Big-Endian (most-significant bytes first) `ByteArray` as an `Int`.
+
+```aiken
+int.from_bytearray_big_endian(#"0f4240") == 1_000_000
+int.from_bytearray_big_endian(#"00000f4240") == 1_000_000
+int.from_bytearray_big_endian(#"0000000000000000") == 0
+```
+
+### `from_bytearray_little_endian` {#from_bytearray_little_endian}
+
+```aiken
+from_bytearray_little_endian(self: ByteArray) -> Int
+```
+
+Interpret a Little-Endian (least-significant bytes first) `ByteArray` as an `Int`.
+
+```aiken
+int.from_bytearray_little_endian(#"40420f") == 1_000_000
+int.from_bytearray_little_endian(#"40420f0000") == 1_000_000
+int.from_bytearray_little_endian(#"0000000000000000") == 0
+```
+
+### `from_utf8` {#from_utf8}
+
+```aiken
+from_utf8(bytes: ByteArray) -> Option<Int>
+```
+
+Parse an integer from a utf-8 encoded `ByteArray`, when possible.
+
+```aiken
+int.from_utf8("14") == Some(14)
+int.from_utf8("-42") == Some(-42)
+int.from_utf8("007") == Some(7)
+int.from_utf8("foo") == None
+int.from_utf8("1.0") == None
+int.from_utf8("1-2") == None
+```
+
+### `to_string` {#to_string}
+
+```aiken
+to_string(n: Int) -> String
+```
+
+Convert an `Int` to its `String` representation.
+
+```aiken
+int.to_string(42) == @"42"
+```

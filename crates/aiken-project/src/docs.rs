@@ -27,7 +27,17 @@ const MAX_COLUMNS: isize = 80;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod link_tree;
+pub mod mdx;
 pub mod source_links;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Format {
+    /// A standalone static website.
+    #[default]
+    Html,
+    /// MDX pages for a Nimbus documentation site, mounted at `base` (e.g. `/stdlib`).
+    Markdown { base: String },
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DocFile {
@@ -169,86 +179,29 @@ fn generate_module(
 
     let source_linker = source_links::SourceLinker::new(root, config, module);
 
-    // Section headers
-    let mut section_headers = module
-        .extra
-        .comments
-        .iter()
-        .filter_map(|span| {
-            let comment = Comment::from((span, module.code.as_str()))
-                .content
-                .trim_start();
-            if comment.starts_with('#') {
-                let trimmed = comment.trim_start_matches('#');
-                let heading = comment.len() - trimmed.len();
-                Some((
-                    span,
-                    DocSection {
-                        heading,
-                        title: trimmed.trim_start().to_string(),
-                    },
-                ))
-            } else {
-                None
-            }
-        })
-        .collect_vec();
+    let ModuleMembers {
+        functions: functions_and_headers,
+        types,
+        constants,
+    } = ModuleMembers::new(module, &source_linker);
 
-    // Functions
-    let functions: Vec<(Span, DocFunction)> = module
-        .ast
-        .definitions
-        .iter()
-        .flat_map(|def| DocFunction::from_definition(def, &source_linker))
-        .collect();
-
-    functions.iter().for_each(|(_, function)| {
-        search_indexes.push(SearchIndex::from_function(module, function))
+    functions_and_headers.iter().for_each(|item| {
+        if let Interspersed::Function(function) = item {
+            search_indexes.push(SearchIndex::from_function(module, function))
+        }
     });
 
-    let no_functions = functions.is_empty();
-
-    let mut functions_and_headers = Vec::new();
-
-    for (span_fn, function) in functions {
-        let mut to_remove = vec![];
-        for (ix, (span_h, header)) in section_headers.iter().enumerate() {
-            if span_h.start < span_fn.start {
-                functions_and_headers.push(Interspersed::Section(header.clone()));
-                to_remove.push(ix);
-            }
-        }
-
-        for ix in to_remove.iter().rev() {
-            section_headers.remove(*ix);
-        }
-
-        functions_and_headers.push(Interspersed::Function(function))
-    }
-
-    // Types
-    let types: Vec<DocType> = module
-        .ast
-        .definitions
-        .iter()
-        .flat_map(|def| DocType::from_definition(def, &source_linker))
-        .sorted()
-        .collect();
     types
         .iter()
         .for_each(|type_info| search_indexes.push(SearchIndex::from_type(module, type_info)));
 
-    // Constants
-    let constants: Vec<DocConstant> = module
-        .ast
-        .definitions
-        .iter()
-        .flat_map(|def| DocConstant::from_definition(def, &source_linker))
-        .sorted()
-        .collect();
     constants
         .iter()
         .for_each(|constant| search_indexes.push(SearchIndex::from_constant(module, constant)));
+
+    let no_functions = !functions_and_headers
+        .iter()
+        .any(|item| matches!(item, Interspersed::Function(..)));
 
     let is_empty = no_functions && types.is_empty() && constants.is_empty();
 
@@ -407,21 +360,24 @@ fn generate_readme(
     }
 }
 
+/// Whether a module gets a documentation page: it isn't hidden and has public definitions.
+fn is_documented(module: &CheckedModule) -> bool {
+    !module.skip_doc_generation()
+        && module.ast.definitions.iter().any(|def| {
+            matches!(
+                def,
+                Definition::Fn(Function { public: true, .. })
+                    | Definition::DataType(DataType { public: true, .. })
+                    | Definition::TypeAlias(TypeAlias { public: true, .. })
+                    | Definition::ModuleConstant(ModuleConstant { public: true, .. })
+            )
+        })
+}
+
 fn generate_modules_links(modules: &[&CheckedModule]) -> Vec<DocLink> {
     let non_empty_modules = modules
         .iter()
-        .filter(|module| {
-            !module.skip_doc_generation()
-                && module.ast.definitions.iter().any(|def| {
-                    matches!(
-                        def,
-                        Definition::Fn(Function { public: true, .. })
-                            | Definition::DataType(DataType { public: true, .. })
-                            | Definition::TypeAlias(TypeAlias { public: true, .. })
-                            | Definition::ModuleConstant(ModuleConstant { public: true, .. })
-                    )
-                })
-        })
+        .filter(|module| is_documented(module))
         .sorted_by(|a, b| a.name.cmp(&b.name))
         .collect_vec();
 
@@ -490,6 +446,93 @@ impl SearchIndex {
             title: module.name.to_string(),
             content: module.ast.docs.iter().join("\n"),
             url: format!("{}.html", module.name),
+        }
+    }
+}
+
+/// A module's documented members: functions (interspersed with the module's section
+/// headers), types and constants.
+struct ModuleMembers {
+    functions: Vec<Interspersed>,
+    types: Vec<DocType>,
+    constants: Vec<DocConstant>,
+}
+
+impl ModuleMembers {
+    fn new(module: &CheckedModule, source_linker: &source_links::SourceLinker) -> Self {
+        // Section headers
+        let mut section_headers = module
+            .extra
+            .comments
+            .iter()
+            .filter_map(|span| {
+                let comment = Comment::from((span, module.code.as_str()))
+                    .content
+                    .trim_start();
+                if comment.starts_with('#') {
+                    let trimmed = comment.trim_start_matches('#');
+                    let heading = comment.len() - trimmed.len();
+                    Some((
+                        span,
+                        DocSection {
+                            heading,
+                            title: trimmed.trim_start().to_string(),
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        // Functions
+        let functions: Vec<(Span, DocFunction)> = module
+            .ast
+            .definitions
+            .iter()
+            .flat_map(|def| DocFunction::from_definition(def, source_linker))
+            .collect();
+
+        let mut functions_and_headers = Vec::new();
+
+        for (span_fn, function) in functions {
+            let mut to_remove = vec![];
+            for (ix, (span_h, header)) in section_headers.iter().enumerate() {
+                if span_h.start < span_fn.start {
+                    functions_and_headers.push(Interspersed::Section(header.clone()));
+                    to_remove.push(ix);
+                }
+            }
+
+            for ix in to_remove.iter().rev() {
+                section_headers.remove(*ix);
+            }
+
+            functions_and_headers.push(Interspersed::Function(function))
+        }
+
+        // Types
+        let types: Vec<DocType> = module
+            .ast
+            .definitions
+            .iter()
+            .flat_map(|def| DocType::from_definition(def, source_linker))
+            .sorted()
+            .collect();
+
+        // Constants
+        let constants: Vec<DocConstant> = module
+            .ast
+            .definitions
+            .iter()
+            .flat_map(|def| DocConstant::from_definition(def, source_linker))
+            .sorted()
+            .collect();
+
+        ModuleMembers {
+            functions: functions_and_headers,
+            types,
+            constants,
         }
     }
 }
@@ -657,6 +700,8 @@ struct DocTypeConstructor {
     definition: String,
     documentation: String,
     raw_documentation: String,
+    /// The constructor's and its fields' documentation, as Markdown.
+    markdown: String,
 }
 
 impl DocTypeConstructor {
@@ -665,31 +710,49 @@ impl DocTypeConstructor {
             .arguments
             .iter()
             .filter_map(|arg| match (arg.label.as_deref(), arg.doc.as_deref()) {
-                (Some(label), Some(doc)) => Some(format!("#### `.{label}`\n{doc}\n<hr/>\n",)),
+                (Some(label), Some(doc)) => {
+                    Some(format!("#### `.{label}`\n{}\n<hr/>\n", dedent(doc).trim()))
+                }
                 _ => None,
             })
             .join("\n");
+
+        let markdown = match constructor.doc.as_deref() {
+            Some(doc) => format!("{}\n{doc_args}", dedent(doc).trim()),
+            None if doc_args.is_empty() => String::new(),
+            None => format!("\n{doc_args}"),
+        };
 
         DocTypeConstructor {
             definition: format::Formatter::new()
                 .docs_record_constructor(constructor)
                 .to_pretty_string(format::MAX_COLUMNS),
-            documentation: constructor
-                .doc
-                .as_deref()
-                .map(|doc| render_markdown(&format!("{doc}\n{doc_args}")))
-                .or(if doc_args.is_empty() {
-                    None
-                } else {
-                    Some(render_markdown(&format!("\n{doc_args}")))
-                })
-                .unwrap_or_default(),
+            documentation: if markdown.is_empty() {
+                String::new()
+            } else {
+                render_markdown(&markdown)
+            },
             raw_documentation: constructor.doc.as_deref().unwrap_or_default().to_string(),
+            markdown,
         }
     }
 }
 
 // ------ Extra Helpers
+
+/// Doc comments keep the space that follows `///`; remove the indentation all lines share.
+fn dedent(text: &str) -> String {
+    let indent = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+
+    text.lines()
+        .map(|line| line.get(indent..).unwrap_or_else(|| line.trim_start()))
+        .join("\n")
+}
 
 fn render_markdown(text: &str) -> String {
     let mut s = String::with_capacity(text.len() * 3 / 2);

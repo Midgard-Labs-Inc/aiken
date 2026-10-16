@@ -32,14 +32,15 @@ pub const zero: G1Element =
 /// The compressed representation is a 48-byte string, corresponding to a modified `x` coordinate.
 /// The leading most significant 3 bits of this string indicate how to reconstruct the `y` coordinate.
 ///
-/// > [!NOTE]
-/// > More explicitly via [Zcash's spec](https://github.com/supranational/blst#serialization-format):
-/// >
-/// > <i>The most-significant three bits of a G1 or G2 encoding should be masked away before the coordinate(s) are interpreted. These bits are used to unambiguously represent the underlying element:
+/// :::note
+/// More explicitly via [Zcash's spec](https://github.com/supranational/blst#serialization-format):
+///
+/// > The most-significant three bits of a G1 or G2 encoding should be masked away before the coordinate(s) are interpreted. These bits are used to unambiguously represent the underlying element:
 /// >
 /// > - The most significant bit, when set, indicates that the point is in compressed form. Otherwise, the point is in uncompressed form.
 /// > - The second-most significant bit indicates that the point is at infinity. If this bit is set, the remaining bits of the group element's encoding should be set to zero.
-/// > - The third-most significant bit is set if (and only if) this point is in compressed form and it is not the point at infinity and its y-coordinate is the lexicographically largest of the two associated with the encoded x-coordinate.</i>
+/// > - The third-most significant bit is set if (and only if) this point is in compressed form and it is not the point at infinity and its y-coordinate is the lexicographically largest of the two associated with the encoded x-coordinate.
+/// :::
 pub fn compress(point) {
   builtin.bls12_381_g1_compress(point)
 }

@@ -1,0 +1,757 @@
+---
+title: "cardano/fuzz"
+sidebar:
+  label: "fuzz"
+---
+
+## Functions
+
+### Address
+
+### `address` {#address}
+
+```aiken
+address() -> Fuzzer<Address>
+```
+
+Generate an arbitrary `Address` (other than pointer addresses).
+
+### `address_with` {#address_with}
+
+```aiken
+address_with(
+  payment_credential: Fuzzer<Credential>,
+  stake_credential: Fuzzer<Option<StakeCredential>>,
+) -> Fuzzer<Address>
+```
+
+Generate an arbitrary `Address` by specifying its payment and stake credentials.
+
+#### Examples
+
+```aiken
+// No stake credential whatsoever
+cardano.address_with(cardano.credential(), fuzz.constant(None))
+
+// Only script addresses
+cardano.address_with(
+  cardano.script(),
+  fuzz.option(cardano.stake_credential()),
+)
+```
+
+#### Address :: Credential
+
+### `credential` {#credential}
+
+```aiken
+credential() -> Fuzzer<Credential>
+```
+
+Generate an arbitrary `Credential`.
+
+##### constructors
+
+### `script` {#script}
+
+```aiken
+script() -> Fuzzer<Credential>
+```
+
+Generate an arbitrary `Script` credential.
+
+### `script_hash` {#script_hash}
+
+```aiken
+script_hash() -> Fuzzer<ScriptHash>
+```
+
+Generate an arbitrary `ScriptHash`
+
+### `script_with` {#script_with}
+
+```aiken
+script_with(script_hash: Fuzzer<ScriptHash>) -> Fuzzer<Credential>
+```
+
+Generate an arbitrary `Script` credential, specifying a hash `Fuzzer`.
+
+#### Examples
+
+```aiken
+// Choose amongst a list of known hashes.
+cardano.script_with(fuzz.one_of([
+  "foo",
+  "bar",
+]))
+```
+
+### `verification_key` {#verification_key}
+
+```aiken
+verification_key() -> Fuzzer<Credential>
+```
+
+Generate an arbitrary `VerificationKey` credential.
+
+### `verification_key_hash` {#verification_key_hash}
+
+```aiken
+verification_key_hash() -> Fuzzer<VerificationKeyHash>
+```
+
+Generate an arbitrary `VerificationKeyHash`.
+
+### `verification_key_with` {#verification_key_with}
+
+```aiken
+verification_key_with(
+  verification_key_hash: Fuzzer<VerificationKeyHash>,
+) -> Fuzzer<Credential>
+```
+
+Generate an arbitrary `VerificationKey` credential, specifying a hash `Fuzzer`.
+
+#### Examples
+
+```aiken
+// Choose amongst a list of known hashes.
+cardano.verification_key_with(fuzz.one_of([
+  "foo",
+  "bar",
+]))
+```
+
+#### Address :: StakeCredential
+
+### `stake_credential` {#stake_credential}
+
+```aiken
+stake_credential() -> Fuzzer<StakeCredential>
+```
+
+Generate an arbitrary stake credential.
+
+##### constructors
+
+### `inline` {#inline}
+
+```aiken
+inline() -> Fuzzer<StakeCredential>
+```
+
+Generate an arbitrary `Inline` stake credential.
+
+### `inline_with` {#inline_with}
+
+```aiken
+inline_with(credential: Fuzzer<Credential>) -> Fuzzer<StakeCredential>
+```
+
+Generate an `Inline` stake credential, specifying a `Fuzzer` for the `Credential`.
+
+### `pointer` {#pointer}
+
+```aiken
+pointer() -> Fuzzer<StakeCredential>
+```
+
+Generate an arbitrary `Pointer` stake credential.
+
+### `pointer_with` {#pointer_with}
+
+```aiken
+pointer_with(
+  slot_number: Fuzzer<Int>,
+  transaction_index: Fuzzer<Int>,
+  certificate_index: Fuzzer<Int>,
+) -> Fuzzer<StakeCredential>
+```
+
+Generate an arbitrary `Pointer` stake credential, specifying fuzzers for the sub-elements.
+
+### Assets
+
+#### Assets :: Assets
+
+### `lovelace` {#lovelace}
+
+```aiken
+lovelace() -> Fuzzer<Assets>
+```
+
+Generate a `Assets` holding a **positive** (i.e. > 0) quantity of lovelace, but no assets.
+
+### `lovelace_with` {#lovelace_with}
+
+```aiken
+lovelace_with(lovelace: Fuzzer<Int>) -> Fuzzer<Assets>
+```
+
+Generate a `Assets` with no assets, specifying a `Fuzzer` for the `Lovelace` quantity.
+
+#### Examples
+
+```aiken
+cardano.lovelace_with(int_at_least(1)) == cardano.lovelace()
+```
+
+### `assets` {#assets}
+
+```aiken
+assets(self: Assets) -> Fuzzer<Assets>
+```
+
+Generate an arbitrary `Assets`, extending an existing one. Use
+`assets.zero` or `cardano.lovelace()` as a simple starting point.
+
+#### Examples
+
+```aiken
+/// Some arbitrary assets, possibly empty.
+cardano.assets(assets.zero)
+
+/// At least some known NFT
+cardano.assets(assets.from_asset("my_policy", "my_asset_name", 1))
+
+/// At least some lovelace
+let quantity <- fuzz.and_then(int_at_least(1))
+cardano.assets(assets.from_lovelace(lovelace))
+```
+
+### `assets_with` {#assets_with}
+
+```aiken
+assets_with(
+  self: Assets,
+  policies: Fuzzer<List<PolicyId>>,
+  asset_name: fn(PolicyId) -> Fuzzer<AssetName>,
+  quantity: fn(PolicyId, AssetName) -> Fuzzer<Int>,
+) -> Fuzzer<Assets>
+```
+
+Extend existing assets using the given fuzzers for fine-grained control.
+
+#### Examples
+
+```aiken
+cardano.assets_with(
+  assets.zero,
+  policies: fuzz.constant([my_policy_1, my_policy_2]),
+  asset_name: fn(policy) {
+    if policy == my_policy_1 {
+       fuzz.one_of([asset_1, asset_2, asset_3])
+    } else {
+       fuzz.constant(my_other_asset)
+    }
+  },
+  quantity: fn(_, _) { fuzz.constant(1) }
+)
+```
+
+#### Assets :: AssetName
+
+### `asset_name` {#asset_name}
+
+```aiken
+asset_name() -> Fuzzer<AssetName>
+```
+
+Generate an arbitrary `AssetName`, between 0 and 32 bytes length.
+
+### `asset_name_with` {#asset_name_with}
+
+```aiken
+asset_name_with(asset_name: Fuzzer<ByteArray>) -> Fuzzer<AssetName>
+```
+
+Generate an arbitrary `AssetName` from another `Fuzzer`, enforcing a length smaller than 32 bytes.
+
+#### Assets :: PolicyId
+
+### `policy_id` {#policy_id}
+
+```aiken
+policy_id() -> Fuzzer<PolicyId>
+```
+
+Generate an arbitrary `PolicyId` (a.k.a script hash).
+
+### `policy_id_with` {#policy_id_with}
+
+```aiken
+policy_id_with(policy_id: Fuzzer<PolicyId>) -> Fuzzer<PolicyId>
+```
+
+Generate an arbitrary `PolicyId` from another `Fuzzer`, enforcing a length strictly equal to 28 bytes.
+
+### Certificate
+
+### `certificate` {#certificate}
+
+```aiken
+certificate() -> Fuzzer<Certificate>
+```
+
+Generate an arbitrary `Certificate`.
+
+##### constructors
+
+### `authorize_constitutional_committee_proxy` {#authorize_constitutional_committee_proxy}
+
+```aiken
+authorize_constitutional_committee_proxy() -> Fuzzer<Certificate>
+```
+
+### `authorize_constitutional_committee_proxy_with` {#authorize_constitutional_committee_proxy_with}
+
+```aiken
+authorize_constitutional_committee_proxy_with(
+  constitutional_committee_member: Fuzzer<Credential>,
+  proxy: Fuzzer<Credential>,
+) -> Fuzzer<Certificate>
+```
+
+### `delegate_credential` {#delegate_credential}
+
+```aiken
+delegate_credential() -> Fuzzer<Certificate>
+```
+
+### `delegate_credential_with` {#delegate_credential_with}
+
+```aiken
+delegate_credential_with(
+  credential: Fuzzer<Credential>,
+  delegate: Fuzzer<Delegate>,
+) -> Fuzzer<Certificate>
+```
+
+### `register_and_delegate_credential` {#register_and_delegate_credential}
+
+```aiken
+register_and_delegate_credential() -> Fuzzer<Certificate>
+```
+
+### `register_and_delegate_credential_with` {#register_and_delegate_credential_with}
+
+```aiken
+register_and_delegate_credential_with(
+  credential: Fuzzer<Credential>,
+  delegate: Fuzzer<Delegate>,
+  deposit: Fuzzer<Lovelace>,
+) -> Fuzzer<Certificate>
+```
+
+### `register_credential` {#register_credential}
+
+```aiken
+register_credential() -> Fuzzer<Certificate>
+```
+
+### `register_credential_with` {#register_credential_with}
+
+```aiken
+register_credential_with(credential: Fuzzer<Credential>) -> Fuzzer<Certificate>
+```
+
+### `register_delegate_representative` {#register_delegate_representative}
+
+```aiken
+register_delegate_representative() -> Fuzzer<Certificate>
+```
+
+### `register_delegate_representative_with` {#register_delegate_representative_with}
+
+```aiken
+register_delegate_representative_with(
+  credential: Fuzzer<Credential>,
+  deposit: Fuzzer<Lovelace>,
+) -> Fuzzer<Certificate>
+```
+
+### `register_stake_pool` {#register_stake_pool}
+
+```aiken
+register_stake_pool() -> Fuzzer<Certificate>
+```
+
+### `register_stake_pool_with` {#register_stake_pool_with}
+
+```aiken
+register_stake_pool_with(
+  stake_pool_id: Fuzzer<StakePoolId>,
+  verification_key_hash: Fuzzer<VerificationKeyHash>,
+) -> Fuzzer<Certificate>
+```
+
+### `retire_from_constitutional_committee` {#retire_from_constitutional_committee}
+
+```aiken
+retire_from_constitutional_committee() -> Fuzzer<Certificate>
+```
+
+### `retire_from_constitutional_committee_with` {#retire_from_constitutional_committee_with}
+
+```aiken
+retire_from_constitutional_committee_with(
+  constitutional_committee_member: Fuzzer<Credential>,
+) -> Fuzzer<Certificate>
+```
+
+### `retire_stake_pool` {#retire_stake_pool}
+
+```aiken
+retire_stake_pool() -> Fuzzer<Certificate>
+```
+
+### `retire_stake_pool_with` {#retire_stake_pool_with}
+
+```aiken
+retire_stake_pool_with(
+  stake_pool_id: Fuzzer<StakePoolId>,
+  deposit: Fuzzer<Lovelace>,
+) -> Fuzzer<Certificate>
+```
+
+### `unregister_credential` {#unregister_credential}
+
+```aiken
+unregister_credential() -> Fuzzer<Certificate>
+```
+
+### `unregister_credential_with` {#unregister_credential_with}
+
+```aiken
+unregister_credential_with(
+  credential: Fuzzer<Credential>,
+) -> Fuzzer<Certificate>
+```
+
+### `unregister_delegate_representative` {#unregister_delegate_representative}
+
+```aiken
+unregister_delegate_representative() -> Fuzzer<Certificate>
+```
+
+### `unregister_delegate_representative_with` {#unregister_delegate_representative_with}
+
+```aiken
+unregister_delegate_representative_with(
+  credential: Fuzzer<Credential>,
+  deposit: Fuzzer<Lovelace>,
+) -> Fuzzer<Certificate>
+```
+
+### `update_delegate_representative` {#update_delegate_representative}
+
+```aiken
+update_delegate_representative() -> Fuzzer<Certificate>
+```
+
+### `update_delegate_representative_with` {#update_delegate_representative_with}
+
+```aiken
+update_delegate_representative_with(
+  credential: Fuzzer<Credential>,
+) -> Fuzzer<Certificate>
+```
+
+#### Certificate :: Delegate
+
+### `delegate` {#delegate}
+
+```aiken
+delegate() -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `Delegate`.
+
+##### constructors
+
+### `delegate_block_production` {#delegate_block_production}
+
+```aiken
+delegate_block_production() -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateBlockProduction` delegate.
+
+### `delegate_block_production_with` {#delegate_block_production_with}
+
+```aiken
+delegate_block_production_with(
+  stake_pool_id: Fuzzer<StakePoolId>,
+) -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateBlockProduction` delegate, specifying a `Fuzzer` for the pool id.
+
+### `delegate_both` {#delegate_both}
+
+```aiken
+delegate_both() -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateBoth` delegate.
+
+### `delegate_both_with` {#delegate_both_with}
+
+```aiken
+delegate_both_with(
+  stake_pool_id: Fuzzer<StakePoolId>,
+  delegate_representative: Fuzzer<DelegateRepresentative>,
+) -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateBoth` delegate, specifying a `Fuzzer` for the pool and drep.
+
+### `delegate_vote` {#delegate_vote}
+
+```aiken
+delegate_vote() -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateVote` delegate.
+
+### `delegate_vote_with` {#delegate_vote_with}
+
+```aiken
+delegate_vote_with(
+  delegate_representative: Fuzzer<DelegateRepresentative>,
+) -> Fuzzer<Delegate>
+```
+
+Generate an arbitrary `DelegateVote` delegate, specifying a `Fuzzer` for the drep.
+
+#### Certificate :: Delegate Representative
+
+### `delegate_representative` {#delegate_representative}
+
+```aiken
+delegate_representative() -> Fuzzer<DelegateRepresentative>
+```
+
+Generate an arbitrary `DelegateRepresentative`.
+
+##### constructors
+
+### `always_abstain` {#always_abstain}
+
+```aiken
+always_abstain() -> Fuzzer<DelegateRepresentative>
+```
+
+Generate an arbitrary `AlwaysAbstain` drep.
+
+### `always_no_confidence` {#always_no_confidence}
+
+```aiken
+always_no_confidence() -> Fuzzer<DelegateRepresentative>
+```
+
+Generate an arbitrary `AlwaysNoConfidence` drep.
+
+### `registered` {#registered}
+
+```aiken
+registered() -> Fuzzer<DelegateRepresentative>
+```
+
+Generate an arbitrary `Registered` drep.
+
+### `registered_with` {#registered_with}
+
+```aiken
+registered_with(
+  credential: Fuzzer<Credential>,
+) -> Fuzzer<DelegateRepresentative>
+```
+
+Generate an arbitrary `Registered` drep, specifying a `Fuzzer` for the credential.
+
+#### Certificate :: StakePoolId
+
+### `stake_pool_id` {#stake_pool_id}
+
+```aiken
+stake_pool_id() -> Fuzzer<StakePoolId>
+```
+
+Generate an arbitrary `StakePoolId`.
+
+### `stake_pool_id_with` {#stake_pool_id_with}
+
+```aiken
+stake_pool_id_with(stake_pool_id: Fuzzer<ByteArray>) -> Fuzzer<StakePoolId>
+```
+
+Generate an arbitrary `StakePoolId`, enforcing a pool id size of 28 bytes.
+
+### Transaction
+
+### `transaction_id` {#transaction_id}
+
+```aiken
+transaction_id() -> Fuzzer<TransactionId>
+```
+
+Generate an arbitrary `TransactionId`
+
+#### Tx :: Datum
+
+### `datum` {#datum}
+
+```aiken
+datum() -> Fuzzer<Datum>
+```
+
+Generate an arbitrary `Datum`.
+
+##### constructors
+
+### `datum_hash` {#datum_hash}
+
+```aiken
+datum_hash() -> Fuzzer<Datum>
+```
+
+### `datum_hash_with` {#datum_hash_with}
+
+```aiken
+datum_hash_with(datum_hash: Fuzzer<DataHash>) -> Fuzzer<Datum>
+```
+
+### `inline_datum` {#inline_datum}
+
+```aiken
+inline_datum() -> Fuzzer<Datum>
+```
+
+### `inline_datum_with` {#inline_datum_with}
+
+```aiken
+inline_datum_with(data: Fuzzer<Data>) -> Fuzzer<Datum>
+```
+
+### `no_datum` {#no_datum}
+
+```aiken
+no_datum() -> Fuzzer<Datum>
+```
+
+#### Tx :: Input
+
+### `input` {#input}
+
+```aiken
+input() -> Fuzzer<Input>
+```
+
+Generate an arbitrary `Input`.
+
+### `input_with` {#input_with}
+
+```aiken
+input_with(
+  output_reference: Fuzzer<OutputReference>,
+  output: Fuzzer<Output>,
+) -> Fuzzer<Input>
+```
+
+Generate an arbitrary `Input`, specifying fuzzers for sub-elements.
+
+#### Tx :: Output
+
+### `output` {#output}
+
+```aiken
+output() -> Fuzzer<Output>
+```
+
+Generate an arbitrary `Output`.
+
+### `output_with` {#output_with}
+
+```aiken
+output_with(
+  address: Fuzzer<Address>,
+  value: Fuzzer<Assets>,
+  datum: Fuzzer<Datum>,
+  reference_script: Fuzzer<Option<ScriptHash>>,
+) -> Fuzzer<Output>
+```
+
+Generate an arbitrary `Output`, specifying fuzzers for sub-elements.
+
+#### Tx :: OutputReference
+
+### `output_reference` {#output_reference}
+
+```aiken
+output_reference() -> Fuzzer<OutputReference>
+```
+
+Generate an arbitrary `OutputReference`, with reasonably sized output indexes.
+
+### `output_reference_with` {#output_reference_with}
+
+```aiken
+output_reference_with(
+  transaction_id: Fuzzer<TransactionId>,
+  output_index: Fuzzer<Int>,
+) -> Fuzzer<OutputReference>
+```
+
+Generate an arbitrary `OutputReference`, specifying fuzzers for sub-elements.
+
+#### Tx :: ReferenceScript
+
+### `reference_script` {#reference_script}
+
+```aiken
+reference_script() -> Fuzzer<Option<ScriptHash>>
+```
+
+Generate an arbitrary `ReferenceScript`.
+
+### `reference_script_with` {#reference_script_with}
+
+```aiken
+reference_script_with(
+  script_hash: Fuzzer<ScriptHash>,
+) -> Fuzzer<Option<ScriptHash>>
+```
+
+Generate an arbitrary `ReferenceScript`, specifying a `Fuzzer` for the script hash.
+
+#### Tx :: Withdrawals
+
+### `withdrawals` {#withdrawals}
+
+```aiken
+withdrawals() -> Fuzzer<Pairs<Credential, Lovelace>>
+```
+
+Generate arbitrary withdrawals, ordered by ascending `Credential`.
+
+### `withdrawals_extending` {#withdrawals_extending}
+
+```aiken
+withdrawals_extending(
+  self: Pairs<Credential, Lovelace>,
+) -> Fuzzer<Pairs<Credential, Lovelace>>
+```
+
+Generate a valid sequence of withdrawals, extending from an existing set.
+
+### `withdrawals_with` {#withdrawals_with}
+
+```aiken
+withdrawals_with(
+  credential: Fuzzer<Credential>,
+  quantity: fn(Credential) -> Fuzzer<Lovelace>,
+) -> Fuzzer<Pairs<Credential, Lovelace>>
+```
+
+Generate arbitrary withdrawals, specifying a `Fuzzer` for credentials and quantity for fine-grained control.

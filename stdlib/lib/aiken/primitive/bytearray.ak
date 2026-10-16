@@ -10,9 +10,10 @@ pub type Byte =
 /// Encode an integer value as a Big-Endian (most-significant bytes first) `ByteArray`.
 /// The size is the expected size in number of bytes.
 ///
-/// > [!IMPORTANT]
-/// > This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
-/// > size is _too large_, the array is left-padded with zeroes.
+/// :::important
+/// This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
+/// size is _too large_, the array is left-padded with zeroes.
+/// :::
 ///
 /// ```aiken
 /// bytearray.from_int_big_endian(1_000_000, 3) == #"0f4240"
@@ -27,9 +28,10 @@ pub fn from_int_big_endian(self: Int, size: Int) -> ByteArray {
 /// Encode an integer value as a Little-Endian (least-significant bytes first) `ByteArray`.
 /// The size is the expected size in number of bytes.
 ///
-/// > [!IMPORTANT]
-/// > This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
-/// > size is _too large_, the array is right-padded with zeroes.
+/// :::important
+/// This function fails (i.e. halts the program) if the value cannot fit in the given size. When the
+/// size is _too large_, the array is right-padded with zeroes.
+/// :::
 ///
 /// ```aiken
 /// bytearray.from_int_little_endian(1_000_000, 3) == #"40420f"
@@ -58,9 +60,10 @@ pub fn from_string(str: String) -> ByteArray {
 /// bytearray.replicate(3, 256) → 💥
 /// ```
 ///
-/// > [!CAUTION]
-/// > This function fails (i.e. halts the program) the given 'byte' is out of
-/// > bounds $[0, 255]$ or if the length is greater than $2^{13} = 8192$.
+/// :::caution
+/// This function fails (i.e. halts the program) the given 'byte' is out of
+/// bounds $[0, 255]$ or if the length is greater than $2^{13} = 8192$.
+/// :::
 pub fn replicate(length: Int, byte: Int) -> ByteArray {
   builtin.replicate_byte(length, byte)
 }
@@ -69,8 +72,9 @@ pub fn replicate(length: Int, byte: Int) -> ByteArray {
 
 /// Get the `Byte` at the given index, or crash.
 ///
-/// > [!CAUTION]
-/// > This function fails (i.e. halts the program) if there's no byte at the given index.
+/// :::caution
+/// This function fails (i.e. halts the program) if there's no byte at the given index.
+/// :::
 pub fn at(self: ByteArray, index: Int) -> Byte {
   builtin.index_bytearray(self, index)
 }
@@ -340,10 +344,11 @@ pub fn to_int_little_endian(self: ByteArray) -> Int {
 
 /// Convert a `ByteArray` into a `String`.
 ///
-/// > [!CAUTION]
-/// > This function fails (i.e. halts the program) if the underlying `ByteArray` isn't UTF-8-encoded. In particular, you cannot convert arbitrary hash digests using this function.
-/// >
-/// > For converting arbitrary `ByteArray`s, use [bytearray.to_hex](#to_hex).
+/// :::caution
+/// This function fails (i.e. halts the program) if the underlying `ByteArray` isn't UTF-8-encoded. In particular, you cannot convert arbitrary hash digests using this function.
+///
+/// For converting arbitrary `ByteArray`s, use [bytearray.to_hex](#to_hex).
+/// :::
 ///
 /// ```aiken
 /// bytearray.to_string(#"414243") == "ABC"

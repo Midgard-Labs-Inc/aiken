@@ -1,4 +1,7 @@
-use aiken_project::watch::{self, watch_project, with_project};
+use aiken_project::{
+    docs,
+    watch::{self, watch_project, with_project},
+};
 use std::{path::PathBuf, process};
 
 #[derive(clap::Args)]
@@ -27,6 +30,21 @@ pub struct Args {
     /// Output directory for the documentation
     #[clap(short = 'o', long)]
     destination: Option<PathBuf>,
+
+    /// Output format: a static website, or MDX pages for a Nimbus documentation site
+    #[clap(long, value_enum, default_value_t = Format::Html)]
+    format: Format,
+
+    /// With `--format markdown`, the URL path the pages are mounted at on the site (e.g.
+    /// `/stdlib`), used for links between them
+    #[clap(long, default_value = "/")]
+    base: String,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Format {
+    Html,
+    Markdown,
 }
 
 pub fn exec(
@@ -37,15 +55,22 @@ pub fn exec(
         watch,
         destination,
         include_dependencies,
+        format,
+        base,
     }: Args,
 ) -> miette::Result<()> {
+    let format = match format {
+        Format::Html => docs::Format::Html,
+        Format::Markdown => docs::Format::Markdown { base },
+    };
+
     let result = if watch {
         watch_project(directory.as_deref(), watch::default_filter, 500, |p| {
-            p.docs(destination.clone(), include_dependencies)
+            p.docs(destination.clone(), include_dependencies, format.clone())
         })
     } else {
         with_project(directory.as_deref(), deny, silent, true, |p| {
-            p.docs(destination.clone(), include_dependencies)
+            p.docs(destination.clone(), include_dependencies, format.clone())
         })
     };
 
