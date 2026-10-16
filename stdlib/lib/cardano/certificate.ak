@@ -14,10 +14,11 @@ pub type Certificate {
   /// format available since the Conway era.
   RegisterCredential {
     credential: Credential,
-    /// > [!NOTE]
-    /// > The `deposit` ought to be an `Option<Lovelace>`, but due to unfortunate
-    /// > circumstances it will always be instantiated to `None` even when set in
-    /// > the host transaction. This is what the `Never` type captures here.
+    /// :::note
+    /// The `deposit` ought to be an `Option<Lovelace>`, but due to unfortunate
+    /// circumstances it will always be instantiated to `None` even when set in
+    /// the host transaction. This is what the `Never` type captures here.
+    /// :::
     deposit: Never,
   }
   /// Un-Register a stake credential with an optional refund amount
@@ -25,10 +26,11 @@ pub type Certificate {
   /// format available since the Conway era.
   UnregisterCredential {
     credential: Credential,
-    /// > [!NOTE]
-    /// > The `refund` ought to be an `Option<Lovelace>`, but due to unfortunate
-    /// > circumstances it will always be instantiated to `None` even when set in
-    /// > the host transaction. This is what the `Never` type captures here.
+    /// :::note
+    /// The `refund` ought to be an `Option<Lovelace>`, but due to unfortunate
+    /// circumstances it will always be instantiated to `None` even when set in
+    /// the host transaction. This is what the `Never` type captures here.
+    /// :::
     refund: Never,
   }
   /// Delegate stake to a [Delegate](#Delegate).

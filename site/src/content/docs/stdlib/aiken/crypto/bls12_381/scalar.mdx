@@ -1,0 +1,222 @@
+---
+title: "aiken/crypto/bls12_381/scalar"
+sidebar:
+  label: "scalar"
+---
+
+This module implements arithmetic operations in the scalar field associated with the BLS12-381 elliptic curve.
+The scalar field, defined over a prime number `q`, is derived from the order of the subgroup G1.
+
+More explicitly, we have the identity:
+
+```aiken
+builtin.bls12_381_g1_scalar_mul(q, bls12_381_g1_generator) == 1
+```
+
+where,
+
+```aiken
+q = 52435875175126190479447740508185965837690552500527637822603658699938581184513
+```
+
+This module provides functionality for basic arithmetic operations (addition, subtraction, multiplication, division) within this scalar field.
+Additionally, it includes advanced operations such as exponentiation and calculation of multiplicative inverses, tailored for cryptographic applications.
+
+## Types
+
+### `Scalar` {#Scalar}
+
+#### Alias
+
+```aiken
+Scalar = ByteArray
+```
+
+## Constants
+
+### `field_prime` {#field_prime}
+
+```aiken
+field_prime: Int = 52435875175126190479447740508185965837690552500527637822603658699938581184513
+```
+
+The prime number defining the scalar field of the BLS12-381 curve.
+
+### `field_size` {#field_size}
+
+```aiken
+field_size: Int = 32
+```
+
+## Functions
+
+### Constructing
+
+### `from_bytes` {#from_bytes}
+
+```aiken
+from_bytes(b: ByteArray) -> State<Scalar>
+```
+
+Constructs a new `Scalar` element from a Big-Endian (most-significant bits first) `ByteArray`.
+
+### `from_bytes_little_endian` {#from_bytes_little_endian}
+
+```aiken
+from_bytes_little_endian(bytes: ByteArray) -> State<Scalar>
+```
+
+Constructs a new `Scalar` element from a Little-Endian (least-significant bits first) `ByteArray`.
+
+### `from_int` {#from_int}
+
+```aiken
+from_int(n: Int) -> State<Scalar>
+```
+
+Constructs a new `Scalar` element from an integer, ensuring it's within the valid range of the field.
+
+### Modifying
+
+### `scale` {#scale}
+
+```aiken
+scale(self: State<Scalar>, e: Int) -> State<Scalar>
+```
+
+Exponentiates an `Scalar` element by a non-negative integer exponent, using repeated squaring.
+Note that this function returns `scalar.zero` for negative exponents.
+A dedicated builtin function for this is in the making, see CIP 109.
+
+### `scale2` {#scale2}
+
+```aiken
+scale2(self: State<Scalar>, k: Int) -> State<Scalar>
+```
+
+A faster version of `scale` for the case where the exponent is a power of two.
+That is, the exponent `e = 2^k` for some non-negative integer `k`. Which is used alot in zk-SNARKs.
+
+### Combining
+
+### `add` {#add}
+
+```aiken
+add(left: State<Scalar>, right: State<Scalar>) -> State<Scalar>
+```
+
+Adds two `Scalar` elements, ensuring the result stays within the finite field range.
+
+### `add_bytes` {#add_bytes}
+
+```aiken
+add_bytes(intermediate: State<Scalar>, bytes: ByteArray) -> State<Scalar>
+```
+
+### `add_int` {#add_int}
+
+```aiken
+add_int(intermediate: State<Scalar>, int: Int) -> State<Scalar>
+```
+
+### `div` {#div}
+
+```aiken
+div(left: State<Scalar>, right: State<Scalar>) -> Option<State<Scalar>>
+```
+
+Divides one `Scalar` element by another, returning `None` if the divisor is zero.
+
+### `div_int` {#div_int}
+
+```aiken
+div_int(left: State<Scalar>, right: Int) -> Option<State<Scalar>>
+```
+
+### `div_bytes` {#div_bytes}
+
+```aiken
+div_bytes(left: State<Scalar>, right: ByteArray) -> Option<State<Scalar>>
+```
+
+### `mul` {#mul}
+
+```aiken
+mul(left: State<Scalar>, right: State<Scalar>) -> State<Scalar>
+```
+
+Multiplies two `Scalar` elements, with the result constrained within the finite field.
+
+### `mul_bytes` {#mul_bytes}
+
+```aiken
+mul_bytes(intermediate: State<Scalar>, bytes: ByteArray) -> State<Scalar>
+```
+
+### `mul_int` {#mul_int}
+
+```aiken
+mul_int(intermediate: State<Scalar>, int: Int) -> State<Scalar>
+```
+
+### `neg` {#neg}
+
+```aiken
+neg(intermediate: State<Scalar>) -> State<Scalar>
+```
+
+Calculates the additive inverse of a `Scalar` element.
+
+### `recip` {#recip}
+
+```aiken
+recip(self: State<Scalar>) -> Option<State<Scalar>>
+```
+
+Calculates the multiplicative inverse of an `Scalar` element, returning `None` if the element is zero.
+
+### `sub` {#sub}
+
+```aiken
+sub(left: State<Scalar>, right: State<Scalar>) -> State<Scalar>
+```
+
+Subtracts one `Scalar` element from another, with the result wrapped within the finite field range.
+
+### `sub_bytes` {#sub_bytes}
+
+```aiken
+sub_bytes(intermediate: State<Scalar>, bytes: ByteArray) -> State<Scalar>
+```
+
+### `sub_int` {#sub_int}
+
+```aiken
+sub_int(intermediate: State<Scalar>, int: Int) -> State<Scalar>
+```
+
+### Transforming
+
+### `to_int` {#to_int}
+
+```aiken
+to_int(s: State<Scalar>) -> Int
+```
+
+Converts a `Scalar` element back to its integer representation.
+
+### `to_bytes` {#to_bytes}
+
+```aiken
+to_bytes(s: State<Scalar>) -> ByteArray
+```
+
+Converts a `Scalar` element to a Big-Endian (most-significant bits first) `ByteArray`.
+
+### `to_bytes_little_endian` {#to_bytes_little_endian}
+
+```aiken
+to_bytes_little_endian(s: State<Scalar>) -> ByteArray
+```
+
+Converts a `Scalar` element to a Little-Endian (least-significant bits first) `ByteArray`.

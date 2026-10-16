@@ -1,0 +1,361 @@
+---
+title: "cardano/governance/protocol_parameters"
+sidebar:
+  label: "protocol_parameters"
+---
+
+## Types
+
+### `ConstitutionalCommitteeThresholds` {#ConstitutionalCommitteeThresholds}
+
+#### Constructors
+
+```aiken
+ConstitutionalCommitteeThresholds {
+  default: Rational,
+  under_no_confidence: Rational,
+}
+```
+
+### `DelegateRepresentativeVotingThresholds` {#DelegateRepresentativeVotingThresholds}
+
+#### Constructors
+
+```aiken
+DelegateRepresentativeVotingThresholds {
+  motion_of_no_confidence: Rational,
+  constitutional_committee: ConstitutionalCommitteeThresholds,
+  constitution: Rational,
+  hard_fork: Rational,
+  protocol_parameters: ProtocolParametersThresholds<
+    Void,
+    Rational,
+    Rational,
+    Rational,
+    Rational,
+  >,
+  treasury_withdrawal: Rational,
+}
+```
+
+### `ExecutionUnits` {#ExecutionUnits}
+
+#### Constructors
+
+```aiken
+ExecutionUnits { memory: Int, cpu: Int }
+```
+
+### `ProtocolParametersThresholds<security, network, economic, technical, governance>` {#ProtocolParametersThresholds}
+
+#### Constructors
+
+```aiken
+ProtocolParametersThresholds {
+  security_group: security,
+  network_group: network,
+  economic_group: economic,
+  technical_group: technical,
+  governance_group: governance,
+}
+```
+
+### `ProtocolParametersUpdate` {#ProtocolParametersUpdate}
+
+### `ScriptExecutionPrices` {#ScriptExecutionPrices}
+
+#### Constructors
+
+```aiken
+ScriptExecutionPrices { memory: Rational, cpu: Rational }
+```
+
+### `StakePoolOperatorVotingThresholds` {#StakePoolOperatorVotingThresholds}
+
+#### Constructors
+
+```aiken
+StakePoolOperatorVotingThresholds {
+  motion_of_no_confidence: Rational,
+  constitutional_committee: ConstitutionalCommitteeThresholds,
+  hard_fork: Rational,
+  protocol_parameters: ProtocolParametersThresholds<
+    Rational,
+    Void,
+    Void,
+    Void,
+    Void,
+  >,
+}
+```
+
+## Functions
+
+### `min_fee_coefficient` {#min_fee_coefficient}
+
+```aiken
+min_fee_coefficient(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The linear coefficient that intervenes in the transaction fee calculation.
+It is multiplied by the size of the transaction in bytes to obtain a Lovelace value.
+
+### `min_fee_constant` {#min_fee_constant}
+
+```aiken
+min_fee_constant(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The constant factor that intervenes in the transaction fee calculation. It is
+a flat cost of lovelace that is added to every fee calculation.
+
+### `max_block_body_size` {#max_block_body_size}
+
+```aiken
+max_block_body_size(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum size of a serialized block body, expressed in bytes.
+
+### `max_transaction_size` {#max_transaction_size}
+
+```aiken
+max_transaction_size(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum size of a serialized transaction (body + witnesses), expressed in bytes.
+
+### `max_block_header_size` {#max_block_header_size}
+
+```aiken
+max_block_header_size(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum size of a serialized block header, expressed in bytes.
+
+### `stake_credential_deposit` {#stake_credential_deposit}
+
+```aiken
+stake_credential_deposit(self: ProtocolParametersUpdate) -> Option<Lovelace>
+```
+
+The required deposit amount when registering stake credentials, expressed in Lovelace.
+
+### `stake_pool_deposit` {#stake_pool_deposit}
+
+```aiken
+stake_pool_deposit(self: ProtocolParametersUpdate) -> Option<Lovelace>
+```
+
+The required deposit amount when registering a stake pool, expressed in Lovelace.
+
+### `stake_pool_retirement_horizon` {#stake_pool_retirement_horizon}
+
+```aiken
+stake_pool_retirement_horizon(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum number of epoch in the future allowed for a stake pool retirement to be scheduled.
+
+### `desired_number_of_stake_pools` {#desired_number_of_stake_pools}
+
+```aiken
+desired_number_of_stake_pools(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The desired/optimal number of fully saturated stake pools in the system. Also known as the _'k-parameter'_.
+
+### `stake_pool_pledge_influence` {#stake_pool_pledge_influence}
+
+```aiken
+stake_pool_pledge_influence(self: ProtocolParametersUpdate) -> Option<Rational>
+```
+
+A parameter controlling the influence of an pool owner's pledge on the rewards. Also known as _'a0'_.
+
+### `monetary_expansion` {#monetary_expansion}
+
+```aiken
+monetary_expansion(self: ProtocolParametersUpdate) -> Option<Rational>
+```
+
+The monetary expansion parameter, controlling the fraction of Ada put in circulation on every epoch through the incentivies model. Also known as _'ρ'_.
+
+### `treasury_expansion` {#treasury_expansion}
+
+```aiken
+treasury_expansion(self: ProtocolParametersUpdate) -> Option<Rational>
+```
+
+The parameter controlling what fraction (%) of available rewards is sent to the treasury on every epoch. Also known as _'τ'_.
+
+### `min_stake_pool_cost` {#min_stake_pool_cost}
+
+```aiken
+min_stake_pool_cost(self: ProtocolParametersUpdate) -> Option<Lovelace>
+```
+
+Minimum authorized constant cost that stake pools can declare when registering, expressed in Lovelace.
+
+### `min_utxo_deposit_coefficient` {#min_utxo_deposit_coefficient}
+
+```aiken
+min_utxo_deposit_coefficient(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The linear coefficient that intervenes in the calculation of the minimum Ada value that any UTxO must hold. It is expressed in Lovelace per Byte, and is also known as the 'coins per utxo byte' parameter.
+
+### `cost_models` {#cost_models}
+
+```aiken
+cost_models(self: ProtocolParametersUpdate) -> Option<Data>
+```
+
+The costs associated with the various operations of the Plutus Virtual Machine, which can be different for each Plutus version.
+
+### `script_execution_prices` {#script_execution_prices}
+
+```aiken
+script_execution_prices(
+  self: ProtocolParametersUpdate,
+) -> Option<ScriptExecutionPrices>
+```
+
+The price, in Lovelace per unit, of the execution units corresponding to cpu and memory usage of on-chain scripts.
+
+### `max_transaction_execution_units` {#max_transaction_execution_units}
+
+```aiken
+max_transaction_execution_units(
+  self: ProtocolParametersUpdate,
+) -> Option<ExecutionUnits>
+```
+
+The maximum execution units allowed for a single transaction.
+
+### `max_block_execution_units` {#max_block_execution_units}
+
+```aiken
+max_block_execution_units(
+  self: ProtocolParametersUpdate,
+) -> Option<ExecutionUnits>
+```
+
+The maximum execution units allowed for a single block.
+
+### `max_value_size` {#max_value_size}
+
+```aiken
+max_value_size(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum size of a serialized value in a transaction output. This effectively limits
+the maximum kinds of assets that can be sent in a single output. It is expressed in bytes.
+
+### `collateral_percentage` {#collateral_percentage}
+
+```aiken
+collateral_percentage(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The scaling factor applied to the transaction cost for defining the minimum collateral
+amount. It is expressed in percent points (so 100 = 100%).
+
+### `max_collateral_inputs` {#max_collateral_inputs}
+
+```aiken
+max_collateral_inputs(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The maximum number of collateral inputs allowed in the transaction.
+
+### `stake_pool_operator_voting_thresholds` {#stake_pool_operator_voting_thresholds}
+
+```aiken
+stake_pool_operator_voting_thresholds(
+  self: ProtocolParametersUpdate,
+) -> Option<StakePoolOperatorVotingThresholds>
+```
+
+The various governance voting thresholds pertaining to stake pool operators.
+
+### `delegate_representative_voting_thresholds` {#delegate_representative_voting_thresholds}
+
+```aiken
+delegate_representative_voting_thresholds(
+  self: ProtocolParametersUpdate,
+) -> Option<DelegateRepresentativeVotingThresholds>
+```
+
+The various governance voting thresholds pertaining to delegate representatives
+(a.k.a DReps).
+
+### `min_constitutional_committee_size` {#min_constitutional_committee_size}
+
+```aiken
+min_constitutional_committee_size(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The minimum number of members in the constitutional committee. Any updates of the committee
+must leave at least this number of members.
+
+### `max_constitutional_committee_mandate` {#max_constitutional_committee_mandate}
+
+```aiken
+max_constitutional_committee_mandate(
+  self: ProtocolParametersUpdate,
+) -> Option<Int>
+```
+
+The maximum length of a constitutional committee member, expressed in number of epochs.
+
+### `governance_proposal_lifetime` {#governance_proposal_lifetime}
+
+```aiken
+governance_proposal_lifetime(self: ProtocolParametersUpdate) -> Option<Int>
+```
+
+The lifetime of any governance proposal. An action that hasn't been approved beyond that
+period is considered inactive and discarded. It is expressed in number of epochs.
+
+### `governance_proposal_deposit` {#governance_proposal_deposit}
+
+```aiken
+governance_proposal_deposit(self: ProtocolParametersUpdate) -> Option<Lovelace>
+```
+
+The required deposit amount for governance proposal procedures, expressed in Lovelace.
+
+### `delegate_representative_deposit` {#delegate_representative_deposit}
+
+```aiken
+delegate_representative_deposit(
+  self: ProtocolParametersUpdate,
+) -> Option<Lovelace>
+```
+
+The required deposit amount when registering as a delegate representative, expressed in
+Lovelace.
+
+### `delegate_representative_max_idle_time` {#delegate_representative_max_idle_time}
+
+```aiken
+delegate_representative_max_idle_time(
+  self: ProtocolParametersUpdate,
+) -> Option<Int>
+```
+
+The maximum number of epochs that a delegate representative can stay inactive (i.e. no
+voting) without becoming _inactive_ and removed from thresholds calculations.
+
+### `reference_scripts_tier_fee_initial_factor` {#reference_scripts_tier_fee_initial_factor}
+
+```aiken
+reference_scripts_tier_fee_initial_factor(
+  self: ProtocolParametersUpdate,
+) -> Option<Rational>
+```
+
+The base tier fee coefficient for reference scripts. Reference scripts gets increasingly
+more expensives every ~24KB, the base coefficient is a multiplicating factor which grows
+exponentially with each tier.

@@ -18,8 +18,9 @@ use aiken/crypto/bls12_381/scalar.{Scalar}
 /// Domain separation tag for the basic BLS scheme, as defined in:
 /// <https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-basic>
 ///
-/// > [!CAUTION]
-/// > **DEPRECATED**: use [`aiken/crypto/bls12_381.{domain_separation_tag_nul}`](../bls12_381.html#domain_separation_tag_nul) instead.
+/// :::caution
+/// **DEPRECATED**: use [`aiken/crypto/bls12_381.{domain_separation_tag_nul}`](../bls12_381.html#domain_separation_tag_nul) instead.
+/// :::
 pub const domain_separation_tag_basic: DomainSeparationTag =
   "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_"
 
@@ -40,14 +41,15 @@ pub const zero: G2Element =
 /// The compressed representation is the concatenation of two 48-byte strings, corresponding to a modified and complexified `x` coordinate.
 /// The leading most significant 3 bits of this string indicate how to reconstruct the `y` coordinate.
 ///
-/// > [!NOTE]
-/// > More explicitly via [Zcash's spec](https://github.com/supranational/blst#serialization-format):
-/// >
-/// > <i>The most-significant three bits of a G1 or G2 encoding should be masked away before the coordinate(s) are interpreted. These bits are used to unambiguously represent the underlying element:
+/// :::note
+/// More explicitly via [Zcash's spec](https://github.com/supranational/blst#serialization-format):
+///
+/// > The most-significant three bits of a G1 or G2 encoding should be masked away before the coordinate(s) are interpreted. These bits are used to unambiguously represent the underlying element:
 /// >
 /// > - The most significant bit, when set, indicates that the point is in compressed form. Otherwise, the point is in uncompressed form.
 /// > - The second-most significant bit indicates that the point is at infinity. If this bit is set, the remaining bits of the group element's encoding should be set to zero.
-/// > - The third-most significant bit is set if (and only if) this point is in compressed form and it is not the point at infinity and its y-coordinate is the lexicographically largest of the two associated with the encoded x-coordinate.</i>
+/// > - The third-most significant bit is set if (and only if) this point is in compressed form and it is not the point at infinity and its y-coordinate is the lexicographically largest of the two associated with the encoded x-coordinate.
+/// :::
 pub fn compress(point: G2Element) -> ByteArray {
   builtin.bls12_381_g2_compress(point)
 }

@@ -3,7 +3,9 @@ import tailwindcss from "@tailwindcss/vite";
 import nimbus, {
   defineConfig as defineNimbusConfig,
 } from "@cloudflare/nimbus-docs";
-import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
+import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
+// From the Aiken VS Code extension (aiken-lang/vscode-aiken, Apache-2.0).
+import aiken from "./src/lib/aiken.tmLanguage.json";
 
 const nimbusConfig = defineNimbusConfig({
   // Canonical origin (no trailing slash). Drives canonical URLs, absolute OG
@@ -26,6 +28,10 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
   },
+  markdown: {
+    // Shiki doesn't ship an Aiken grammar. Code fences use the lowercase name.
+    shikiConfig: { langs: [{ ...aiken, name: "aiken" }] },
+  },
   // Hover-prefetch link targets so full-page navigations feel instant without
   // a client-side router.
   prefetch: {
@@ -47,11 +53,11 @@ export default defineConfig({
       markdown: {
         // Wrap wide tables so they scroll instead of overflowing the page
         // (styled by `.nb-table-scroll` in src/styles/prose.css).
-        hastPlugins: [tableScroll()],
+        hastPlugins: [tableScroll(), math()],
         // `## Install {#install}` gives a heading a fixed id. A heading that
         // ends in other `{…}` text, such as `{account_id}` in a .md file, is
         // read as attributes too; remove this to keep it as text.
-        features: { headingAttributes: true },
+        features: { headingAttributes: true, math: true },
       },
     }),
   ],

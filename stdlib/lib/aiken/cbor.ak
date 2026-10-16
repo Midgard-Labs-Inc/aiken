@@ -35,13 +35,14 @@ pub fn diagnostic(self: Data) -> String {
 /// cbor.deserialise(cbor.serialise(any_data)) == Some(any_data)
 /// ```
 ///
-/// > [!CAUTION]
-/// > Unfortunately, this function isn't derived from a builtin primitive. It
-/// > is therefore an order of magnitude more expensive than its counterpart
-/// > and shall be used with care.
-/// >
-/// > In general, one might prefer avoiding deserialisation unless truly necessary.
-/// > Yet, it may come in handy for testing and in rare scenarios.
+/// :::caution
+/// Unfortunately, this function isn't derived from a builtin primitive. It
+/// is therefore an order of magnitude more expensive than its counterpart
+/// and shall be used with care.
+///
+/// In general, one might prefer avoiding deserialisation unless truly necessary.
+/// Yet, it may come in handy for testing and in rare scenarios.
+/// :::
 pub fn deserialise(bytes: ByteArray) -> Option<Data> {
   let length = bytearray.length(bytes)
 

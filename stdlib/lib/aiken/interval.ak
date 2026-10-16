@@ -34,8 +34,9 @@
 //// If we call $validityRange = [start_{tx}, end_{tx})$ the validity interval
 //// of transactions during each period, we must then have:
 ////
-//// > [!TIP]
-//// > In Plutus V3, transaction validity ranges are always semi-open intervals, open in their upper bound.
+//// :::tip
+//// In Plutus V3, transaction validity ranges are always semi-open intervals, open in their upper bound.
+//// :::
 ////
 //// 1. Pre-bidding: $end_{tx} \lt start_{bid}$
 ////

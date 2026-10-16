@@ -1,0 +1,199 @@
+---
+title: "aiken/crypto/int224"
+sidebar:
+  label: "int224"
+---
+
+This module implements arithmetic operations in a constrained 224-bit integer field.
+Operations are performed modulo $2^{224}$, providing a field for cryptographic operations
+that require 28-byte values.
+
+The module provides functionality for basic arithmetic operations (addition, subtraction,
+multiplication) within this constrained field, as well as conversion functions between
+different representations.
+
+## Types
+
+### `Bits224` {#Bits224}
+
+### `State` {#State}
+
+#### Alias
+
+```aiken
+State = bitwise.State<Bits224>
+```
+
+## Constants
+
+### `field` {#field}
+
+```aiken
+field: Int
+```
+
+The prime defining the 224-bit integer field $2^{224}$
+
+### `field_size` {#field_size}
+
+```aiken
+field_size: Int = 28
+```
+
+The field size, in **bytes**.
+
+## Functions
+
+### Constructing
+
+### `from_bytearray_big_endian` {#from_bytearray_big_endian}
+
+```aiken
+from_bytearray_big_endian(bytes: ByteArray) -> State
+```
+
+Constructs a new `Bits224` element from a Big-Endian (most-significant bits first) `ByteArray`.
+
+### `from_bytearray_little_endian` {#from_bytearray_little_endian}
+
+```aiken
+from_bytearray_little_endian(bytes: ByteArray) -> State
+```
+
+Constructs a new `Bits224` element from a Little-Endian (least-significant bits first) `ByteArray`.
+
+### `from_int` {#from_int}
+
+```aiken
+from_int(int: Int) -> State
+```
+
+Constructs a new `Bits224` element from an integer, ensuring it's within the valid range of the field.
+
+### Modifying
+
+### `scale` {#scale}
+
+```aiken
+scale(self: State, e: Int) -> State
+```
+
+Exponentiates a `Bits224` element by a non-negative integer exponent, using repeated squaring.
+Note that this function returns `zero` for negative exponents.
+
+### `scale2` {#scale2}
+
+```aiken
+scale2(self: State, k: Int) -> State
+```
+
+A faster version of `scale` for the case where the exponent is a power of two.
+That is, the exponent $e = 2^k$ for some non-negative integer $k$.
+
+### Combining
+
+### `add` {#add}
+
+```aiken
+add(left: State, right: State) -> State
+```
+
+Adds two `Bits224` elements, ensuring the result stays within the finite field range.
+
+### `add_bytes` {#add_bytes}
+
+```aiken
+add_bytes(self: State, bytes: ByteArray) -> State
+```
+
+Adds a ByteArray to a `Bits224` element, interpreting bytes as a big-endian number.
+
+### `add_int` {#add_int}
+
+```aiken
+add_int(self: State, int: Int) -> State
+```
+
+Adds an integer to a `Bits224` element.
+
+### `mul` {#mul}
+
+```aiken
+mul(left: State, right: State) -> State
+```
+
+Multiplies two `Bits224` elements, with the result constrained within the finite field.
+
+### `mul_bytes` {#mul_bytes}
+
+```aiken
+mul_bytes(self: State, bytes: ByteArray) -> State
+```
+
+Multiplies a `Bits224` element by a ByteArray, interpreting bytes as a big-endian number.
+
+### `mul_int` {#mul_int}
+
+```aiken
+mul_int(self: State, int: Int) -> State
+```
+
+Multiplies a `Bits224` element by an integer.
+
+### `neg` {#neg}
+
+```aiken
+neg(self: State) -> State
+```
+
+Calculates the additive inverse of a `Bits224` element.
+
+### `sub` {#sub}
+
+```aiken
+sub(left: State, right: State) -> State
+```
+
+Subtracts one `Bits224` element from another, with the result wrapped within the finite field range.
+
+### `sub_bytes` {#sub_bytes}
+
+```aiken
+sub_bytes(self: State, bytes: ByteArray) -> State
+```
+
+Subtracts a `ByteArray` from a `Bits224` element, interpreting bytes as a big-endian number.
+
+### `sub_int` {#sub_int}
+
+```aiken
+sub_int(self: State, int: Int) -> State
+```
+
+Subtracts an integer from a `Bits224` element.
+
+### Transforming
+
+### `to_bytearray_big_endian` {#to_bytearray_big_endian}
+
+```aiken
+to_bytearray_big_endian(self: State) -> ByteArray
+```
+
+Converts a `Bits224` element to a Big-Endian (most-significant bits first) `ByteArray`.
+
+### `to_bytearray_little_endian` {#to_bytearray_little_endian}
+
+```aiken
+to_bytearray_little_endian(self: State) -> ByteArray
+```
+
+Converts a `Bits224` element to a Little-Endian (least-significant bits first) `ByteArray`.
+
+### `to_int` {#to_int}
+
+```aiken
+to_int(self: State) -> Int
+```
+
+Converts a `Bits224` element back to its integer representation.

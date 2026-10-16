@@ -1,0 +1,62 @@
+---
+title: "aiken/crypto/bls12_381"
+sidebar:
+  label: "bls12_381"
+  group:
+    label: "bls12_381"
+---
+
+## Types
+
+### `DomainSeparationTag` {#DomainSeparationTag}
+
+#### Alias
+
+```aiken
+DomainSeparationTag = ByteArray
+```
+
+## Constants
+
+### `domain_separation_tag_aug` {#domain_separation_tag_aug}
+
+```aiken
+domain_separation_tag_aug: ByteArray = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_AUG_"
+```
+
+Domain separation tag for the BLS scheme with message augmentation, as defined in:
+[https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-message-augmentation-2](https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-message-augmentation-2)
+
+### `domain_separation_tag_nul` {#domain_separation_tag_nul}
+
+```aiken
+domain_separation_tag_nul: ByteArray = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_"
+```
+
+Domain separation tag for the basic BLS scheme, as defined in:
+[https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-basic](https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-basic)
+
+### `domain_separation_tag_pop` {#domain_separation_tag_pop}
+
+```aiken
+domain_separation_tag_pop: ByteArray = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_"
+```
+
+Domain separation tag for the BLS scheme with proof of possession, as defined in:
+[https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-proof-of-possession-2](https://www.ietf.org/archive/id/draft-irtf-cfrg-bls-signature-05.html#name-proof-of-possession-2)
+
+### `public_key_size` {#public_key_size}
+
+```aiken
+public_key_size: Int = 48
+```
+
+Size (in bytes) of a compressed BLS12-381 public key.
+
+### `signature_size` {#signature_size}
+
+```aiken
+signature_size: Int = 96
+```
+
+Size (in bytes) of a compressed BLS12-381 signature.

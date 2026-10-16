@@ -5,12 +5,16 @@
 ### Added
 
 - **stdlib**: The standard library now lives in this repository (`stdlib/`) and ships with the compiler, so its version is the compiler's version. It starts from aiken-lang/stdlib v4.0.0, with aiken-lang/fuzz v3.0.0 merged in, so the `aiken/fuzz`, `aiken/fuzz/scenario` and `cardano/fuzz` modules are available too. Projects get it without declaring any dependency, and without fetching anything over the network. @rvcas
+- **stdlib**: The standard library's documentation is published on [aiken-lang.com](https://aiken-lang.com/stdlib/), generated from its doc comments with each release. @rvcas
+- **aiken**: `aiken docs --format markdown --base <path>` generates MDX pages for a [Nimbus](https://nimbus-docs.com) documentation site, one per module, instead of a standalone HTML site. @rvcas
 
 ### Changed
 
 - **aiken-project**: Declaring `aiken-lang/stdlib` or `aiken-lang/fuzz` as a dependency is now an error pointing at the entry to remove from `aiken.toml`. @rvcas
 - **aiken-project**: The `aiken/*` and `cardano/*` module namespaces are reserved for the standard library: a project can no longer define modules under them. Dependencies still can, as long as they don't clash with a standard library module. @rvcas
 - **aiken**: `aiken new` no longer adds a standard library dependency (nor looks up its latest release on GitHub), and `aiken packages add` refuses to add it. @rvcas
+- **stdlib**: Doc comments use Nimbus admonitions (`:::note … :::`) instead of GitHub-style alerts (`> [!NOTE]`), and some broken links and unclosed code examples are fixed. @rvcas
+- **aiken-project**: The "Stdlib" link in generated HTML documentation points at aiken-lang.com. @rvcas
 
 ## v1.2.1 - 2026-10-14
 

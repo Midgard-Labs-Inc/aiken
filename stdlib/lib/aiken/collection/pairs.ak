@@ -4,13 +4,13 @@
 //// that are specifically tailored to working with associative lists. Fundamentally, a `Pairs<key, value>` is
 //// a type-alias to `List<Pair<key, value>>`.
 ////
-//// > [!CAUTION]
-//// >
-//// > Unlike dictionaries (a.k.a. [`Dict`](./dict.html#Dict), associative lists make no assumption
-//// > about the ordering of elements within the list. As a result, lookup
-//// > functions do traverse the entire list when invoked. They are also not _sets_,
-//// > and thus allow for duplicate keys. This is reflected in the functions used
-//// > to interact with them.
+//// :::caution
+//// Unlike dictionaries (a.k.a. [`Dict`](./dict.html#Dict), associative lists make no assumption
+//// about the ordering of elements within the list. As a result, lookup
+//// functions do traverse the entire list when invoked. They are also not _sets_,
+//// and thus allow for duplicate keys. This is reflected in the functions used
+//// to interact with them.
+//// :::
 
 use aiken/builtin
 
@@ -422,11 +422,12 @@ pub fn delete_last(self: Pairs<key, value>, key k: key) -> Pairs<key, value> {
 /// Insert a value in the `Pairs` at a given key. If the key already exists,
 /// the value is added in front.
 ///
-/// > [!CAUTION]
-/// > The list is only traversed up to the given key and the traversal
-/// > stops as soon as a higher key is encountered. Said differently, the list
-/// > is assumed to **be ordered by ascending keys**! If it is not, expect the
-/// > unexpected.
+/// :::caution
+/// The list is only traversed up to the given key and the traversal
+/// stops as soon as a higher key is encountered. Said differently, the list
+/// is assumed to **be ordered by ascending keys**! If it is not, expect the
+/// unexpected.
+/// :::
 ///
 /// ```aiken
 /// use aiken/primitive/bytearray
@@ -461,11 +462,12 @@ pub fn insert_by_ascending_key(
 /// Like [`insert_by_ascending_key`](#insert_by_ascending_key) but specifies
 /// how to combine two values on a key conflict.
 ///
-/// > [!CAUTION]
-/// > The list is only traversed up to the given key and the traversal
-/// > stops as soon as a higher key is encountered. Said differently, the list
-/// > is assumed to **be ordered by ascending keys**! If it is not, expect the
-/// > unexpected.
+/// :::caution
+/// The list is only traversed up to the given key and the traversal
+/// stops as soon as a higher key is encountered. Said differently, the list
+/// is assumed to **be ordered by ascending keys**! If it is not, expect the
+/// unexpected.
+/// :::
 ///
 /// ```aiken
 /// use aiken/primitive/bytearray
@@ -604,11 +606,12 @@ pub fn pop_until_key_and_then(
 /// Insert a value in the `Pairs` at a given key. If the key already exists,
 /// its value is replaced.
 ///
-/// > [!CAUTION]
-/// > The list is only traversed up to the given key and the traversal
-/// > stops as soon as a higher key is encountered. Said differently, the list
-/// > is assumed to **be ordered by ascending keys**! If it is not, expect the
-/// > unexpected.
+/// :::caution
+/// The list is only traversed up to the given key and the traversal
+/// stops as soon as a higher key is encountered. Said differently, the list
+/// is assumed to **be ordered by ascending keys**! If it is not, expect the
+/// unexpected.
+/// :::
 ///
 /// ```aiken
 /// use aiken/primitive/bytearray

@@ -9,13 +9,13 @@ use cardano/transaction/output_reference
 
 /// Compare two script purposes, using the same ordering as the one used by
 /// the ledger when constructing the
-/// [redeemers](./transaction.html#Transaction) list:
+/// [redeemers](../transaction.html#Transaction) list:
 ///
-/// [`Spend`](./transaction.html#ScriptPurpose) < [`Mint`](./transaction.html#ScriptPurpose) < [`Publish`](./transaction.html#ScriptPurpose) < [`Withdraw`](./transaction.html#ScriptPurpose) < [`Vote`](./transaction.html#ScriptPurpose) < [`Propose`](./transaction.html#ScriptPurpose)
+/// [`Spend`](../transaction.html#ScriptPurpose) < [`Mint`](../transaction.html#ScriptPurpose) < [`Publish`](../transaction.html#ScriptPurpose) < [`Withdraw`](../transaction.html#ScriptPurpose) < [`Vote`](../transaction.html#ScriptPurpose) < [`Propose`](../transaction.html#ScriptPurpose)
 ///
 /// Note that this ordering follows the internal ledger types, and thus
 /// differs from the constructor order of
-/// [ScriptPurpose](./transaction.html#ScriptPurpose): `Spend` comes before
+/// [ScriptPurpose](../transaction.html#ScriptPurpose): `Spend` comes before
 /// `Mint`, and `Publish` comes before `Withdraw`.
 pub fn compare(left: ScriptPurpose, right: ScriptPurpose) -> Ordering {
   when left is {

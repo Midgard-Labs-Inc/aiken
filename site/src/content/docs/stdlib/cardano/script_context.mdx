@@ -1,0 +1,93 @@
+---
+title: "cardano/script_context"
+sidebar:
+  label: "script_context"
+---
+
+This module contains utilities for manually dealing with [`ScriptContext`](#ScriptContext). This is only ever useful for writing custom `else` handlers in validators.
+
+:::note
+Unless you know what you're doing, you should prefer using named handlers:
+
+- `mint`
+- `spend`
+- `withdraw`
+- `publish`
+- `vote`
+- `propose`
+:::
+
+## Types
+
+### `ScriptContext` {#ScriptContext}
+
+A context given to a script by the Cardano ledger when being executed.
+
+The context contains information about the entire transaction that contains
+the script. The transaction may also contain other scripts; to distinguish
+between multiple scripts, the [`ScriptContext`](#ScriptContext) contains a
+[`ScriptInfo`](#ScriptInfo) which indicates which script (or, for what
+purpose) the transaction is being executed.
+
+#### Constructors
+
+```aiken
+ScriptContext { transaction: Transaction, redeemer: Redeemer, info: ScriptInfo }
+```
+
+### `ScriptInfo` {#ScriptInfo}
+
+Characterizes the script information. The main (and only) difference with [`ScriptPurpose`](/stdlib/cardano/transaction/#ScriptPurpose) resides in the `Spending` variant which here contains a second field `datum: Option<Data>`.
+
+#### Constructors
+
+```aiken
+Minting(PolicyId)
+```
+
+For scripts executed as minting/burning policies, to insert
+or remove assets from circulation. It's parameterized by the identifier
+of the associated policy.
+
+```aiken
+Spending { output: OutputReference, datum: Option<Data> }
+```
+
+For scripts that are used as payment credentials for addresses in
+transaction outputs. They govern the rule by which the output they
+reference can be spent.
+
+```aiken
+Withdrawing(Credential)
+```
+
+For scripts that validate reward withdrawals from a reward account.
+
+The argument identifies the target reward account.
+
+```aiken
+Publishing { at: Index, certificate: Certificate }
+```
+
+Needed when delegating to a pool using stake credentials defined as a
+custom script. This purpose is also triggered when de-registering such
+stake credentials.
+
+The Int is a 0-based index of the given `Certificate` in `certificates`.
+
+```aiken
+Voting(Voter)
+```
+
+Voting for a type of voter using a governance action id to vote
+yes / no / abstain inside a transaction.
+
+The voter is who is doing the governance action.
+
+```aiken
+Proposing { at: Index, proposal_procedure: ProposalProcedure }
+```
+
+Used to propose a governance action.
+
+A 0-based index of the given `ProposalProcedure` in `proposal_procedures`.

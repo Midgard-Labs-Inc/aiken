@@ -59,18 +59,21 @@ pub type Transaction {
   fee: Lovelace,
   mint: Assets,
   certificates: List<Certificate>,
-  /// > [!IMPORTANT]
-  /// > Withdrawals are ordered by ascending [Credential](./credential.html#Credential). Yet, note that [`Script`](./credential.html#Credential) credentials are treated as **lower values** than [`VerificationKey`](./credential.html#Credential) credentials.
+  /// :::important
+  /// Withdrawals are ordered by ascending [Credential](./address.html#Credential). Yet, note that [`Script`](./address.html#Credential) credentials are treated as **lower values** than [`VerificationKey`](./address.html#Credential) credentials.
+  /// :::
   withdrawals: Pairs<Credential, Lovelace>,
   validity_range: ValidityRange,
   extra_signatories: List<VerificationKeyHash>,
-  /// > [!IMPORTANT]
-  /// > Redeemers are ordered by ascending [ScriptPurpose](./transaction.html#ScriptPurpose), following the internal ledger's ordering of script purposes: [`Spend`](./transaction.html#ScriptPurpose) < [`Mint`](./transaction.html#ScriptPurpose) < [`Publish`](./transaction.html#ScriptPurpose) < [`Withdraw`](./transaction.html#ScriptPurpose) < [`Vote`](./transaction.html#ScriptPurpose) < [`Propose`](./transaction.html#ScriptPurpose). Note that this ordering **differs from the constructor order** of [ScriptPurpose](./transaction.html#ScriptPurpose); see [script_purpose.compare](./transaction/script_purpose.html#compare).
+  /// :::important
+  /// Redeemers are ordered by ascending [ScriptPurpose](./transaction.html#ScriptPurpose), following the internal ledger's ordering of script purposes: [`Spend`](./transaction.html#ScriptPurpose) < [`Mint`](./transaction.html#ScriptPurpose) < [`Publish`](./transaction.html#ScriptPurpose) < [`Withdraw`](./transaction.html#ScriptPurpose) < [`Vote`](./transaction.html#ScriptPurpose) < [`Propose`](./transaction.html#ScriptPurpose). Note that this ordering **differs from the constructor order** of [ScriptPurpose](./transaction.html#ScriptPurpose); see [script_purpose.compare](./transaction/script_purpose.html#compare).
+  /// :::
   redeemers: Pairs<ScriptPurpose, Redeemer>,
   datums: Dict<DataHash, Data>,
   id: TransactionId,
-  /// > [!IMPORTANT]
-  /// > Votes are ordered by ascending [Voter](./governance.html#Voter) and [GovernanceActionId](./governance.html#GovernanceActionId).<br/>First constructor variants in a type are treated as lower indices; except for [Credential](./credential.html#Credential) where [`Script`](./credential.html#Credential) credentials are treated as **lower values** than [`VerificationKey`](./credential.html#Credential) credentials.
+  /// :::important
+  /// Votes are ordered by ascending [Voter](./governance.html#Voter) and [GovernanceActionId](./governance.html#GovernanceActionId).<br/>First constructor variants in a type are treated as lower indices; except for [Credential](./address.html#Credential) where [`Script`](./address.html#Credential) credentials are treated as **lower values** than [`VerificationKey`](./address.html#Credential) credentials.
+  /// :::
   votes: Pairs<Voter, Pairs<GovernanceActionId, Vote>>,
   proposal_procedures: List<ProposalProcedure>,
   current_treasury_amount: Option<Lovelace>,

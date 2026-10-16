@@ -1,15 +1,16 @@
 //// This module implements operations between rational numbers.
 ////
-//// > [!CAUTION]
-//// > Internally, rational aren't automatically reduced as this is **only done on-demand**.
-//// >
-//// > Thus, for example:
-//// >
-//// > ```aiken
-//// > rational.new(2, 3) != rational.new(4, 6)
-//// > ```
-//// >
-//// > Comparing rational values should, therefore, only happen after reduction (see [reduce](#reduce)) or via the [compare](#compare) method.
+//// :::caution
+//// Internally, rational aren't automatically reduced as this is **only done on-demand**.
+////
+//// Thus, for example:
+////
+//// ```aiken
+//// rational.new(2, 3) != rational.new(4, 6)
+//// ```
+////
+//// Comparing rational values should, therefore, only happen after reduction (see [reduce](#reduce)) or via the [compare](#compare) method.
+//// :::
 
 use aiken/builtin
 use aiken/collection/list
@@ -402,9 +403,10 @@ pub fn proper_fraction(self: Rational) -> (Int, Rational) {
 /// rational.round(z) == -1
 /// ```
 ///
-/// > [!CAUTION]
-/// > This behaves differently than _Haskell_. If you're coming from `PlutusTx`, beware that in Haskell, rounding on equidistant values depends on the whole number being odd or even.
-/// > If you need this behaviour, use [`round_even`](#round_even).
+/// :::caution
+/// This behaves differently than _Haskell_. If you're coming from `PlutusTx`, beware that in Haskell, rounding on equidistant values depends on the whole number being odd or even.
+/// If you need this behaviour, use [`round_even`](#round_even).
+/// :::
 pub fn round(self: Rational) -> Int {
   let (n, f) = proper_fraction(self)
 

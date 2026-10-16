@@ -230,7 +230,31 @@ where
         &mut self,
         destination: Option<PathBuf>,
         include_dependencies: bool,
+        format: docs::Format,
     ) -> Result<(), Vec<Error>> {
+        let doc_files = self.docs_files(include_dependencies, format)?;
+
+        let destination = destination.unwrap_or_else(|| self.root.join("docs"));
+
+        self.event_listener.handle_event(Event::GeneratingDocFiles {
+            output_path: destination.clone(),
+        });
+
+        for file in doc_files {
+            let path = destination.join(file.path);
+            fs::create_dir_all(path.parent().unwrap()).map_err(Error::from)?;
+            fs::write(&path, file.content).map_err(Error::from)?;
+        }
+
+        Ok(())
+    }
+
+    /// Generate the project's documentation, without writing it anywhere.
+    pub fn docs_files(
+        &mut self,
+        include_dependencies: bool,
+        format: docs::Format,
+    ) -> Result<Vec<docs::DocFile>, Vec<Error>> {
         self.event_listener
             .handle_event(Event::BuildingDocumentation {
                 root: self.root.clone(),
@@ -246,12 +270,6 @@ where
 
         self.type_check(&mut modules, Tracing::silent(), None, false)?;
 
-        let destination = destination.unwrap_or_else(|| self.root.join("docs"));
-
-        self.event_listener.handle_event(Event::GeneratingDocFiles {
-            output_path: destination.clone(),
-        });
-
         let modules = self
             .checked_modules
             .values_mut()
@@ -264,15 +282,12 @@ where
             })
             .collect();
 
-        let doc_files = docs::generate_all(&self.root, &self.config, modules);
-
-        for file in doc_files {
-            let path = destination.join(file.path);
-            fs::create_dir_all(path.parent().unwrap()).map_err(Error::from)?;
-            fs::write(&path, file.content).map_err(Error::from)?;
-        }
-
-        Ok(())
+        Ok(match format {
+            docs::Format::Html => docs::generate_all(&self.root, &self.config, modules),
+            docs::Format::Markdown { base } => {
+                docs::mdx::generate_all(&self.root, &self.config, modules, &base)
+            }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

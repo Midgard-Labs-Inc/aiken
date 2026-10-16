@@ -1,0 +1,218 @@
+---
+title: "cardano/governance"
+sidebar:
+  label: "governance"
+  group:
+    label: "governance"
+---
+
+## Types
+
+### `Constitution` {#Constitution}
+
+#### Constructors
+
+```aiken
+Constitution { guardrails: Option<ScriptHash> }
+```
+
+### `GovernanceAction` {#GovernanceAction}
+
+#### Constructors
+
+```aiken
+ProtocolParameters {
+  ancestor: Option<GovernanceActionId>,
+  new_parameters: ProtocolParametersUpdate,
+  guardrails: Option<ScriptHash>,
+}
+```
+
+#### `.ancestor`
+The last governance action of type 'ProtocolParameters'. They must all
+form a chain.
+<hr/>
+
+#### `.new_parameters`
+The new proposed protocol parameters. Only values set to `Some` are relevant.
+<hr/>
+
+#### `.guardrails`
+The optional guardrails script defined in the constitution. The script
+is executed by the ledger in addition to the hard-coded ledger rules.
+
+It must pass for the new protocol parameters to be deemed valid.
+<hr/>
+
+```aiken
+HardFork { ancestor: Option<GovernanceActionId>, new_version: ProtocolVersion }
+```
+
+#### `.ancestor`
+The last governance action of type `HardFork`. They must all
+form a chain.
+<hr/>
+
+#### `.new_version`
+The new proposed version. Few rules apply to proposing new versions:
+
+- The `major` component, if incremented, must be exactly one more than the current.
+- The `minor` component, if incremented, must be exactly one more than the current.
+- If the `major` component is incremented, `minor` must be set to `0`.
+- Neither `minor` nor `major` can be decremented.
+<hr/>
+
+```aiken
+TreasuryWithdrawal {
+  beneficiaries: Pairs<Credential, Lovelace>,
+  guardrails: Option<ScriptHash>,
+}
+```
+
+#### `.beneficiaries`
+A collection of beneficiaries, which can be plain verification key
+hashes or script hashes (e.g. DAO).
+<hr/>
+
+#### `.guardrails`
+The optional guardrails script defined in the constitution. The script
+is executed by the ledger in addition to the hard-coded ledger rules.
+
+It must pass for the withdrawals to be authorized.
+<hr/>
+
+```aiken
+NoConfidence { ancestor: Option<GovernanceActionId> }
+```
+
+#### `.ancestor`
+The last governance action of type `NoConfidence` or
+`ConstitutionalCommittee`. They must all / form a chain.
+<hr/>
+
+```aiken
+ConstitutionalCommittee {
+  ancestor: Option<GovernanceActionId>,
+  evicted_members: List<Credential>,
+  added_members: Pairs<Credential, Mandate>,
+  quorum: Rational,
+}
+```
+
+#### `.ancestor`
+The last governance action of type `NoConfidence` or
+`ConstitutionalCommittee`. They must all / form a chain.
+<hr/>
+
+#### `.evicted_members`
+Constitutional members to be removed.
+<hr/>
+
+#### `.added_members`
+Constitutional members to be added.
+<hr/>
+
+#### `.quorum`
+The new quorum value, as a ratio of a numerator and a denominator. The
+quorum specifies the threshold of 'Yes' votes necessary for the
+constitutional committee to accept a proposal procedure.
+<hr/>
+
+```aiken
+NewConstitution {
+  ancestor: Option<GovernanceActionId>,
+  constitution: Constitution,
+}
+```
+
+#### `.ancestor`
+The last governance action of type `Constitution` or
+`ConstitutionalCommittee`. They must all / form a chain.
+<hr/>
+
+#### `.constitution`
+The new proposed constitution.
+<hr/>
+
+```aiken
+NicePoll
+```
+
+### `GovernanceActionId` {#GovernanceActionId}
+
+#### Constructors
+
+```aiken
+GovernanceActionId { transaction: TransactionId, proposal_procedure: Index }
+```
+
+### `Mandate` {#Mandate}
+
+An epoch number after which constitutional committee member
+mandate expires.
+
+#### Alias
+
+```aiken
+Mandate = Int
+```
+
+### `ProposalProcedure` {#ProposalProcedure}
+
+#### Constructors
+
+```aiken
+ProposalProcedure {
+  deposit: Lovelace,
+  return_address: Credential,
+  governance_action: GovernanceAction,
+}
+```
+
+### `ProtocolVersion` {#ProtocolVersion}
+
+#### Constructors
+
+```aiken
+ProtocolVersion { major: Int, minor: Int }
+```
+
+### `TransactionId` {#TransactionId}
+
+#### Alias
+
+```aiken
+TransactionId = Hash<Blake2b_256, ByteArray>
+```
+
+### `Vote` {#Vote}
+
+#### Constructors
+
+```aiken
+No
+```
+
+```aiken
+Yes
+```
+
+```aiken
+Abstain
+```
+
+### `Voter` {#Voter}
+
+#### Constructors
+
+```aiken
+ConstitutionalCommitteeMember(Credential)
+```
+
+```aiken
+DelegateRepresentative(Credential)
+```
+
+```aiken
+StakePool(VerificationKeyHash)
+```

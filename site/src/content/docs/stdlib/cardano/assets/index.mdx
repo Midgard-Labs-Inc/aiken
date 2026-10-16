@@ -1,0 +1,618 @@
+---
+title: "cardano/assets"
+sidebar:
+  label: "assets"
+  group:
+    label: "assets"
+---
+
+## Types
+
+### `AssetName` {#AssetName}
+
+A type-alias for 'AssetName`, which are free-form byte-arrays between
+0 and 32 bytes.
+
+#### Alias
+
+```aiken
+AssetName = ByteArray
+```
+
+### `Assets` {#Assets}
+
+A multi-asset output `Assets`. Contains tokens indexed by [PolicyId](#PolicyId) and [AssetName](#AssetName).
+
+:::important
+This type maintain some invariants by construction; in particular,
+`Assets` will never contain a zero quantity of a particular token.
+:::
+
+### `Lovelace` {#Lovelace}
+
+`Lovelace` is a type-alias for `Int`.
+
+#### Alias
+
+```aiken
+Lovelace = Int
+```
+
+### `PolicyId` {#PolicyId}
+
+A type-alias for a `PolicyId`. A `PolicyId` is always 28-byte long
+
+#### Alias
+
+```aiken
+PolicyId = Hash<Blake2b_224, Script>
+```
+
+### `Tokens` {#Tokens}
+
+Token quantities indexed by asset name for a single policy.
+
+#### Alias
+
+```aiken
+Tokens = Dict<AssetName, Int>
+```
+
+## Constants
+
+### `ada_asset_name` {#ada_asset_name}
+
+```aiken
+ada_asset_name: ByteArray = ""
+```
+
+Ada, the native currency, isn't associated with any `AssetName` (it's not
+possible to mint Ada!).
+
+By convention, it is an empty `ByteArray`.
+
+### `ada_policy_id` {#ada_policy_id}
+
+```aiken
+ada_policy_id: ByteArray = ""
+```
+
+Ada, the native currency, isn't associated with any `PolicyId` (it's not
+possible to mint Ada!).
+
+By convention, it is an empty `ByteArray`.
+
+### `zero` {#zero}
+
+```aiken
+zero: Assets
+```
+
+Construct an empty `Assets` with nothing in it.
+
+## Functions
+
+### Constructing
+
+### `from_asset` {#from_asset}
+
+```aiken
+from_asset(policy_id: PolicyId, asset_name: AssetName, quantity: Int) -> Assets
+```
+
+Construct `Assets` from an asset identifier (i.e. `PolicyId` + `AssetName`)
+and a given quantity.
+
+### `from_value` {#from_value}
+
+```aiken
+from_value(value: Value) -> Assets
+```
+
+Construct an `Assets` map from a builtin `Value`
+
+### `from_ascending_pairs` {#from_ascending_pairs}
+
+```aiken
+from_ascending_pairs(xs: Pairs<PolicyId, Dict<AssetName, Int>>) -> Assets
+```
+
+### `from_asset_list` {#from_asset_list}
+
+```aiken
+from_asset_list(xs: Pairs<PolicyId, Pairs<AssetName, Int>>) -> Assets
+```
+
+Promote an arbitrary list of assets into `Assets`. This function fails
+(i.e. halts the program execution) if:
+
+- there's any duplicate amongst `PolicyId`;
+- there's any duplicate amongst `AssetName`;
+- the `AssetName` aren't sorted in ascending lexicographic order; or
+- any asset quantity is null.
+
+This function is meant to turn arbitrary user-defined `Data` into safe `Assets`,
+while checking for internal invariants.
+
+### `from_lovelace` {#from_lovelace}
+
+```aiken
+from_lovelace(quantity: Int) -> Assets
+```
+
+Construct `Assets` from a lovelace quantity.
+
+Friendly reminder: 1 Ada = 1.000.000 Lovelace
+
+### Inspecting
+
+### `contains` {#contains}
+
+```aiken
+contains(self: Dict<AssetName, Int>, subset: Dict<AssetName, Int>) -> Bool
+```
+
+Check whether some tokens list is contained within another. This is a
+specialised version of [`dict.{contains}`](/stdlib/aiken/collection/dict/#contains).
+
+### `has_any_nft` {#has_any_nft}
+
+```aiken
+has_any_nft(self: Assets, policy: PolicyId) -> Bool
+```
+
+Check whether local `Assets` carry a quantity of exactly 1 of at least one asset
+of the given policy, as expected of an NFT. Other assets are tolerated.
+
+:::important
+The check is local to the given `Assets`. A quantity of 1 does not prove
+that the asset is a genuine NFT, unique across the whole chain. A fungible
+token present with a quantity of 1 also satisfies the check.
+:::
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("bar", "token#2", 14)
+
+assets.has_any_nft(my_assets, "foo") == True
+assets.has_any_nft(my_assets, "bar") == False
+assets.has_any_nft(my_assets, "baz") == False
+```
+
+### `has_any_nft_strict` {#has_any_nft_strict}
+
+```aiken
+has_any_nft_strict(self: Assets, policy: PolicyId) -> Bool
+```
+
+Check whether `Assets` carry a quantity of exactly 1 of a single asset of
+the given policy, as expected of an NFT. Other assets (other than
+Ada) aren't tolerated. Said differently, the check succeeds if and only if
+the assets contain no assets other than the expected NFT or Ada.
+
+:::important
+See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+and does not prove chain-level uniqueness.
+:::
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("bar", "token#2", 14)
+
+assets.has_any_nft_strict(my_assets, "foo") == False
+assets.has_any_nft_strict(my_assets, "bar") == False
+assets.has_any_nft_strict(my_assets, "baz") == False
+```
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+
+assets.has_any_nft_strict(my_assets, "foo") == True
+assets.has_any_nft_strict(my_assets, "bar") == False
+```
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("foo", "token#2", 1)
+
+assets.has_any_nft_strict(my_assets, "foo") == False
+assets.has_any_nft_strict(my_assets, "bar") == False
+```
+
+### `has_nft` {#has_nft}
+
+```aiken
+has_nft(self: Assets, policy: PolicyId, asset_name: AssetName) -> Bool
+```
+
+Check whether `Assets` carry a quantity of exactly 1 of the given asset,
+as expected of an NFT. Other assets are tolerated.
+
+:::important
+See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+and does not prove chain-level uniqueness.
+:::
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("bar", "token#2", 14)
+
+assets.has_nft(my_assets, "foo", "token#1") == True
+assets.has_nft(my_assets, "foo", "token#2") == False
+assets.has_nft(my_assets, "bar", "token#2") == False
+assets.has_nft(my_assets, "baz", "token#3") == False
+```
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("foo", "token#2", 1)
+
+assets.has_nft(my_assets, "foo", "token#1") == True
+assets.has_nft(my_assets, "foo", "token#2") == True
+assets.has_nft(my_assets, "bar", "token#2") == False
+```
+
+### `has_nft_strict` {#has_nft_strict}
+
+```aiken
+has_nft_strict(self: Assets, policy: PolicyId, asset_name: AssetName) -> Bool
+```
+
+Check whether a `Assets` carry a quantity of exactly 1 of the given asset,
+as expected of an NFT. Other assets (other than
+Ada) aren't tolerated. Said differently, the check succeeds if and only if
+assets contain no assets other than the expected NFT or Ada.
+
+:::important
+See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+and does not prove chain-level uniqueness.
+:::
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("bar", "token#2", 14)
+
+assets.has_nft_strict(my_assets, "foo", "asset#1") == False
+assets.has_nft_strict(my_assets, "bar", "asset#2") == False
+assets.has_nft_strict(my_assets, "baz", "asset#3") == False
+```
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+
+assets.has_nft_strict(my_assets, "foo", "token#1") == True
+assets.has_nft_strict(my_assets, "foo", "token#2") == False
+assets.has_nft_strict(my_assets, "bar", "token#2") == False
+```
+
+```aiken
+let my_assets = assets.from_lovelace(42)
+   |> assets.add("foo", "token#1", 1)
+   |> assets.add("foo", "token#2", 1)
+
+assets.has_nft_strict(my_assets, "foo", "asset#1") == False
+assets.has_nft_strict(my_assets, "foo", "asset#2") == False
+```
+
+### `is_zero` {#is_zero}
+
+```aiken
+is_zero(self: Assets) -> Bool
+```
+
+Check if `Assets` have no assets and holds no Ada/Lovelace.
+
+### `match` {#match}
+
+```aiken
+match(
+  left: Assets,
+  right: Data,
+  assert_lovelace: fn(Lovelace, Lovelace) -> Bool,
+) -> Bool
+```
+
+Efficiently compare two asset maps together, allowing a custom behaviour for Ada/Lovelace.
+The second parameter is provided as `Data`, allowing to conveniently compare serialized
+datums or similar structurually equivalent types (such as `Pairs<PolicyId, Pairs<AssetName, Lovelace>>`).
+
+The third argument is a callback function to assert the left and right lovelace
+quantities. Its first argument refers to the quantity of the first argument of
+`match`, and the second argument of the callback to the quantity of the second
+argument of `match`. In the absence of lovelace in any assets, it defaults to `0`.
+
+```aiken
+const my_assets: Assets =
+  assets.from_lovelace(30)
+    |> assets.add("foo", "bar", 1)
+    |> assets.add("foo", "baz", 42)
+
+const datum: Data =
+  assets.from_lovelace(20)
+    |> assets.add("foo", "bar", 1)
+    |> assets.add("foo", "baz", 42)
+
+True == assets.match(my_assets, datum, >=)
+
+False == assets.match(my_assets, datum, ==)
+
+True == assets.match(my_assets, datum, fn(my_assets_lovelace, datum_lovelace) {
+  2 * datum_lovelace >= my_assets_lovelace
+})
+
+False == assets.match(assets.zero, datum, fn(_, _) { True })
+```
+
+### `match_assets` {#match_assets}
+
+```aiken
+match_assets(left: Assets, right: Data) -> Bool
+```
+
+A version of [`match`](#match) which simply ignores lovelace in either operands.
+
+```aiken
+const my_assets: Assets =
+  assets.from_lovelace(30)
+    |> assets.add("foo", "bar", 1)
+    |> assets.add("foo", "baz", 42)
+
+const datum: Data =
+  assets.from_lovelace(20)
+    |> assets.add("foo", "bar", 1)
+    |> assets.add("foo", "baz", 42)
+
+True == assets.match(my_assets, datum)
+
+False == assets.match(assets.zero, datum)
+```
+
+### `lovelace_of` {#lovelace_of}
+
+```aiken
+lovelace_of(self: Assets) -> Int
+```
+
+A specialized version of `quantity_of` for the Ada currency.
+
+### `policies` {#policies}
+
+```aiken
+policies(self: Assets) -> List<PolicyId>
+```
+
+A list of all token policies in that Assets with non-zero tokens.
+
+### `quantity_of` {#quantity_of}
+
+```aiken
+quantity_of(self: Assets, policy_id: PolicyId, asset_name: AssetName) -> Int
+```
+
+Extract the quantity of a given asset.
+
+### `tokens` {#tokens}
+
+```aiken
+tokens(self: Assets, policy_id: PolicyId) -> Dict<AssetName, Int>
+```
+
+Get all tokens associated with a given policy.
+
+### Inspecting Forcibly
+
+### `expect_lovelace_of` {#expect_lovelace_of}
+
+```aiken
+expect_lovelace_of(self: Assets) -> Int
+```
+
+More efficient version of [`lovelace_of`](#lovelace_of), but fails when
+there's no lovelace quantity in the [`Assets`](#Assets).
+
+:::tip
+It's worth noting that:
+
+- There's **always** some lovelace in assets from **inputs** or **outputs**.
+- There's **never** any lovelace in assets from **mint**.
+:::
+
+### `expect_match` {#expect_match}
+
+```aiken
+expect_match(
+  left: Assets,
+  right: Data,
+  assert_lovelace: fn(Lovelace, Lovelace) -> Bool,
+) -> Bool
+```
+
+A slightly more efficient version of [`match`](#match) which fails if the
+provided `Data` is not akin to a [`Assets`](#Assets).
+
+### `expect_match_assets` {#expect_match_assets}
+
+```aiken
+expect_match_assets(left: Assets, right: Data) -> Bool
+```
+
+A slightly more efficient version of [`match_assets`](#match_assets) which
+fails if the provided `Data` is not akin to a [`Assets`](#Assets).
+
+### `expect_quantity_of` {#expect_quantity_of}
+
+```aiken
+expect_quantity_of(
+  self: Assets,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> Int
+```
+
+More efficient version of [`quantity_of`](#quantity_of), but fails if the
+target policy and asset aren't present in the assets.
+
+### Modifying
+
+### `negate` {#negate}
+
+```aiken
+negate(self: Assets) -> Assets
+```
+
+Negates quantities of all tokens (including Ada) in that `Assets`.
+
+```
+v1
+  |> assets.negate
+  |> assets.merge(v1)
+  |> assets.is_zero
+// True
+```
+
+### `restricted_to` {#restricted_to}
+
+```aiken
+restricted_to(self: Assets, mask: List<PolicyId>) -> Assets
+```
+
+Get a subset of the assets restricted to the given policies.
+
+### `without_lovelace` {#without_lovelace}
+
+```aiken
+without_lovelace(self: Assets) -> Assets
+```
+
+Get `Assets` excluding Ada.
+
+### Modifying Forcibly
+
+### `expect_tail` {#expect_tail}
+
+```aiken
+expect_tail(self: Assets) -> Assets
+```
+
+Removes the first policy id from an `Assets` map, but fails if the `Assets`
+are empty and contains no assets whatsoever.
+
+This is useful to strip Ada forcibly out of assets that are known to
+contain Ada (e.g. inputs or outputs).
+
+### Combining
+
+### `add` {#add}
+
+```aiken
+add(
+  self: Assets,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+  quantity: Int,
+) -> Assets
+```
+
+Add a (positive or negative) quantity of a single token to a assets.
+This is more efficient than [`merge`](#merge) for a single asset.
+
+### `difference` {#difference}
+
+```aiken
+difference(left: Assets, right: Assets) -> Assets
+```
+
+### `merge` {#merge}
+
+```aiken
+merge(left: Assets, right: Assets) -> Assets
+```
+
+Combine two `Assets` together.
+
+### Transforming
+
+### `flatten` {#flatten}
+
+```aiken
+flatten(self: Assets) -> List<(PolicyId, AssetName, Int)>
+```
+
+Flatten `Assets` into a list of 3-tuple `(PolicyId, AssetName, Quantity)`.
+
+Handy to manipulate assets as uniform lists.
+
+:::caution
+This function is quite expensive and really only viable in testing
+scenarios. If you need to traverse all elements in an `Assets` map, prefer
+[`reduce`](#reduce) or more bespoke functions for your use case.
+:::
+
+### `flatten_with` {#flatten_with}
+
+```aiken
+flatten_with(self: Assets, with: FlattenStrategy<result>) -> List<result>
+```
+
+Flatten `Assets` into a list of results, possibly discarding some along the
+way. In particular, we have:
+
+```aiken
+assets.flatten(my_assets) == assets.flatten_with(my_assets, strategy.triple())
+```
+
+### `reduce` {#reduce}
+
+```aiken
+reduce(
+  self: Assets,
+  start: result,
+  with: fn(PolicyId, AssetName, Int, result) -> result,
+) -> result
+```
+
+Reduce assets into a single result
+
+```
+assets.zero
+ |> assets.add("a", "1", 10)
+ |> assets.add("b", "2", 20)
+ |> assets.reduce(v, 0, fn(_, _, quantity, acc) { acc + quantity })
+ // 30
+```
+
+### `to_dict` {#to_dict}
+
+```aiken
+to_dict(self: Assets) -> Dict<PolicyId, Tokens>
+```
+
+Convert assets into a dictionary of tokens.
+
+### `to_pairs` {#to_pairs}
+
+```aiken
+to_pairs(self: Assets) -> Pairs<PolicyId, Tokens>
+```
+
+Convert assets into pairs of tokens.
+
+### `to_value` {#to_value}
+
+```aiken
+to_value(self: Assets) -> Value
+```
+
+Convert assets into a builtin `Value`
+
+:::important
+This function is rather expensive and performs a full Data-object conversion. Use with care.
+:::

@@ -54,6 +54,14 @@ pnpm typecheck
 pnpm lint:docs
 ```
 
+`site/src/content/docs/stdlib/` is generated from the standard library's doc comments (with `aiken docs --format markdown`'s renderer) and must not be hand-edited. A test fails when it's out of date; after changing stdlib docs, regenerate it with:
+
+```sh
+UPDATE_STDLIB_DOCS=1 cargo test -p aiken-project --test stdlib
+```
+
+Stdlib doc comments are rendered as MDX: use Nimbus admonitions (`:::note … :::`) rather than GitHub-style alerts, and close every code fence.
+
 ## Architecture
 
 `stdlib/` is the standard library (including the fuzzers). It's an ordinary Aiken project, but it ships inside the compiler: `crates/aiken-project/build.rs` embeds its modules (minus the `*.test.ak` test modules), and every project gets them written to `build/packages/aiken-stdlib` and loaded as an implicit dependency named `aiken/stdlib` (`crates/aiken-project/src/stdlib.rs`). Its version is the compiler's version. Projects can't declare it as a dependency, and their own modules can't live under the `aiken/*` or `cardano/*` namespaces.

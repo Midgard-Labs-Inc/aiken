@@ -37,9 +37,10 @@ pub const ada_asset_name = ""
 
 /// A multi-asset output `Assets`. Contains tokens indexed by [PolicyId](#PolicyId) and [AssetName](#AssetName).
 ///
-/// > [!IMPORTANT]
-/// > This type maintain some invariants by construction; in particular,
-/// > `Assets` will never contain a zero quantity of a particular token.
+/// :::important
+/// This type maintain some invariants by construction; in particular,
+/// `Assets` will never contain a zero quantity of a particular token.
+/// :::
 pub opaque type Assets {
   inner: Dict<PolicyId, Tokens>,
 }
@@ -161,10 +162,11 @@ fn do_contains(
 /// Check whether local `Assets` carry a quantity of exactly 1 of at least one asset
 /// of the given policy, as expected of an NFT. Other assets are tolerated.
 ///
-/// > [!IMPORTANT]
-/// > The check is local to the given `Assets`. A quantity of 1 does not prove
-/// > that the asset is a genuine NFT, unique across the whole chain. A fungible
-/// > token present with a quantity of 1 also satisfies the check.
+/// :::important
+/// The check is local to the given `Assets`. A quantity of 1 does not prove
+/// that the asset is a genuine NFT, unique across the whole chain. A fungible
+/// token present with a quantity of 1 also satisfies the check.
+/// :::
 ///
 /// ```aiken
 /// let my_assets = assets.from_lovelace(42)
@@ -185,9 +187,10 @@ pub fn has_any_nft(self: Assets, policy: PolicyId) -> Bool {
 /// Ada) aren't tolerated. Said differently, the check succeeds if and only if
 /// the assets contain no assets other than the expected NFT or Ada.
 ///
-/// > [!IMPORTANT]
-/// > See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
-/// > and does not prove chain-level uniqueness.
+/// :::important
+/// See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+/// and does not prove chain-level uniqueness.
+/// :::
 ///
 /// ```aiken
 /// let my_assets = assets.from_lovelace(42)
@@ -241,9 +244,10 @@ pub fn has_any_nft_strict(self: Assets, policy: PolicyId) -> Bool {
 /// Check whether `Assets` carry a quantity of exactly 1 of the given asset,
 /// as expected of an NFT. Other assets are tolerated.
 ///
-/// > [!IMPORTANT]
-/// > See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
-/// > and does not prove chain-level uniqueness.
+/// :::important
+/// See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+/// and does not prove chain-level uniqueness.
+/// :::
 ///
 /// ```aiken
 /// let my_assets = assets.from_lovelace(42)
@@ -274,9 +278,10 @@ pub fn has_nft(self: Assets, policy: PolicyId, asset_name: AssetName) -> Bool {
 /// Ada) aren't tolerated. Said differently, the check succeeds if and only if
 /// assets contain no assets other than the expected NFT or Ada.
 ///
-/// > [!IMPORTANT]
-/// > See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
-/// > and does not prove chain-level uniqueness.
+/// :::important
+/// See [`has_any_nft`](#has_any_nft): the check is local to the given `Assets`
+/// and does not prove chain-level uniqueness.
+/// :::
 ///
 /// ```aiken
 /// let my_assets = assets.from_lovelace(42)
@@ -433,11 +438,12 @@ pub fn tokens(self: Assets, policy_id: PolicyId) -> Dict<AssetName, Int> {
 /// More efficient version of [`lovelace_of`](#lovelace_of), but fails when
 /// there's no lovelace quantity in the [`Assets`](#Assets).
 ///
-/// > [!TIP]
-/// > It's worth noting that:
-/// >
-/// > - There's **always** some lovelace in assets from **inputs** or **outputs**.
-/// > - There's **never** any lovelace in assets from **mint**.
+/// :::tip
+/// It's worth noting that:
+///
+/// - There's **always** some lovelace in assets from **inputs** or **outputs**.
+/// - There's **never** any lovelace in assets from **mint**.
+/// :::
 pub fn expect_lovelace_of(self: Assets) -> Int {
   expect Pair("", lovelaces) = self
     |> to_dict
@@ -656,10 +662,11 @@ pub fn merge(left v0: Assets, right v1: Assets) -> Assets {
 ///
 /// Handy to manipulate assets as uniform lists.
 ///
-/// > [!CAUTION]
-/// > This function is quite expensive and really only viable in testing
-/// > scenarios. If you need to traverse all elements in an `Assets` map, prefer
-/// > [`reduce`](#reduce) or more bespoke functions for your use case.
+/// :::caution
+/// This function is quite expensive and really only viable in testing
+/// scenarios. If you need to traverse all elements in an `Assets` map, prefer
+/// [`reduce`](#reduce) or more bespoke functions for your use case.
+/// :::
 pub fn flatten(self: Assets) -> List<(PolicyId, AssetName, Int)> {
   dict.foldr(
     self.inner,
@@ -739,8 +746,9 @@ pub fn to_pairs(self: Assets) -> Pairs<PolicyId, Tokens> {
 
 /// Convert assets into a builtin `Value`
 ///
-/// > [!IMPORTANT]
-/// > This function is rather expensive and performs a full Data-object conversion. Use with care.
+/// :::important
+/// This function is rather expensive and performs a full Data-object conversion. Use with care.
+/// :::
 pub fn to_value(self: Assets) -> Value {
   builtin.un_value_data(self.inner)
 }

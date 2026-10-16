@@ -1,0 +1,64 @@
+---
+title: "cardano/assets/strategy"
+sidebar:
+  label: "strategy"
+---
+
+This module contains strategies used to transform [`Assets`](/stdlib/cardano/assets/#Assets). You can safely ignore this module if you aren't using [`flatten_with`](/stdlib/cardano/assets/#flatten_with).
+
+## Types
+
+### `DiscardResult<result>` {#DiscardResult}
+
+A callback to discard result at a given key
+
+#### Alias
+
+```aiken
+DiscardResult<result> = fn() -> List<result>
+```
+
+### `FlattenStrategy<result>` {#FlattenStrategy}
+
+A strategy for flattening an asset list.
+
+#### Alias
+
+```aiken
+FlattenStrategy<result> = fn(
+    Hash<Blake2b_224, Script>,
+    ByteArray,
+    Int,
+    KeepResult<result>,
+    DiscardResult<result>,
+  ) ->
+    List<result>
+```
+
+### `KeepResult<result>` {#KeepResult}
+
+A callback to keep result at a given key
+
+#### Alias
+
+```aiken
+KeepResult<result> = fn(result) -> List<result>
+```
+
+## Functions
+
+#### Flatten strategies
+
+### `triple` {#triple}
+
+```aiken
+triple() -> FlattenStrategy<(Hash<Blake2b_224, Script>, ByteArray, Int)>
+```
+
+Keep all assets, combining them as a 3-tuple.
+
+```aiken
+fn(policy_id, asset_name, quantity, keep, _discard) {
+  keep((policy_id, asset_name, quantity))
+}
+```
