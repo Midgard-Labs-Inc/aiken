@@ -2,6 +2,8 @@
 
 ## unreleased
 
+## v1.3.0 - 2026-10-16
+
 ### Added
 
 - **stdlib**: The standard library now lives in this repository (`stdlib/`) and ships with the compiler, so its version is the compiler's version. It starts from aiken-lang/stdlib v4.0.0, with aiken-lang/fuzz v3.0.0 merged in, so the `aiken/fuzz`, `aiken/fuzz/scenario` and `cardano/fuzz` modules are available too. Projects get it without declaring any dependency, and without fetching anything over the network. @rvcas

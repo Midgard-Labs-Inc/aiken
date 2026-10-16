@@ -1,6 +1,6 @@
 name = "aiken/stdlib"
-version = "v1.2.1"
-compiler = "v1.2.1"
+version = "v1.3.0"
+compiler = "v1.3.0"
 plutus = "v3"
 license = "Apache-2.0"
 description = "The Aiken standard library, which ships with the compiler"
