@@ -75,7 +75,7 @@ dependencies = [
  "regex",
  "serde_json",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "uplc",
  "xdg",
 ]
@@ -106,7 +106,7 @@ dependencies = [
  "serde",
  "stacker",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "uplc",
  "vec1",
 ]
@@ -126,7 +126,7 @@ dependencies = [
  "owo-colors 3.5.0",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tracing",
  "url",
  "urlencoding",
@@ -177,7 +177,7 @@ dependencies = [
  "serde_json",
  "strip-ansi-escapes",
  "textplots",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "toml",
  "uplc",
@@ -4191,7 +4191,7 @@ dependencies = [
  "serde_json",
  "strum",
  "test-case",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "walkdir",
 ]
 
