@@ -7,8 +7,3 @@ description = "Aiken contracts for project 'aiken/benchmarks'"
 user = "aiken"
 project = "benchmarks"
 platform = "github"
-
-[[dependencies]]
-name = "aiken-lang/stdlib"
-version = "main"
-source = "github"

@@ -87,8 +87,7 @@ impl<'de> Deserialize<'de> for PackageName {
             type Value = PackageName;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter
-                    .write_str("a string representing an owner and repo, ex: aiken-lang/stdlib")
+                formatter.write_str("a string representing an owner and repo, ex: my-org/my-lib")
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -152,7 +151,7 @@ impl fmt::Display for InvalidProjectNameReason {
                 \nFor example,\n\n\t{}",
                 "{owner}".if_supports_color(Stdout, |s| s.bright_blue()),
                 "{project}".if_supports_color(Stdout, |s| s.bright_blue()),
-                "aiken-lang/stdlib".if_supports_color(Stdout, |s| s.bright_blue()),
+                "my-org/my-lib".if_supports_color(Stdout, |s| s.bright_blue()),
             ),
         }
     }

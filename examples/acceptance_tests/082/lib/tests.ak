@@ -1,8 +1,7 @@
+use aiken/collection/list
 use aiken/interval.{Finite, Interval, IntervalBound}
-use aiken/list
-use aiken/time.{PosixTime}
-use aiken/transaction.{ScriptContext, ValidityRange}
-use aiken/transaction/value.{Value}
+use cardano/assets.{Assets}
+use cardano/transaction.{ValidityRange}
 
 // TODO added to the stdlib in #40 
 pub fn count(self: List<a>, predicate: fn(a) -> Bool) -> Int {
@@ -20,29 +19,29 @@ pub fn count(self: List<a>, predicate: fn(a) -> Bool) -> Int {
 }
 
 test foldl_value_test1() {
-  let val1 = value.from_lovelace(1000000)
-  let val2 = value.from_lovelace(2000000)
+  let val1 = assets.from_lovelace(1000000)
+  let val2 = assets.from_lovelace(2000000)
   let foo =
-    fn(i: Value, acc: (Value, Int)) {
+    fn(i: Assets, acc: (Assets, Int)) {
       let (v, int) = acc
-      (value.merge(i, v), int + 1)
+      (assets.merge(i, v), int + 1)
     }
-  list.foldl([val1, val2], (value.zero(), 0), foo) == (
-    value.from_lovelace(3000000),
+  list.foldl([val1, val2], (assets.zero, 0), foo) == (
+    assets.from_lovelace(3000000),
     2,
   )
 }
 
 test foldl_value_test2() {
-  let val1 = value.from_lovelace(1000000)
-  let val2 = value.from_lovelace(2000000)
+  let val1 = assets.from_lovelace(1000000)
+  let val2 = assets.from_lovelace(2000000)
   let foo =
-    fn(i: Value, acc: (Value, Int)) {
+    fn(i: Assets, acc: (Assets, Int)) {
       let (v, int) = acc
-      (value.merge(i, v), int + 1)
+      (assets.merge(i, v), int + 1)
     }
-  list.foldl([val1, val2], (value.from_lovelace(0), 0), foo) == (
-    value.from_lovelace(3000000),
+  list.foldl([val1, val2], (assets.from_lovelace(0), 0), foo) == (
+    assets.from_lovelace(3000000),
     2,
   )
 }
@@ -52,8 +51,8 @@ pub type NativeScript {
   AllOf { scripts: List<NativeScript> }
   AnyOf { scripts: List<NativeScript> }
   AtLeast { required: Int, scripts: List<NativeScript> }
-  Before { time: PosixTime }
-  After { time: PosixTime }
+  Before { time: Int }
+  After { time: Int }
 }
 
 pub fn satisfied(

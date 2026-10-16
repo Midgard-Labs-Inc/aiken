@@ -2502,7 +2502,8 @@ pub enum Error {
     #[diagnostic(help(r#"Some module names are reserved for internal use. This the case of:
 
 - aiken: where the prelude is located;
-- aiken/builtin: where I store low-level Plutus builtins.
+- aiken/builtin: where I store low-level Plutus builtins;
+- aiken/* and cardano/*: where the standard library, which ships with me, is located.
 
 Note that 'aiken' is also imported by default; but you can refer to it explicitly to disambiguate with a local value that would clash with one from that module."#
     ))]

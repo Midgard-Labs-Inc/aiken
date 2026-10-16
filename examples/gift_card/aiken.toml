@@ -7,8 +7,3 @@ description = "Create a gift card that can be used to redeem locked assets"
 user = 'aiken-lang'
 project = 'gift_card'
 platform = 'github'
-
-[[dependencies]]
-name = 'aiken-lang/stdlib'
-version = 'v2'
-source = 'github'

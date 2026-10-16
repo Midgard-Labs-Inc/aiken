@@ -1,5 +1,5 @@
-use aiken/list
-use aiken/transaction.{InlineDatum, Input, OutputReference, TransactionId}
+use aiken/collection/list
+use cardano/transaction.{InlineDatum, Input, OutputReference}
 
 type OtherInput {
   output_reference: OutputReference,
@@ -14,11 +14,11 @@ type MyDatum<a> {
 test discard_partitions() {
   let all_inputs =
     [
-      OtherInput(OutputReference(TransactionId(#"aabb"), 2), 3),
-      OtherInput(OutputReference(TransactionId(#"aabbcc"), 3), 3),
+      OtherInput(OutputReference(#"aabb", 2), 3),
+      OtherInput(OutputReference(#"aabbcc", 3), 3),
     ]
 
-  let own_out_ref = OutputReference(TransactionId(#"aabb"), 2)
+  let own_out_ref = OutputReference(#"aabb", 2)
 
   expect ([_], other_inputs) =
     list.partition(

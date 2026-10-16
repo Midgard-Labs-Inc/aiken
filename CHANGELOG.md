@@ -2,6 +2,16 @@
 
 ## unreleased
 
+### Added
+
+- **stdlib**: The standard library now lives in this repository (`stdlib/`) and ships with the compiler, so its version is the compiler's version. It starts from aiken-lang/stdlib v4.0.0, with aiken-lang/fuzz v3.0.0 merged in, so the `aiken/fuzz`, `aiken/fuzz/scenario` and `cardano/fuzz` modules are available too. Projects get it without declaring any dependency, and without fetching anything over the network. @rvcas
+
+### Changed
+
+- **aiken-project**: Declaring `aiken-lang/stdlib` or `aiken-lang/fuzz` as a dependency is now an error pointing at the entry to remove from `aiken.toml`. @rvcas
+- **aiken-project**: The `aiken/*` and `cardano/*` module namespaces are reserved for the standard library: a project can no longer define modules under them. Dependencies still can, as long as they don't clash with a standard library module. @rvcas
+- **aiken**: `aiken new` no longer adds a standard library dependency (nor looks up its latest release on GitHub), and `aiken packages add` refuses to add it. @rvcas
+
 ## v1.2.1 - 2026-10-14
 
 ### Changed

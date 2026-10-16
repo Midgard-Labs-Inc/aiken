@@ -7,13 +7,3 @@ description = "Aiken contracts for project 'aiken-lang/104'"
 user = "aiken-lang"
 project = "104"
 platform = "github"
-
-[[dependencies]]
-name = "aiken-lang/stdlib"
-version = "main"
-source = "github"
-
-[[dependencies]]
-name = "aiken-lang/fuzz"
-version = "main"
-source = "github"

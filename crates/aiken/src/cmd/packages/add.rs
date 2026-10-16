@@ -2,7 +2,7 @@ use aiken_project::{
     config::{Dependency, Platform, ProjectConfig},
     error::Warning,
     package_name::PackageName,
-    pretty,
+    pretty, stdlib,
 };
 use miette::IntoDiagnostic;
 use owo_colors::{OwoColorize, Stream::Stderr};
@@ -14,7 +14,7 @@ use std::{path::PathBuf, process};
 pub struct Args {
     /// Package name, in the form of {owner}/{repository}.
     ///
-    /// For example → 'add aiken-lang/stdlib'
+    /// For example → 'add my-org/my-lib'
     ///
     /// Note that by default, this assumes the package is located
     /// on Github.
@@ -35,6 +35,14 @@ pub fn exec(args: Args) -> miette::Result<()> {
         version: args.version,
         source: Platform::Github,
     };
+
+    if stdlib::is_bundled(&dependency.name) {
+        return Err(miette::miette!(
+            help = "Its modules (e.g. aiken/collection/list, cardano/transaction or aiken/fuzz) are available without declaring any dependency.",
+            "'{}' is part of the standard library, which ships with the compiler.",
+            dependency.name,
+        ));
+    }
 
     let config = match ProjectConfig::load(&root) {
         Ok(config) => config,

@@ -41,7 +41,7 @@ petgraph.workspace = true
 pulldown-cmark = { workspace = true, features = ["html"] }
 rayon.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = ["blocking", "json"] }
+reqwest = { workspace = true, features = ["json"] }
 rgb.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }

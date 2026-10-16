@@ -1,4 +1,4 @@
-use aiken/dict.{Dict}
+use my/dict.{Dict}
 
 pub type PolicyId =
   ByteArray

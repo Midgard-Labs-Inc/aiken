@@ -1,14 +1,14 @@
-use aiken/bytearray
-use aiken/dict.{Dict}
-use aiken/int
-use aiken/list
-use aiken/transaction.{OutputReference, TransactionId}
-use aiken/transaction/credential.{Address, VerificationKeyCredential}
-use aiken/transaction/value.{AssetName, PolicyId, Value}
+use aiken/collection/dict.{Dict}
+use aiken/collection/list
+use aiken/primitive/bytearray
+use aiken/primitive/int
+use cardano/address.{Address, VerificationKey}
+use cardano/assets.{AssetName, Assets, PolicyId}
+use cardano/transaction.{OutputReference}
 
 fn compare_out_ref(ref1: OutputReference, ref2: OutputReference) -> Ordering {
-  let OutputReference(TransactionId(tx_id1), out_index1) = ref1
-  let OutputReference(TransactionId(tx_id2), out_index2) = ref2
+  let OutputReference(tx_id1, out_index1) = ref1
+  let OutputReference(tx_id2, out_index2) = ref2
   when bytearray.compare(tx_id1, tx_id2) is {
     Less -> Less
     Greater -> Greater
@@ -21,11 +21,11 @@ fn compare_out_ref(ref1: OutputReference, ref2: OutputReference) -> Ordering {
 fn compare_value(
   loan_id: AssetName,
   sym: PolicyId,
-  val1: Value,
-  val2: Value,
+  val1: Assets,
+  val2: Assets,
 ) -> Ordering {
   if
-  value.quantity_of(val1, sym, loan_id) == value.quantity_of(val2, sym, loan_id){
+  assets.quantity_of(val1, sym, loan_id) == assets.quantity_of(val2, sym, loan_id){
   
     fail @"Should not be equal"
   } else {
@@ -34,8 +34,8 @@ fn compare_value(
 }
 
 test dict_test1() {
-  let offer_input_ref = OutputReference(TransactionId("00"), 0)
-  let ask_input_ref = OutputReference(TransactionId("00"), 1)
+  let offer_input_ref = OutputReference("00", 0)
+  let ask_input_ref = OutputReference("00", 1)
   let pairings =
     [(ask_input_ref, offer_input_ref)]
 
@@ -56,27 +56,27 @@ test dict_test1() {
 }
 
 test dict_test2() {
-  let offer_input_ref = OutputReference(TransactionId("00"), 0)
-  let ask_input_ref = OutputReference(TransactionId("00"), 1)
+  let offer_input_ref = OutputReference("00", 0)
+  let ask_input_ref = OutputReference("00", 1)
   let pairings =
     [(ask_input_ref, offer_input_ref)]
 
   let foo =
     fn(pair: (OutputReference, OutputReference), acc: Dict<ByteArray, Address>) {
       let new_pay_map =
-        dict.insert(acc, "", Address(VerificationKeyCredential("00"), None))
+        dict.insert(acc, "", Address(VerificationKey("00"), None))
 
       new_pay_map
     }
 
-  let pay_map = list.foldl(pairings, dict.new(), foo)
+  let pay_map = list.foldl(pairings, dict.empty, foo)
 
-  pay_map != dict.new()
+  pay_map != dict.empty
 }
 
 test dict_test3() {
-  let offer_input_ref = OutputReference(TransactionId("00"), 0)
-  let ask_input_ref = OutputReference(TransactionId("00"), 1)
+  let offer_input_ref = OutputReference("00", 0)
+  let ask_input_ref = OutputReference("00", 1)
   let pairings =
     [(ask_input_ref, offer_input_ref)]
 
@@ -90,14 +90,14 @@ test dict_test3() {
 
   // TODO: Maybe passing Value to the key generic of dict shouldn't be possible
   let foo =
-    fn(pair: (OutputReference, OutputReference), acc: Dict<Value, Address>) {
+    fn(pair: (OutputReference, OutputReference), acc: Dict<Assets, Address>) {
       let new_pay_map =
-        dict.insert(acc, "", Address(VerificationKeyCredential("00"), None))
+        dict.insert(acc, "", Address(VerificationKey("00"), None))
 
       new_pay_map
     }
 
-  let pay_map = list.foldl(pairings, dict.new(), foo)
+  let pay_map = list.foldl(pairings, dict.empty, foo)
 
-  pay_map != dict.new()
+  pay_map != dict.empty
 }
