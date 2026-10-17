@@ -6041,3 +6041,142 @@ fn incomplete_pair() {
         Err((_, Error::IncorrectFunctionCallArity { expected, .. })) if expected == 2
     ))
 }
+
+#[test]
+fn coerce_data_into_record() {
+    let source_code = r#"
+        type Datum { owner: ByteArray, amount: Int }
+
+        fn amount(data: Data) -> Int {
+          coerce datum: Datum = data
+          datum.amount
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn coerce_data_into_opaque_type() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar(n: Data) -> Thing {
+          coerce a: Thing = n
+          a
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn coerce_into_imported_opaque_type() {
+    let dependency = r#"
+        pub opaque type Dict<key, value> { inner: Pairs<ByteArray, value> }
+
+        pub opaque type Assets { inner: Dict<ByteArray, Dict<ByteArray, Int>> }
+    "#;
+
+    let source_code = r#"
+        use cardano/assets.{Assets}
+
+        fn from_pairs(xs: Pairs<ByteArray, Pairs<ByteArray, Int>>) -> Assets {
+          coerce assets: Assets = xs
+          assets
+        }
+
+        fn to_pairs(assets: Assets) -> Pairs<ByteArray, Pairs<ByteArray, Int>> {
+          coerce xs: Pairs<ByteArray, Pairs<ByteArray, Int>> = assets
+          xs
+        }
+    "#;
+
+    let result = check_with_deps(
+        parse(source_code),
+        vec![parse_as(dependency, "cardano/assets")],
+    );
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn coerce_from_function() {
+    let source_code = r#"
+        fn bar() -> Int {
+          coerce n: Int = fn(x: Int) { x + 1 }
+          n
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+#[test]
+fn coerce_into_function() {
+    let source_code = r#"
+        fn bar(data: Data) -> Int {
+          coerce f: fn(Int) -> Int = data
+          f(1)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+#[test]
+fn coerce_into_value() {
+    let source_code = r#"
+        fn bar(data: Data) -> Value {
+          coerce value: Value = data
+          value
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+#[test]
+fn coerce_empty_list() {
+    let source_code = r#"
+        fn bar() -> Int {
+          coerce n: Int = []
+          n
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::AmbiguousEmptyList { .. }))
+    ))
+}
+
+#[test]
+fn coerce_binding_has_the_annotated_type() {
+    let source_code = r#"
+        type Datum { owner: ByteArray, amount: Int }
+
+        fn bar(data: Data) -> ByteArray {
+          coerce datum: Datum = data
+          datum
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}

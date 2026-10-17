@@ -1481,6 +1481,16 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         comment: Option<String>,
         location: Span,
     ) -> Result<TypedExpr, Error> {
+        if kind.is_coerce() {
+            return self.infer_coerce(
+                untyped_pattern,
+                untyped_value,
+                annotation,
+                comment,
+                location,
+            );
+        }
+
         let typed_value = self.infer(untyped_value.clone())?;
 
         let mut value_typ = typed_value.tipo();
@@ -1609,6 +1619,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     .check_exhaustiveness(&[&pattern], location, true)?
             }
 
+            AssignmentKind::Coerce => unreachable!("coerce is inferred by infer_coerce"),
+
             AssignmentKind::Expect { .. } => {
                 let is_exaustive_pattern = self
                     .environment
@@ -1665,6 +1677,67 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             location,
             tipo: value_typ,
             kind: kind.into(),
+            pattern,
+            value: Box::new(typed_value),
+            comment,
+        })
+    }
+
+    /// A coerce converts its value to the annotated type through Data without checking anything.
+    /// Unlike `expect`, the annotation needn't relate to the value's type, and opaque types are
+    /// allowed: the caller is responsible for the value's validity.
+    #[allow(clippy::result_large_err)]
+    fn infer_coerce(
+        &mut self,
+        untyped_pattern: UntypedPattern,
+        untyped_value: UntypedExpr,
+        annotation: &Option<Annotation>,
+        comment: Option<String>,
+        location: Span,
+    ) -> Result<TypedExpr, Error> {
+        let annotation = annotation
+            .as_ref()
+            .expect("the parser ensures a coerce has an annotation");
+
+        let typed_value = self.infer(untyped_value)?;
+
+        let value_type = typed_value.tipo();
+
+        if value_type.is_unbounded_list() {
+            return Err(Error::AmbiguousEmptyList {
+                location: typed_value.location(),
+            });
+        }
+
+        if !self.environment.is_data_like(&value_type) {
+            return Err(Error::IllegalCoerce {
+                location: typed_value.location(),
+                tipo: value_type,
+            });
+        }
+
+        let tipo = self
+            .type_from_annotation(annotation)
+            .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
+
+        if !self.environment.is_data_like(&tipo) {
+            return Err(Error::IllegalCoerce {
+                location: annotation.location(),
+                tipo,
+            });
+        }
+
+        let pattern = PatternTyper::new(self.environment, &self.hydrator).unify(
+            untyped_pattern,
+            tipo.clone(),
+            Some(tipo.clone()),
+            true,
+        )?;
+
+        Ok(TypedExpr::Assignment {
+            location,
+            tipo,
+            kind: AssignmentKind::Coerce,
             pattern,
             value: Box::new(typed_value),
             comment,
@@ -2260,6 +2333,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                                     AssignmentKind::let_()
                                 }
                                 AssignmentKind::Expect { .. } => AssignmentKind::expect(),
+                                AssignmentKind::Coerce => unreachable!("coerce can't backpass"),
                             },
                             comment: comment.clone(),
                         },

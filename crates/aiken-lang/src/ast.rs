@@ -210,6 +210,7 @@ impl TypedModule {
 fn str_to_keyword(word: &str) -> Option<Token> {
     // Alphabetical keywords:
     match word {
+        "coerce" => Some(Token::Coerce),
         "expect" => Some(Token::Expect),
         "else" => Some(Token::Else),
         "is" => Some(Token::Is),
@@ -2149,8 +2150,15 @@ pub type TypedAssignmentKind = AssignmentKind<()>;
 #[derive(Debug, Clone, PartialEq, Eq, Copy, serde::Serialize, serde::Deserialize)]
 pub enum AssignmentKind<T> {
     Is,
-    Let { backpassing: T },
-    Expect { backpassing: T },
+    Let {
+        backpassing: T,
+    },
+    Expect {
+        backpassing: T,
+    },
+    /// Like `expect`, but without any of the generated checks: the value is converted to the
+    /// annotated type as-is, and the caller is responsible for its validity.
+    Coerce,
 }
 
 impl From<UntypedAssignmentKind> for TypedAssignmentKind {
@@ -2159,6 +2167,7 @@ impl From<UntypedAssignmentKind> for TypedAssignmentKind {
             AssignmentKind::Is => AssignmentKind::Is,
             AssignmentKind::Let { .. } => AssignmentKind::Let { backpassing: () },
             AssignmentKind::Expect { .. } => AssignmentKind::Expect { backpassing: () },
+            AssignmentKind::Coerce => AssignmentKind::Coerce,
         }
     }
 }
@@ -2176,11 +2185,16 @@ impl<T> AssignmentKind<T> {
         matches!(self, AssignmentKind::Is)
     }
 
+    pub fn is_coerce(&self) -> bool {
+        matches!(self, AssignmentKind::Coerce)
+    }
+
     pub fn location_offset(&self) -> usize {
         match self {
             AssignmentKind::Is => 2,
             AssignmentKind::Let { .. } => 3,
             AssignmentKind::Expect { .. } => 6,
+            AssignmentKind::Coerce => 6,
         }
     }
 }
@@ -2190,6 +2204,7 @@ impl AssignmentKind<bool> {
         match self {
             Self::Is => unreachable!(),
             Self::Let { backpassing } | Self::Expect { backpassing } => *backpassing,
+            Self::Coerce => false,
         }
     }
 }

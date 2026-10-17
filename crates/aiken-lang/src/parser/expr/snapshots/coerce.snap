@@ -1,0 +1,34 @@
+---
+source: crates/aiken-lang/src/parser/expr/assignment.rs
+description: "Code:\n\ncoerce datum: Datum = something.field"
+---
+Assignment {
+    location: 0..37,
+    value: FieldAccess {
+        location: 22..37,
+        label: "field",
+        container: Var {
+            location: 22..31,
+            name: "something",
+        },
+    },
+    patterns: [
+        AssignmentPattern {
+            pattern: Var {
+                location: 7..12,
+                name: "datum",
+            },
+            annotation: Some(
+                Constructor {
+                    location: 14..19,
+                    module: None,
+                    name: "Datum",
+                    arguments: [],
+                },
+            ),
+            location: 7..19,
+        },
+    ],
+    kind: Coerce,
+    comment: None,
+}

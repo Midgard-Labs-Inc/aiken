@@ -507,7 +507,9 @@ impl<'a> CodeGenerator<'a> {
 
             let otherwise_delayed = {
                 let msg = match (self.tracing, kind) {
-                    (TraceLevel::Silent, _) | (_, AssignmentKind::Let { .. }) => "".to_string(),
+                    (TraceLevel::Silent, _)
+                    | (_, AssignmentKind::Let { .. })
+                    | (_, AssignmentKind::Coerce) => "".to_string(),
                     (TraceLevel::Compact, _) => {
                         match comment.as_ref().and_then(|s| s.split(":").next()) {
                             None => "".to_string(),
@@ -1241,7 +1243,24 @@ impl<'a> CodeGenerator<'a> {
 
         // Cast value to or from data so we don't have to worry from this point onward
         let assign_casted_value = |name, value, then| {
-            if props.value_type.is_data() && props.kind.is_expect() && !tipo.is_data() {
+            if props.kind.is_coerce() {
+                // A coerce goes through Data without checking anything. Casts between identical
+                // representations (e.g. an opaque type and its erased inner type) cancel out
+                // during optimization.
+                let value = if props.value_type.is_data() {
+                    value
+                } else {
+                    AirTree::cast_to_data(value, props.value_type.clone())
+                };
+
+                let value = if tipo.is_data() {
+                    value
+                } else {
+                    AirTree::cast_from_data(value, tipo.clone(), false)
+                };
+
+                AirTree::let_assignment(name, value, then)
+            } else if props.value_type.is_data() && props.kind.is_expect() && !tipo.is_data() {
                 if tipo.is_value() {
                     AirTree::let_assignment(
                         name,

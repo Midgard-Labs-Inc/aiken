@@ -1,0 +1,5 @@
+---
+source: crates/aiken-lang/src/parser/expr/assignment.rs
+description: "Invalid code (parse error):\n\ncoerce _: Datum = something.field"
+---
+I spotted a malformed coerce.

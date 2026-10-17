@@ -100,6 +100,45 @@ pub fn expect(
         )
 }
 
+pub fn coerce(
+    r: Recursive<'_, Token, UntypedExpr, ParseError>,
+) -> impl Parser<Token, UntypedExpr, Error = ParseError> + '_ {
+    just(Token::Coerce)
+        .ignore_then(assignment_patterns())
+        .then_ignore(just(Token::Equal))
+        .then(r.clone())
+        .validate(move |(patterns, value), span, emit| {
+            if matches!(value, UntypedExpr::Assignment { .. }) {
+                emit(ParseError::invalid_assignment_right_hand_side(span))
+            }
+
+            if !matches!(
+                patterns.as_slice(),
+                [ast::AssignmentPattern {
+                    pattern: ast::Pattern::Var { .. },
+                    annotation: Some(_),
+                    ..
+                }]
+            ) {
+                let start = patterns.first().map_or(span.start, |p| p.location.start);
+                let end = patterns.last().map_or(span.end, |p| p.location.end);
+                emit(ParseError::invalid_coerce(Span { start, end }))
+            }
+
+            let patterns = patterns
+                .try_into()
+                .expect("We use at_least(1) so this should never be empty");
+
+            UntypedExpr::Assignment {
+                location: span,
+                value: Box::new(value),
+                patterns,
+                kind: ast::AssignmentKind::Coerce,
+                comment: None,
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::assert_expr;
@@ -181,5 +220,35 @@ mod tests {
     #[test]
     fn expect_expect_let() {
         assert_expr!("expect { let a = 42 } = foo");
+    }
+
+    #[test]
+    fn coerce() {
+        assert_expr!("coerce datum: Datum = something.field");
+    }
+
+    #[test]
+    fn coerce_without_annotation() {
+        assert_expr!("coerce datum = something.field");
+    }
+
+    #[test]
+    fn coerce_pattern() {
+        assert_expr!("coerce Some(x): Option<Int> = something.field");
+    }
+
+    #[test]
+    fn coerce_discard() {
+        assert_expr!("coerce _: Datum = something.field");
+    }
+
+    #[test]
+    fn coerce_many() {
+        assert_expr!("coerce a: Int, b: Int = something.field");
+    }
+
+    #[test]
+    fn coerce_backpassing() {
+        assert_expr!("coerce datum: Datum <- something.field");
     }
 }

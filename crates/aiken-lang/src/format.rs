@@ -959,6 +959,7 @@ impl<'comments> Formatter<'comments> {
             AssignmentKind::Is => unreachable!(),
             AssignmentKind::Let { .. } => "let",
             AssignmentKind::Expect { .. } => "expect",
+            AssignmentKind::Coerce => "coerce",
         };
 
         let symbol = if kind.is_backpassing() { "<-" } else { "=" };

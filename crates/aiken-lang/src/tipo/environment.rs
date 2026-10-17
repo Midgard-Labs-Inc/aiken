@@ -2342,6 +2342,8 @@ impl<T> From<AssignmentKind<T>> for UnifyMode {
             AssignmentKind::Let { .. } => Self::AllowUpCast,
             AssignmentKind::Is => Self::AllowDownCast,
             AssignmentKind::Expect { .. } => Self::AllowDownCast,
+            // A coerce never unifies its value with its annotation; see `infer_coerce`.
+            AssignmentKind::Coerce => Self::Strict,
         }
     }
 }

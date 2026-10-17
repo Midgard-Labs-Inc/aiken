@@ -92,6 +92,15 @@ impl ParseError {
         }
     }
 
+    pub fn invalid_coerce(span: Span) -> Self {
+        Self {
+            kind: Box::new(ErrorKind::InvalidCoerce),
+            span,
+            expected: HashSet::new(),
+            label: Some("expected a name and a type annotation"),
+        }
+    }
+
     pub fn invalid_tuple_index(span: Span, index: String, suffix: Option<String>) -> Self {
         let hint = suffix.map(|suffix| format!("Did you mean '{index}{suffix}'?"));
         Self {
@@ -268,12 +277,28 @@ pub enum ErrorKind {
     #[error("I spotted an unfinished assignment.")]
     #[diagnostic(
         help(
-            "{} and {} bindings must be followed by a valid, complete, expression.",
+            "{}, {} and {} bindings must be followed by a valid, complete, expression.",
             "let".if_supports_color(Stdout, |s| s.yellow()),
             "expect".if_supports_color(Stdout, |s| s.yellow()),
+            "coerce".if_supports_color(Stdout, |s| s.yellow()),
         ),
     )]
     UnfinishedAssignmentRightHandSide,
+
+    #[error("I spotted a malformed coerce.")]
+    #[diagnostic(help("{}", formatdoc! {
+        r#"A coerce binds a single name and must state the type to coerce to. It doesn't take patterns: bind a name, then destructure it with {let}.
+
+           For example:
+
+             ┍━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+             │ {coerce} datum: MyDatum {eq} data
+        "#,
+        let = "let".if_supports_color(Stdout, |s| s.yellow()),
+        coerce = "coerce".if_supports_color(Stdout, |s| s.yellow()),
+        eq = "=".if_supports_color(Stdout, |s| s.yellow()),
+    }))]
+    InvalidCoerce,
 
     #[error("I tripped over a {}", fmt_curve_type(.curve))]
     PointNotOnCurve { curve: CurveType },

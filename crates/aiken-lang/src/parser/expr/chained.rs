@@ -66,6 +66,7 @@ pub fn chain_start<'a>(
         when(expression.clone()),
         assignment::let_(expression.clone()),
         assignment::expect(expression.clone()),
+        assignment::coerce(expression.clone()),
         if_else(sequence, expression.clone()),
     ))
 }

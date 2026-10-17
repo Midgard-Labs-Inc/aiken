@@ -227,6 +227,7 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = ParseError> {
         "as" => Token::As,
         "and" => Token::And,
         "or" => Token::Or,
+        "coerce" => Token::Coerce,
         "expect" => Token::Expect,
         "const" => Token::Const,
         "fn" => Token::Fn,

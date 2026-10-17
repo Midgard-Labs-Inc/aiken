@@ -2062,3 +2062,18 @@ fn expect_comment() {
         "#
     );
 }
+
+#[test]
+fn format_coerce() {
+    let expected = r#"fn foo(data: Data) -> Int {
+  coerce datum: Datum = data
+  datum.amount
+}
+"#;
+
+    pretty_assertions::assert_eq!(
+        format_source("fn foo(data: Data) -> Int { coerce  datum :Datum=data\n datum.amount }"),
+        expected
+    );
+    pretty_assertions::assert_eq!(format_source(expected), expected);
+}

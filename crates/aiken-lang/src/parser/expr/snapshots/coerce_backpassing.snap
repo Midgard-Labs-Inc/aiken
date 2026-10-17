@@ -1,0 +1,5 @@
+---
+source: crates/aiken-lang/src/parser/expr/assignment.rs
+description: "Invalid code (parse error):\n\ncoerce datum: Datum <- something.field"
+---
+I found an unexpected token '<-'.

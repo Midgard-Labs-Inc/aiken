@@ -367,6 +367,19 @@ Use an intermediate public representation instead, then re-construct the opaque 
         tipo: Rc<Type>,
     },
 
+    #[error("I can't coerce a value of type {}.\n", tipo.to_pretty(0).if_supports_color(Stdout, |s| s.red()))]
+    #[diagnostic(code("illegal::coerce"))]
+    #[diagnostic(help(
+        r#"A {coerce} converts its value through Plutus Data, so both the value and the type it's coerced to must have a Data representation that's free to convert to and from. Functions, {Value}s and BLS12-381 elements don't."#,
+        coerce = "coerce".if_supports_color(Stdout, |s| s.yellow()),
+        Value = "Value".if_supports_color(Stdout, |s| s.cyan()),
+    ))]
+    IllegalCoerce {
+        #[label("no free Data representation")]
+        location: Span,
+        tipo: Rc<Type>,
+    },
+
     #[error("I noticed an unsupported use of equality.\n")]
     #[diagnostic(code("illegal::comparison"))]
     #[diagnostic(help(
@@ -1227,6 +1240,7 @@ impl ExtraData for Error {
             | Error::ExtraVarInAlternativePattern { .. }
             | Error::FunctionTypeInData { .. }
             | Error::IllegalTypeInData { .. }
+            | Error::IllegalCoerce { .. }
             | Error::IllegalComparison { .. }
             | Error::ImplicitlyDiscardedExpression { .. }
             | Error::IncorrectFieldsArity { .. }
