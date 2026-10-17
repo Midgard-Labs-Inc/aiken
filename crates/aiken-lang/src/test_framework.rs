@@ -62,8 +62,6 @@ pub enum Test {
     Benchmark(Benchmark),
 }
 
-unsafe impl Send for Test {}
-
 impl Test {
     pub fn unit_test(
         generator: &mut CodeGenerator<'_>,
@@ -217,8 +215,6 @@ pub struct UnitTest {
     pub assertion: Option<Box<Assertion<TypedExpr>>>,
 }
 
-unsafe impl Send for UnitTest {}
-
 impl UnitTest {
     pub fn run(
         mut self,
@@ -274,8 +270,6 @@ pub struct PropertyTest {
     pub program: Program<Name>,
     pub fuzzer: Fuzzer<Name>,
 }
-
-unsafe impl Send for PropertyTest {}
 
 #[derive(Debug, Clone)]
 pub struct Fuzzer<T> {
@@ -545,8 +539,6 @@ pub struct Benchmark {
     pub program: Program<Name>,
     pub sampler: Sampler<Name>,
 }
-
-unsafe impl Send for Benchmark {}
 
 impl Benchmark {
     pub const DEFAULT_MAX_SIZE: usize = 30;
@@ -1136,8 +1128,6 @@ pub enum TestResult<U, T> {
     BenchmarkResult(BenchmarkResult),
 }
 
-unsafe impl<U, T> Send for TestResult<U, T> {}
-
 impl TestResult<(Constant, Rc<Type>), PlutusData> {
     pub fn reify(
         self,
@@ -1211,8 +1201,6 @@ pub struct UnitTestResult<T> {
     pub assertion: Option<Assertion<T>>,
 }
 
-unsafe impl<T> Send for UnitTestResult<T> {}
-
 impl UnitTestResult<(Constant, Rc<Type>)> {
     pub fn reify(
         self,
@@ -1256,8 +1244,6 @@ pub struct PropertyTestResult<T> {
     pub labels: BTreeMap<String, usize>,
     pub logs: Vec<String>,
 }
-
-unsafe impl<T> Send for PropertyTestResult<T> {}
 
 impl PropertyTestResult<PlutusData> {
     pub fn reify(
@@ -1708,12 +1694,22 @@ pub struct BenchmarkResult {
     pub error: Option<BenchmarkError>,
 }
 
-unsafe impl Send for BenchmarkResult {}
-unsafe impl Sync for BenchmarkResult {}
-
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn rc_backed_public_tests_and_results_are_not_send_or_sync() {
+        use static_assertions::assert_not_impl_any;
+        assert_not_impl_any!(Test: Send, Sync);
+        assert_not_impl_any!(UnitTest: Send, Sync);
+        assert_not_impl_any!(PropertyTest: Send, Sync);
+        assert_not_impl_any!(Benchmark: Send, Sync);
+        assert_not_impl_any!(TestResult<Rc<u8>, Rc<u8>>: Send, Sync);
+        assert_not_impl_any!(UnitTestResult<Rc<u8>>: Send, Sync);
+        assert_not_impl_any!(PropertyTestResult<Rc<u8>>: Send, Sync);
+        assert_not_impl_any!(BenchmarkResult: Send, Sync);
+    }
 
     #[test]
     fn test_cache() {

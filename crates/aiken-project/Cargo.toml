@@ -47,6 +47,7 @@ semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 strip-ansi-escapes.workspace = true
+tempfile.workspace = true
 textplots.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }

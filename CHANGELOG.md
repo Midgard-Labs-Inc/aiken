@@ -2,6 +2,12 @@
 
 ## unreleased
 
+### Fixed
+
+- **aiken**: Upgrade build metadata and terminal color dependencies to remove the vulnerable `git2` and `atty` versions from the toolchain.
+- **aiken-project**: Extract dependency archives in private staging directories, reject symlinks and path traversal, strip privileged permission bits, and preserve the previous package when extraction fails. Upgrade `zip` to a patched version with only the compression support needed for GitHub archives.
+- **aiken-lang**, **aiken-project**: Remove unsound public `Send`/`Sync` implementations on Rc-backed tests and results. Parallel runners now transfer only private, detached program graphs; shared source assertions and display types stay on the calling thread.
+
 ### Added
 
 - **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. It costs at most one builtin conversion from `Data`, and coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions, Miller-loop results, builtin `Value`s and BLS12-381 elements, whose conversions aren't free: `un_value_data` validates the whole map, and uncompressing a G1/G2 element checks it's on the curve. Call those builtins explicitly instead. `coerce` is now a keyword. @rvcas, @colll78

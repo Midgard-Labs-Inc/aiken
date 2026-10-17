@@ -42,7 +42,7 @@ use aiken_lang::{
     gen_uplc::CodeGenerator,
     line_numbers::LineNumbers,
     test_framework::{RunnableKind, Test, TestResult},
-    tipo::{Type, TypeInfo},
+    tipo::TypeInfo,
     utils,
 };
 use export::Export;
@@ -57,13 +57,9 @@ use std::{
     fs::{self, File},
     io::BufReader,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 use telemetry::EventListener;
-use uplc::{
-    PlutusData,
-    ast::{Constant, Name, Program},
-};
+use uplc::ast::{Name, Program};
 
 #[derive(Debug)]
 pub struct Source {
@@ -1171,7 +1167,7 @@ where
 
     fn run_runnables(
         &self,
-        mut tests: Vec<Test>,
+        tests: Vec<Test>,
         seed: u32,
         max_success: usize,
         tracing: Tracing,
@@ -1182,42 +1178,35 @@ where
 
         let plutus_version = &self.config.plutus;
 
-        // The structural assertions hold typed expressions whose Rc-based
-        // nodes are shared with the module ASTs; those reference counts are
-        // not atomic, so keep the assertions on this thread rather than
-        // letting them cross into the parallel test runs below (indexed
-        // parallel iterators preserve order, so results line up with the
-        // assertions taken here).
-        let mut assertions = tests
-            .iter_mut()
-            .map(|test| match test {
-                Test::UnitTest(unit_test) => unit_test.assertion.take(),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        let mut results = tests
+        // Public Rc-backed test values are not Send. Detach worker-owned
+        // program graphs while keeping AST and display types on this thread.
+        let (workers, metadata): (Vec<_>, Vec<_>) = tests
+            .into_iter()
+            .map(test_framework::parallel::detach)
+            .unzip();
+        let results = workers
             .into_par_iter()
             .map(|test| test.run(seed, max_success, plutus_version, tracing))
-            .collect::<Vec<TestResult<(Constant, Rc<Type>), PlutusData>>>();
+            .collect::<Vec<_>>();
 
         // Assertion operands are only displayed for failed unit tests, so
         // generating and evaluating them is deferred until here rather than
         // being paid for every unit test at collection time.
         let mut generator = self.new_generator(tracing);
 
-        for (result, assertion) in results.iter_mut().zip(assertions.iter_mut()) {
-            if let TestResult::UnitTestResult(unit) = result
-                && !unit.success
-                && let Some(assertion) = assertion.take()
-            {
-                unit.assertion = Some(assertion.evaluate(&mut generator, &unit.test.module));
-            }
-        }
-
         results
             .into_iter()
-            .map(|test| test.reify(&data_types))
+            .zip(metadata)
+            .map(|(result, metadata)| {
+                let (mut result, assertion) = result.restore(metadata);
+                if let TestResult::UnitTestResult(unit) = &mut result
+                    && !unit.success
+                    && let Some(assertion) = assertion
+                {
+                    unit.assertion = Some(assertion.evaluate(&mut generator, &unit.test.module));
+                }
+                result.reify(&data_types)
+            })
             .collect()
     }
 

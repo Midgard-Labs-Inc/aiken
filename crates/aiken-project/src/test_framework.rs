@@ -1,3 +1,5 @@
+pub(crate) mod parallel;
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -132,7 +134,7 @@ mod test {
         (test, reify)
     }
 
-    fn property_raw(src: &str) -> (PropertyTest, impl Fn(PlutusData) -> String) {
+    pub(super) fn property_raw(src: &str) -> (PropertyTest, impl Fn(PlutusData) -> String) {
         let prelude = indoc! { r#"
             use aiken/builtin
 

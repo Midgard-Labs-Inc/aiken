@@ -40,6 +40,7 @@ chumsky = { workspace = true, features = ["default"] }
 chumsky = { workspace = true, features = ["ahash", "std"] }
 
 [dev-dependencies]
+static_assertions = "1.1.0"
 indoc.workspace = true
 insta = { workspace = true, features = ["yaml", "json", "redactions"] }
 pretty_assertions.workspace = true
