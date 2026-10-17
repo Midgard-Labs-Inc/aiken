@@ -14,6 +14,7 @@ pub mod stdlib;
 pub mod telemetry;
 pub mod watch;
 
+mod size_profile;
 mod test_framework;
 
 #[cfg(test)]
@@ -224,6 +225,22 @@ where
         };
 
         self.compile(options)
+    }
+
+    /// Write an exact UPLC size report to `build/size-profile.json` after a successful build.
+    /// The tracing options must match those used to produce the blueprint.
+    pub fn write_size_profile(
+        &self,
+        blueprint_path: &Path,
+        tracing: Tracing,
+    ) -> Result<usize, Error> {
+        size_profile::write_report(
+            self,
+            blueprint_path,
+            &self.root.join(paths::build()).join("size-profile.json"),
+            tracing,
+        )
+        .map_err(|error| std::io::Error::other(error.to_string()).into())
     }
 
     pub fn docs(
