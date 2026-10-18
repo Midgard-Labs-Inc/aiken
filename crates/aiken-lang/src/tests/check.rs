@@ -6505,6 +6505,94 @@ fn expect_links_an_unknown_type_argument_to_data() {
     ))
 }
 
+/// `==` compares through Data, and functions and `MillerLoopResult` have no Data form. A type
+/// variable that meets `==` isn't linked to anything, so instantiating it later with a function
+/// (or a `MillerLoopResult`) type-checks: the function case compiles to `equalsData` on two
+/// lambdas, which fails at runtime, and the `MillerLoopResult` case panics the code generator.
+#[test]
+#[ignore = "open hole: == on a type variable later instantiated with a function or MillerLoopResult type-checks"]
+fn equality_refuses_types_without_a_data_form_through_type_variables() {
+    for source_code in [
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn main() -> Bool {
+          same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn main() -> Bool {
+          let same = fn(x, y) { x == y }
+          same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        use aiken/builtin
+
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn main(p: G1Element, q: G2Element) -> Bool {
+          let ml = builtin.bls12_381_miller_loop(p, q)
+          same(ml, ml)
+        }
+        "#,
+    ] {
+        assert!(
+            check(parse(source_code)).is_err(),
+            "type-checks:\n{source_code}"
+        );
+    }
+}
+
+/// casts.mdx: "An empty list `[]` whose element type is unknown is ambiguous and refused" (its Data
+/// form is `List []` as a `List<a>` and `Map []` as `Pairs<k, v>`). Only a top-level empty list is
+/// refused: a nested one has its element type linked to Data and becomes `List []`.
+#[test]
+#[ignore = "open hole: an empty list of unknown element type nested in an upcast value isn't refused as ambiguous"]
+fn upcast_refuses_a_nested_empty_list_of_unknown_type() {
+    let source_code = r#"
+        fn main() -> Data {
+          let d: Data = Some([])
+          d
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::AmbiguousEmptyList { .. }))
+    ))
+}
+
+/// casts.mdx: a phantom type argument "never appears in a value, so an opaque type there doesn't
+/// count". `contains_opaque` follows that rule (H), but the ABI check also looks for opaque types
+/// in the annotation (`find_opaque_in_annotation`), where alias arguments aren't expanded: since I
+/// runs the ABI check on parameters, `Hash<Blake2b_224, VerificationKey>` (a `ByteArray`) is
+/// refused as a validator parameter, which type-checked at 796ebe9d.
+#[test]
+#[ignore = "open regression: the ABI check counts an opaque type in a phantom alias argument, so I refuses Hash<Blake2b_224, _> parameters"]
+fn validator_parameter_with_an_opaque_phantom_alias_argument_is_legal() {
+    let source_code = r#"
+        pub opaque type Tag {
+          Tag
+        }
+
+        pub type Hash<alg, a> =
+          ByteArray
+
+        validator by_alias_args(h: Hash<Tag, Int>) {
+          else(_) {
+            h == h
+          }
+        }
+    "#;
+
+    assert!(matches!(check_validator(parse(source_code)), Ok(..)))
+}
+
 #[test]
 fn local_and_imported_opaque_wrappers_cast_the_same_way() {
     let dependency = r#"
