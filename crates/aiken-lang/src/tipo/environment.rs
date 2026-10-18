@@ -17,6 +17,7 @@ use crate::{
     tipo::{TypeAliasAnnotation, fields::FieldMap, well_known},
 };
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::Deref,
     rc::Rc,
@@ -760,49 +761,18 @@ impl<'a> Environment<'a> {
     /// and upcasts rely on. A type variable whose type isn't known yet is linked to Data, so that
     /// it can't later be bound to a type that converts differently (or not at all).
     pub(crate) fn is_data_like(&mut self, tipo: &Type) -> bool {
-        let is_data_like = self.assert_known_data_type(
-            tipo,
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-            false,
-            &[well_known::MILLER_LOOP_RESULT],
-        );
+        let traits = self.data_traits(tipo);
+        let is_data_like = traits.is_data_like();
 
         if is_data_like {
-            link_unbound_vars_to_data(tipo);
+            traits.link_unbound_to_data();
         }
 
         is_data_like
     }
 
-    /// Whether `if ... is` can test Data against this type without failing. No builtin can check
-    /// that bytes are valid UTF-8 or a valid compressed BLS12-381 point, or that Data is a
-    /// well-formed Value, without failing on bad input; so a soft cast to a type that contains
-    /// any of these would crash instead of taking the `else` branch.
-    pub(crate) fn is_soft_castable(&mut self, tipo: &Type) -> bool {
-        self.assert_known_data_type(
-            tipo,
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-            false,
-            &[
-                well_known::STRING,
-                well_known::VALUE,
-                well_known::G1_ELEMENT,
-                well_known::G2_ELEMENT,
-                well_known::MILLER_LOOP_RESULT,
-            ],
-        )
-    }
-
     pub fn ensure_serialisable(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
-        if !self.assert_known_data_type(
-            tipo.as_ref(),
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-            true,
-            &[well_known::MILLER_LOOP_RESULT],
-        ) {
+        if !self.data_traits(&tipo).is_serialisable() {
             return Err(Error::IllegalTypeInData {
                 tipo: tipo.clone(),
                 location,
@@ -852,44 +822,62 @@ impl<'a> Environment<'a> {
                 TypeVar::Generic { .. } | TypeVar::Unbound { .. } => true,
             },
 
-            _ => self.assert_known_data_type(
-                tipo,
-                ids,
-                active_types,
-                true,
-                &[well_known::MILLER_LOOP_RESULT],
-            ),
+            _ => {
+                let mut traits = DataTraits::default();
+                self.collect_data_traits(tipo, ids, active_types, &mut traits);
+                traits.is_serialisable()
+            }
         }
     }
 
-    fn assert_known_data_type(
+    /// Walks `tipo` once, through the fields of the data types it uses, and reports what matters
+    /// to casts through Data.
+    fn data_traits(&mut self, tipo: &Type) -> DataTraits {
+        let mut traits = DataTraits::default();
+        self.collect_data_traits(tipo, &mut HashMap::new(), &mut HashSet::new(), &mut traits);
+        traits
+    }
+
+    fn collect_data_traits(
         &mut self,
         tipo: &Type,
         ids: &mut HashMap<u64, Rc<Type>>,
         active_types: &mut HashSet<(String, String)>,
-        allow_unmapped_generics: bool,
-        forbidden_known_types: &[&str],
-    ) -> bool {
+        traits: &mut DataTraits,
+    ) {
+        // No predicate holds once the type has no Data form, so the rest doesn't matter.
+        if traits.no_data_form {
+            return;
+        }
+
         match tipo {
             Type::App {
                 module, name, args, ..
             } => {
-                if module.is_empty() && forbidden_known_types.contains(&name.as_str()) {
-                    return false;
+                if module.is_empty() {
+                    match name.as_str() {
+                        well_known::MILLER_LOOP_RESULT => {
+                            traits.no_data_form = true;
+                            return;
+                        }
+                        well_known::STRING
+                        | well_known::VALUE
+                        | well_known::G1_ELEMENT
+                        | well_known::G2_ELEMENT => {
+                            traits.untestable_from_data = true;
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
 
                 let qualifier = (module.clone(), name.clone());
 
                 if !active_types.insert(qualifier.clone()) {
-                    return args.iter().all(|arg| {
-                        self.assert_known_data_type(
-                            arg,
-                            ids,
-                            active_types,
-                            allow_unmapped_generics,
-                            forbidden_known_types,
-                        )
-                    });
+                    for arg in args {
+                        self.collect_data_traits(arg, ids, active_types, traits);
+                    }
+                    return;
                 }
 
                 let type_constructor = if module.is_empty() || module == self.current_module {
@@ -930,87 +918,42 @@ impl<'a> Environment<'a> {
                             }
                         }
 
-                        if constructor_args.iter().any(|arg| {
-                            !self.assert_known_data_type(
-                                arg,
-                                ids,
-                                active_types,
-                                allow_unmapped_generics,
-                                forbidden_known_types,
-                            )
-                        }) {
-                            active_types.remove(&qualifier);
-                            return false;
+                        for field in constructor_args {
+                            self.collect_data_traits(field, ids, active_types, traits);
                         }
                     }
                 }
 
-                let result = args.iter().all(|arg| {
-                    self.assert_known_data_type(
-                        arg,
-                        ids,
-                        active_types,
-                        allow_unmapped_generics,
-                        forbidden_known_types,
-                    )
-                });
+                for arg in args {
+                    self.collect_data_traits(arg, ids, active_types, traits);
+                }
 
                 active_types.remove(&qualifier);
-
-                result
             }
 
-            Type::Var { tipo, .. } => match tipo.borrow().deref() {
-                TypeVar::Link { tipo } => self.assert_known_data_type(
-                    tipo,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                ),
-                TypeVar::Generic { id } => {
-                    if let Some(tipo) = ids.get(id) {
-                        self.assert_known_data_type(
-                            &tipo.clone(),
-                            ids,
-                            active_types,
-                            allow_unmapped_generics,
-                            forbidden_known_types,
-                        )
-                    } else {
-                        allow_unmapped_generics
+            Type::Var { tipo: var, .. } => match var.borrow().deref() {
+                TypeVar::Link { tipo } => self.collect_data_traits(tipo, ids, active_types, traits),
+                TypeVar::Generic { id } => match ids.get(id) {
+                    Some(tipo) => {
+                        self.collect_data_traits(&tipo.clone(), ids, active_types, traits)
                     }
-                }
-                TypeVar::Unbound { .. } => true,
+                    None => traits.unmapped_generic = true,
+                },
+                TypeVar::Unbound { .. } => traits.unbound.push(var.clone()),
             },
 
-            Type::Tuple { elems, .. } => elems.iter().all(|elem| {
-                self.assert_known_data_type(
-                    elem,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                )
-            }),
-
-            Type::Pair { fst, snd, .. } => {
-                self.assert_known_data_type(
-                    fst,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                ) && self.assert_known_data_type(
-                    snd,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                )
+            Type::Tuple { elems, .. } => {
+                for elem in elems {
+                    self.collect_data_traits(elem, ids, active_types, traits);
+                }
             }
 
-            Type::Fn { .. } => false,
+            Type::Pair { fst, snd, .. } => {
+                self.collect_data_traits(fst, ids, active_types, traits);
+                self.collect_data_traits(snd, ids, active_types, traits);
+            }
+
+            Type::Fn { .. } => traits.no_data_form = true,
         }
     }
 
@@ -2208,17 +2151,23 @@ impl<'a> Environment<'a> {
                     if self.is_data_like(&rhs) {
                         return Ok(());
                     }
-                } else if rhs.is_data() && self.is_data_like(&lhs) {
-                    if matches!(unify_mode, UnifyMode::AllowSoftCast)
-                        && !self.is_soft_castable(&lhs)
-                    {
-                        return Err(Error::IllegalSoftCast {
-                            location,
-                            tipo: lhs,
-                        });
-                    }
+                } else if rhs.is_data() {
+                    let traits = self.data_traits(&lhs);
 
-                    return Ok(());
+                    if traits.is_data_like() {
+                        if matches!(unify_mode, UnifyMode::AllowSoftCast)
+                            && !traits.is_soft_castable()
+                        {
+                            return Err(Error::IllegalSoftCast {
+                                location,
+                                tipo: lhs,
+                            });
+                        }
+
+                        traits.link_unbound_to_data();
+
+                        return Ok(());
+                    }
                 }
             }
         };
@@ -2519,7 +2468,7 @@ pub enum UnifyMode {
     // Via `expect`, only allow non-opaque Data-like types on the left-hand side
     AllowDownCast,
     // Via `if/is`: like `AllowDownCast`, and the conversion from Data must be testable without
-    // failing (see `Environment::is_soft_castable`)
+    // failing (see `DataTraits::is_soft_castable`)
     AllowSoftCast,
 }
 
@@ -2641,31 +2590,44 @@ fn resolve_links(tipo: Rc<Type>) -> Rc<Type> {
     }
 }
 
-/// Link every type variable in `tipo` whose type isn't known yet to Data. Generic (rigid) type
-/// variables are left alone.
-fn link_unbound_vars_to_data(tipo: &Type) {
-    match tipo {
-        Type::Var { tipo, .. } => {
-            let linked = match tipo.borrow().deref() {
-                TypeVar::Link { tipo } => Some(tipo.clone()),
-                TypeVar::Unbound { .. } => None,
-                TypeVar::Generic { .. } => return,
-            };
+/// What a walk over a type found that matters to casts through Data.
+#[derive(Default)]
+struct DataTraits {
+    /// A function or a `MillerLoopResult`: no builtin converts it to or from Data.
+    no_data_form: bool,
+    /// A `String`, `Value`, `G1Element` or `G2Element`: converting it from Data can fail on bad
+    /// input, and no builtin can test for that without failing.
+    untestable_from_data: bool,
+    /// A generic type variable that no type argument maps.
+    unmapped_generic: bool,
+    /// Type variables whose type isn't known yet.
+    unbound: Vec<Rc<RefCell<TypeVar>>>,
+}
 
-            match linked {
-                Some(linked) => link_unbound_vars_to_data(&linked),
-                None => *tipo.borrow_mut() = TypeVar::Link { tipo: Type::data() },
+impl DataTraits {
+    /// Can appear in Data (a list, a field, a comparison); generic variables are fine there.
+    fn is_serialisable(&self) -> bool {
+        !self.no_data_form
+    }
+
+    /// Can be converted to and from Data, which `expect`, `coerce` and upcasts do.
+    fn is_data_like(&self) -> bool {
+        !self.no_data_form && !self.unmapped_generic
+    }
+
+    /// `if ... is` can test Data against it without failing, to take its `else` branch instead.
+    fn is_soft_castable(&self) -> bool {
+        self.is_data_like() && !self.untestable_from_data
+    }
+
+    /// Link every type variable whose type isn't known yet to Data.
+    fn link_unbound_to_data(self) {
+        for var in self.unbound {
+            // The same variable can be met more than once.
+            if var.borrow().is_unbound() {
+                *var.borrow_mut() = TypeVar::Link { tipo: Type::data() };
             }
         }
-        Type::App { args, .. } => args.iter().for_each(|arg| link_unbound_vars_to_data(arg)),
-        Type::Tuple { elems, .. } => elems
-            .iter()
-            .for_each(|elem| link_unbound_vars_to_data(elem)),
-        Type::Pair { fst, snd, .. } => {
-            link_unbound_vars_to_data(fst);
-            link_unbound_vars_to_data(snd);
-        }
-        Type::Fn { .. } => {}
     }
 }
 
