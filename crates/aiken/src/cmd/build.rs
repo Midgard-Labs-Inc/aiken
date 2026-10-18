@@ -31,6 +31,10 @@ pub struct Args {
     #[clap(short, long)]
     uplc: bool,
 
+    /// Write an exact UPLC size report to build/size-profile.json
+    #[clap(long)]
+    size_profile: bool,
+
     /// Environment to build against.
     #[clap(long)]
     env: Option<String>,
@@ -93,6 +97,7 @@ pub fn exec(
         silent,
         watch,
         uplc,
+        size_profile,
         trace_filter,
         trace_level,
         output,
@@ -111,7 +116,17 @@ pub fn exec(
                 p.blueprint_path(output.as_deref()),
                 BlueprintExport::from(include_all_types),
                 env.clone(),
-            )
+            )?;
+            if size_profile {
+                p.write_size_profile(
+                    &p.blueprint_path(output.as_deref()),
+                    match trace_filter {
+                        Some(trace_filter) => trace_filter(trace_level),
+                        None => Tracing::All(trace_level),
+                    },
+                )?;
+            }
+            Ok(())
         })
     } else {
         with_project(directory.as_deref(), deny, silent, true, |p| {
@@ -124,7 +139,17 @@ pub fn exec(
                 p.blueprint_path(output.as_deref()),
                 BlueprintExport::from(include_all_types),
                 env.clone(),
-            )
+            )?;
+            if size_profile {
+                p.write_size_profile(
+                    &p.blueprint_path(output.as_deref()),
+                    match trace_filter {
+                        Some(trace_filter) => trace_filter(trace_level),
+                        None => Tracing::All(trace_level),
+                    },
+                )?;
+            }
+            Ok(())
         })
     };
 

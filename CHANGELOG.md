@@ -6,6 +6,8 @@
 
 ### Added
 
+- **aiken**: Add `aiken build --size-profile` for UPLC size reports.
+
 - **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. It costs at most one builtin conversion from `Data`, and coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions, Miller-loop results, builtin `Value`s and BLS12-381 elements, whose conversions aren't free: `un_value_data` validates the whole map, and uncompressing a G1/G2 element checks it's on the curve. Call those builtins explicitly instead. `coerce` is now a keyword. @rvcas, @colll78
 
 ### Changed
