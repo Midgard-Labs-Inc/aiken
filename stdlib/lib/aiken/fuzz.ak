@@ -608,7 +608,7 @@ pub fn tuple9(
 // ## Combining
 
 /// Combine a [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer) with the result of a another one.
-/// This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
+/// This function works great with [backpassing](https://aiken-lang.com/language-tour/functions/#backpassing-).
 ///
 /// ```aiken
 /// pub fn either(left: Fuzzer<a>, right: Fuzzer<a>) -> Fuzzer<a> {
@@ -864,7 +864,7 @@ pub fn either9(
 }
 
 /// Transform the result of a [Fuzzer](https://aiken-lang.com/prelude/#Fuzzer) using a function.
-/// This function works great with [backpassing](https://aiken-lang.org/language-tour/functions#backpassing-).
+/// This function works great with [backpassing](https://aiken-lang.com/language-tour/functions/#backpassing-).
 ///
 /// ```aiken
 /// fn bool() -> Fuzzer<Bool> {

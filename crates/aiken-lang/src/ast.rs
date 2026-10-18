@@ -2503,7 +2503,7 @@ pub enum Error {
       name.if_supports_color(Stdout, |s| s.purple()),
       keyword.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/modules"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/modules/"))]
     #[diagnostic(code("illegal::module_name"))]
     #[diagnostic(help(r#"You cannot use keywords as part of a module path name. As a quick reminder, here's a list of all the keywords (and thus, of invalid module path names):
 

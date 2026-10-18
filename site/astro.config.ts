@@ -6,6 +6,8 @@ import nimbus, {
 import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
 // From the Aiken VS Code extension (aiken-lang/vscode-aiken, Apache-2.0).
 import aiken from "./src/lib/aiken.tmLanguage.json";
+// From the old aiken-lang.org site (aiken-lang/site, Apache-2.0).
+import uplc from "./src/lib/uplc.tmLanguage.json";
 
 const nimbusConfig = defineNimbusConfig({
   // Canonical origin (no trailing slash). Drives canonical URLs, absolute OG
@@ -29,8 +31,13 @@ export default defineConfig({
     plugins: [tailwindcss()],
   },
   markdown: {
-    // Shiki doesn't ship an Aiken grammar. Code fences use the lowercase name.
-    shikiConfig: { langs: [{ ...aiken, name: "aiken" }] },
+    // Shiki doesn't ship Aiken or UPLC grammars. Code fences use the lowercase names.
+    shikiConfig: {
+      langs: [
+        { ...aiken, name: "aiken" },
+        { ...uplc, name: "uplc" },
+      ],
+    },
   },
   // Hover-prefetch link targets so full-page navigations feel instant without
   // a client-side router.

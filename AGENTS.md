@@ -64,6 +64,8 @@ Stdlib doc comments are rendered as MDX: use Nimbus admonitions (`:::note … ::
 
 `site/src/content/docs/prelude/` documents the prelude (`aiken`) and the builtins (`aiken/builtin`), which are defined by the compiler (`crates/aiken-lang/src/builtins.rs`, and `crates/uplc/src/builtins.rs` for the builtins). These pages are maintained by hand: when you add, remove or change a prelude type or function, or a builtin, update them in the same change.
 
+`site/src/content/docs/language-tour/` is the language tour, also maintained by hand: document new syntax or language features there in the same change. Compiler diagnostics link to its sections (`#[diagnostic(url("https://aiken-lang.com/language-tour/..."))]`), so when you rename or move a heading, update the links that point at its anchor.
+
 ## Architecture
 
 `stdlib/` is the standard library (including the fuzzers). It's an ordinary Aiken project, but it ships inside the compiler: `crates/aiken-project/build.rs` embeds its modules (minus the `*.test.ak` test modules), and every project gets them written to `build/packages/aiken-stdlib` and loaded as an implicit dependency named `aiken/stdlib` (`crates/aiken-project/src/stdlib.rs`). Its version is the compiler's version. Projects can't declare it as a dependency, and their own modules can't live under the `aiken/*` or `cardano/*` namespaces.

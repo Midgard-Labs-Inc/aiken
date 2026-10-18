@@ -2,7 +2,7 @@
 source: crates/aiken-project/src/export.rs
 description: "Code:\n\npub opaque type Thing {\n  a: Int\n}\n\npub fn add(a: Thing, b: Int) -> Int {\n    a.a + b\n}\n"
 ---
-        Error aiken::check::illegal::opaque_type_in_abi (https://aiken-lang.org/language-tour/modules#opaque-types)
+        Error aiken::check::illegal::opaque_type_in_abi (https://aiken-lang.com/language-tour/modules/#opaque-types)
 
   × While trying to make sense of your code...
   ╰─▶ I caught an opaque type in an exported interface.

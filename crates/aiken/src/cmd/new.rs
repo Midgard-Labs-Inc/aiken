@@ -222,7 +222,7 @@ fn readme(root: &Path, project_name: &str) -> miette::Result<()> {
 
                 ## Resources
 
-                Find more on the [Aiken's user manual](https://aiken-lang.org).
+                Find more on the [Aiken's user manual](https://aiken-lang.com/language-tour/).
             "#,
             name = project_name
         },

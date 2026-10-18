@@ -337,7 +337,7 @@ pub enum ErrorKind {
     InvalidValueLiteral { reason: String },
 
     #[error("I came across a bytearray declared using two different notations.")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types#bytearray"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/#bytearray"))]
     #[diagnostic(help("Either use decimal or hexadecimal notation, but don't mix them."))]
     HybridNotationInByteArray,
 

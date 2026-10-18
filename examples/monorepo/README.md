@@ -52,4 +52,4 @@ aiken docs
 
 ## Resources
 
-Find more on the [Aiken's user manual](https://aiken-lang.org).
+Find more on the [Aiken's user manual](https://aiken-lang.com/language-tour/).

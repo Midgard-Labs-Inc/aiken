@@ -83,7 +83,7 @@ pub enum Error {
     },
 
     #[error("I struggled to unify the types of two expressions.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/"))]
     #[diagnostic(code("type_mismatch"))]
     #[diagnostic(help("{}", suggest_unify(expected, given, situation, rigid_type_names)))]
     CouldNotUnify {
@@ -99,7 +99,7 @@ pub enum Error {
     },
 
     #[error("I almost got caught in an infinite cycle of type definitions.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#type-aliases"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#type-aliases"))]
     #[diagnostic(code("cycle"))]
     CyclicTypeDefinitions {
         #[label(collection, "part of a cycle")]
@@ -285,9 +285,7 @@ You can use '{discard}' and numbers to distinguish between similar names.
         "I realized the variable '{}' was mentioned more than once in an alternative pattern.\n",
         name.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url(
-        "https://aiken-lang.org/language-tour/control-flow#alternative-clause-patterns"
-    ))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#alternative-patterns"))]
     #[diagnostic(code("duplicate::pattern"))]
     DuplicateVarInPattern {
         #[label("duplicate identifier")]
@@ -299,9 +297,7 @@ You can use '{discard}' and numbers to distinguish between similar names.
         "I tripped over an extra variable in an alternative pattern: {}.\n",
         name.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url(
-        "https://aiken-lang.org/language-tour/control-flow#alternative-clause-patterns"
-    ))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#alternative-patterns"))]
     #[diagnostic(code("unexpected::variable"))]
     ExtraVarInAlternativePattern {
         #[label("unexpected variable")]
@@ -311,7 +307,7 @@ You can use '{discard}' and numbers to distinguish between similar names.
 
     #[error("I caught an opaque type possibly breaking its abstraction boundary.\n")]
     #[diagnostic(code("illegal::expect_opaque_type"))]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/modules#opaque-types"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/modules/#opaque-types"))]
     #[diagnostic(help(
         "This expression is trying to convert something unknown into an opaque type. An opaque type is a data-type which hides its internal details; usually because it enforces some specific invariant on its internal structure. For example, you might define a {Natural} type that holds an {Integer} but ensures that it never gets negative.\n\nA direct consequence means that it isn't generally possible, nor safe, to turn *any* value into an opaque type. Instead, use the constructors and methods provided for lifting values into that opaque type while ensuring that any structural invariant is checked for.",
         Natural = "Natural".if_supports_color(Stdout, |s| s.cyan()),
@@ -324,7 +320,7 @@ You can use '{discard}' and numbers to distinguish between similar names.
 
     #[error("I caught an opaque type in an exported interface.\n")]
     #[diagnostic(code("illegal::opaque_type_in_abi"))]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/modules#opaque-types"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/modules/#opaque-types"))]
     #[diagnostic(help(
         r#"Opaque types cannot appear in an exposed interface such as a validator's datum or redeemer type or an exported function. Indeed, an opaque type hides its implementation details, usually because it enforces an invariant that cannot be safely reconstructed from arbitrary Plutus Data.
 
@@ -405,7 +401,7 @@ Use an intermediate public representation instead, then re-construct the opaque 
     },
 
     #[error("I notice a benchmark definition without any argument.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/bench"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/bench/"))]
     #[diagnostic(code("arity::bench"))]
     IncorrectBenchmarkArity {
         #[label("must have exactly one argument")]
@@ -418,7 +414,7 @@ Use an intermediate public representation instead, then re-construct the opaque 
         if *given <= 1 { "" } else { "s"},
         expected.if_supports_color(Stdout, |s| s.purple()),
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/"))]
     #[diagnostic(code("arity::constructor"))]
     IncorrectFieldsArity {
         #[label("{}", if given < expected { "missing fields" } else { "extraneous fields" })]
@@ -432,7 +428,7 @@ Use an intermediate public representation instead, then re-construct the opaque 
         expected.if_supports_color(Stdout, |s| s.purple()),
         given.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/functions#named-functions"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/functions/#named-functions"))]
     #[diagnostic(code("arity::invoke"))]
     #[diagnostic(help(r#"Functions (and constructors) must always be called with all their arguments (comma-separated, between brackets).
 
@@ -468,7 +464,7 @@ From there, you can define 'increment', a function that takes a single argument 
         expected.if_supports_color(Stdout, |s| s.purple()),
         given.len().if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/control-flow#matching"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#pattern-matching"))]
     #[diagnostic(code("arity::pattern"))]
     #[diagnostic(help(
         "When pattern-matching on constructors, you must either match the exact number of fields, or use the spread operator '{spread}'. Note that unused fields must be discarded by prefixing their name with '{discard}'.",
@@ -490,7 +486,7 @@ From there, you can define 'increment', a function that takes a single argument 
         expected.if_supports_color(Stdout, |s| s.purple()),
         given.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/control-flow#destructuring"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#destructuring"))]
     #[diagnostic(code("arity::tuple"))]
     #[diagnostic(help(
         "When pattern matching on a tuple, you must match all of its elements. Note that unused fields must be discarded by prefixing their name with '{discard}'.",
@@ -508,7 +504,7 @@ From there, you can define 'increment', a function that takes a single argument 
         given.if_supports_color(Stdout, |s| s.purple()),
         expected.if_supports_color(Stdout, |s| s.purple()),
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#generics"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#generics"))]
     #[diagnostic(code("arity::generic"))]
     #[diagnostic(help(
         "{}",
@@ -545,7 +541,7 @@ Perhaps, try the following:
       name.if_supports_color(Stdout, |s| s.purple()),
       keyword.if_supports_color(Stdout, |s| s.purple()),
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/modules"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/modules/"))]
     #[diagnostic(code("illegal::module_name"))]
     #[diagnostic(help(r#"You cannot use keywords as part of a module path name. As a quick reminder, here's a list of all the keywords (and thus, of invalid module path names):
 
@@ -553,7 +549,7 @@ Perhaps, try the following:
     KeywordInModuleName { name: String, keyword: String },
 
     #[error("I discovered a block which is ending with an assignment.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/functions#named-functions"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/functions/#named-functions"))]
     #[diagnostic(code("illegal::return"))]
     #[diagnostic(help(r#"In Aiken, code blocks (such as function bodies) must return an explicit result in the form of an expression. While assignments are technically speaking expressions, they aren't allowed to be the last expression of a function because they convey a different meaning and this could be error-prone.
 
@@ -574,9 +570,7 @@ If you really meant to return that last expression, try to replace it with the f
         "I found a missing variable in an alternative pattern: {}.\n",
         name.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url(
-        "https://aiken-lang.org/language-tour/control-flow#alternative-clause-patterns"
-    ))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#alternative-patterns"))]
     #[diagnostic(code("missing::variable"))]
     MissingVarInAlternativePattern {
         #[label("missing case")]
@@ -585,7 +579,7 @@ If you really meant to return that last expression, try to replace it with the f
     },
 
     #[error("I tripped over an attempt to access elements on something that isn't indexable.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types#tuples"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/#tuples"))]
     #[diagnostic(code("illegal::indexable"))]
     #[diagnostic(help(
         r#"Because you used an ordinal index on an element, I assumed it had to be a tuple or a pair but instead I found something of type:
@@ -609,7 +603,7 @@ If you really meant to return that last expression, try to replace it with the f
           )
       }
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/control-flow#matching"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#pattern-matching"))]
     #[diagnostic(code("non_exhaustive_pattern_match"))]
     #[diagnostic(help(r#"Let bindings and when clauses must be exhaustive -- that is, they must cover all possible cases of the type they match. In {keyword_when}/{keyword_is} pattern-match, it is recommended to have an explicit branch for each constructor as it prevents future silly mistakes when adding new constructors to a type. However, you can also use the wildcard '{discard}' as a last branch to match any remaining result.
 
@@ -647,7 +641,7 @@ In this particular instance, the following cases are unmatched:
     },
 
     #[error("I discovered a positional argument after a label argument.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/functions#labeled-arguments"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/functions/#labeled-arguments"))]
     #[diagnostic(code("unexpected::positional_argument"))]
     #[diagnostic(help(r#"You can mix positional and labeled arguments, but you must put all positional arguments (i.e. without label) at the front.
 
@@ -660,7 +654,7 @@ To fix this, you'll need to either turn that argument as a labeled argument, or 
     },
 
     #[error("I caught a private value trying to escape.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/modules"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/modules/"))]
     #[diagnostic(code("private_leak"))]
     #[diagnostic(help(r#"I found a public value that is making use of a private type. This would prevent other modules from actually using that value because they wouldn't know what this type refer to.
 
@@ -696,7 +690,7 @@ Maybe you meant to turn it public using the '{keyword_pub}' keyword?"#
             keyword_when = "when".if_supports_color(Stdout, |s| s.purple())
         )
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/control-flow#matching"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#pattern-matching"))]
     #[diagnostic(code("redundant_pattern_match"))]
     #[diagnostic(help("Double check these patterns and then remove one of the clauses."))]
     RedundantMatchClause {
@@ -708,7 +702,7 @@ Maybe you meant to turn it public using the '{keyword_pub}' keyword?"#
 
     #[error("I couldn't figure out the type of a record you're trying to access.\n")]
     #[diagnostic(url(
-        "https://aiken-lang.org/language-tour/variables-and-constants#type-annotations"
+        "https://aiken-lang.com/language-tour/variables-and-constants/#type-annotations"
     ))]
     #[diagnostic(code("unknown::record_access"))]
     #[diagnostic(help(r#"I do my best to infer types of any expression; yet sometimes I need help (don't we all?).
@@ -734,7 +728,7 @@ You can help me by providing a type-annotation for 'x', as such:
     },
 
     #[error("I tripped over an invalid constructor in a record update.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#record-updates"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#updating-custom-types"))]
     #[diagnostic(code("illegal::record_update"))]
     RecordUpdateInvalidConstructor {
         #[label("invalid constructor")]
@@ -742,7 +736,7 @@ You can help me by providing a type-annotation for 'x', as such:
     },
 
     #[error("I almost got caught in an endless loop while inferring a recursive type.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#type-annotations"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/functions/#type-annotations"))]
     #[diagnostic(code("missing::type_annotation"))]
     #[diagnostic(help(
         "I have several aptitudes, but inferring recursive types isn't one them. It is still possible to define recursive types just fine, but I will need a little help in the form of type annotation to infer their types should they show up."
@@ -757,7 +751,7 @@ You can help me by providing a type-annotation for 'x', as such:
         Ordinal(*index + 1).to_string().if_supports_color(Stdout, |s| s.purple()),
         size.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types#tuples"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/#tuples"))]
     #[diagnostic(code("invalid::tuple_index"))]
     TupleIndexOutOfBound {
         #[label("out of bounds")]
@@ -771,7 +765,7 @@ You can help me by providing a type-annotation for 'x', as such:
         Ordinal(*index + 1).to_string().if_supports_color(Stdout, |s| s.purple()),
         "Pair".if_supports_color(Stdout, |s| s.bright_blue()).if_supports_color(Stdout, |s| s.bold()),
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types#pairs"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/#pairs"))]
     #[diagnostic(code("invalid::pair_index"))]
     PairIndexOutOfBound {
         #[label("out of bounds")]
@@ -783,7 +777,7 @@ You can help me by providing a type-annotation for 'x', as such:
         "I tripped over the following labeled argument: {}.\n",
         label.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/functions#labeled-arguments"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/functions/#labeled-arguments"))]
     #[diagnostic(code("unexpected::module_name"))]
     UnexpectedLabeledArg {
         #[label("unexpected labeled args")]
@@ -795,7 +789,7 @@ You can help me by providing a type-annotation for 'x', as such:
         "I tripped over the following labeled argument: {}.\n",
         label.if_supports_color(Stdout, |s| s.purple())
     )]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#named-accessors"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#named-accessors"))]
     #[diagnostic(code("unexpected::labeled_argument"))]
     #[diagnostic(help(r#"The constructor '{constructor}' does not have any labeled field. Its fields must therefore be matched only by position.
 
@@ -1020,7 +1014,7 @@ Perhaps, try the following:
     },
 
     #[error("I discovered a redundant spread operator.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/control-flow#destructuring"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#destructuring"))]
     #[diagnostic(code("unexpected::spread_operator"))]
     #[diagnostic(help(r#"The spread operator comes in handy when matching on some fields of a constructor. However, here you've matched all {arity} fields of the constructor which makes the spread operator redundant.
 
@@ -1032,7 +1026,7 @@ The best thing to do from here is to remove it."#))]
     },
 
     #[error("I tripped over a record-update on a data-type with more than one constructor.\n")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#record-updates"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#updating-custom-types"))]
     #[diagnostic(code("illegal::record_update"))]
     UpdateMultiConstructorType {
         #[label("more than one constructor")]
@@ -1686,7 +1680,7 @@ fn suggest_import_constructor() -> String {
 #[derive(Debug, PartialEq, Clone, thiserror::Error, Diagnostic)]
 pub enum Warning {
     #[error("I found a record update using all fields; thus redundant.")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#record-updates"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#updating-custom-types"))]
     #[diagnostic(code("record_update::all_fields"))]
     AllFieldsRecordUpdate {
         #[label("redundant record update")]
@@ -1704,7 +1698,7 @@ pub enum Warning {
     },
 
     #[error("I found a record update with no fields; effectively updating nothing.")]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#record-updates"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#updating-custom-types"))]
     #[diagnostic(code("record_update::no_fields"))]
     NoFieldsRecordUpdate {
         #[label("useless record update")]
@@ -1955,7 +1949,7 @@ pub enum Warning {
         symbol_hash = "#".if_supports_color(Stderr, |s| s.purple()),
     }))]
     #[diagnostic(code("syntax::bytearray_literal_is_hex_string"))]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/primitive-types#bytearray"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/primitive-types/#bytearray"))]
     Utf8ByteArrayIsValidHexString {
         #[label("missing '#' to decode hex string")]
         location: Span,
@@ -1965,7 +1959,7 @@ pub enum Warning {
     #[error("I tripped over a confusing constructor destructuring")]
     #[diagnostic(help("Try instead: \n\n{}", format_pattern_suggestion(suggestion)))]
     #[diagnostic(code("syntax::unused_record_fields"))]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/custom-types#destructuring"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/custom-types/#destructuring"))]
     UnusedRecordFields {
         #[label("prefer destructuring with named fields")]
         location: Span,
@@ -1977,7 +1971,7 @@ pub enum Warning {
         "Compiling with a compact trace-level, you are probably expecting compact traces although here, the entire label will need to be serialise *at runtime* which will add a significant overhead.\n\nAs a reminder, trace arguments are fully ignored in compact tracing. Hence, you probably want to put a cute little label here and move the current trace as argument!"
     ))]
     #[diagnostic(code("trace::label_is_not_string"))]
-    #[diagnostic(url("https://aiken-lang.org/language-tour/troubleshooting#traces"))]
+    #[diagnostic(url("https://aiken-lang.com/language-tour/troubleshooting/#traces"))]
     CompactTraceLabelIsNotstring {
         #[label("compact trace label is not String")]
         location: Span,

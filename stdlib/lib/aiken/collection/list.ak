@@ -951,7 +951,7 @@ pub type Fold2<a, b, result> =
 /// faster (albeit equivalent) than accumulating both results in a `Pair` or tuple.
 ///
 /// :::tip
-/// Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// Using [`backpassing`](https://aiken-lang.com/language-tour/functions/#backpassing-) to ease readability is a good idea.
 /// :::
 ///
 /// ```aiken
@@ -1001,7 +1001,7 @@ pub fn foldr(self: List<a>, zero: b, with: fn(a, b) -> b) -> b {
 /// faster (albeit equivalent) than accumulating both results in a `Pair` or tuple.
 ///
 /// :::tip
-/// Using [`backpassing`](https://aiken-lang.org/language-tour/functions#backpassing-) to ease readability is a good idea.
+/// Using [`backpassing`](https://aiken-lang.com/language-tour/functions/#backpassing-) to ease readability is a good idea.
 /// :::
 ///
 /// ```aiken

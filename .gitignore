@@ -5,3 +5,4 @@ _site/
 temp/
 scratch/
 .vscode/
+.claude/settings.local.json
