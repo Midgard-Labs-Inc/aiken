@@ -1,0 +1,464 @@
+---
+source: crates/aiken-project/src/tests/codegen_costs.rs
+assertion_line: 316
+expression: "json!({\n    \"schema_version\": 1, \"plutus_version\": \"v3\", \"protocol_major_version\":\n    PROTOCOL_MAJOR_VERSION, \"cost_model\": \"default_for_language_and_protocol\",\n    \"cek_slippage\": CEK_SLIPPAGE, \"cases\": results,\n})"
+---
+{
+  "schema_version": 1,
+  "plutus_version": "v3",
+  "protocol_major_version": 11,
+  "cost_model": "default_for_language_and_protocol",
+  "cek_slippage": 1,
+  "cases": {
+    "expect_before_branch": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 91,
+        "cbor_bytes": 93,
+        "inputs": {
+          "valid_unused": {
+            "result": 7,
+            "cpu_units": 2292443,
+            "memory_units": 9858
+          },
+          "valid_used": {
+            "result": 42,
+            "cpu_units": 2705331,
+            "memory_units": 11054
+          },
+          "wrong_element_unused": {
+            "result": null,
+            "cpu_units": 1585737,
+            "memory_units": 7193
+          },
+          "wrong_shape_unused": {
+            "result": null,
+            "cpu_units": 394033,
+            "memory_units": 2432
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 91,
+        "cbor_bytes": 93,
+        "inputs": {
+          "valid_unused": {
+            "result": 7,
+            "cpu_units": 2292443,
+            "memory_units": 9858
+          },
+          "valid_used": {
+            "result": 42,
+            "cpu_units": 2705331,
+            "memory_units": 11054
+          },
+          "wrong_element_unused": {
+            "result": null,
+            "cpu_units": 1585737,
+            "memory_units": 7193
+          },
+          "wrong_shape_unused": {
+            "result": null,
+            "cpu_units": 394033,
+            "memory_units": 2432
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 161,
+        "cbor_bytes": 163,
+        "inputs": {
+          "valid_unused": {
+            "result": 7,
+            "cpu_units": 3009193,
+            "memory_units": 13222
+          },
+          "valid_used": {
+            "result": 42,
+            "cpu_units": 3422081,
+            "memory_units": 14418
+          },
+          "wrong_element_unused": {
+            "result": null,
+            "cpu_units": 2357241,
+            "memory_units": 10657
+          },
+          "wrong_shape_unused": {
+            "result": null,
+            "cpu_units": 1348789,
+            "memory_units": 6329
+          }
+        }
+      }
+    },
+    "large_local_constant": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      }
+    },
+    "large_module_constant": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 1059,
+        "cbor_bytes": 1062,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      }
+    },
+    "late_record_field": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 34,
+        "cbor_bytes": 36,
+        "inputs": {
+          "negative": {
+            "result": -9,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          },
+          "positive": {
+            "result": 6,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 34,
+        "cbor_bytes": 36,
+        "inputs": {
+          "negative": {
+            "result": -9,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          },
+          "positive": {
+            "result": 6,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 34,
+        "cbor_bytes": 36,
+        "inputs": {
+          "negative": {
+            "result": -9,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          },
+          "positive": {
+            "result": 6,
+            "cpu_units": 1222889,
+            "memory_units": 3788
+          }
+        }
+      }
+    },
+    "list_prefix": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 56,
+        "cbor_bytes": 58,
+        "inputs": {
+          "empty_list": {
+            "result": null,
+            "cpu_units": 491696,
+            "memory_units": 2564
+          },
+          "exact_prefix": {
+            "result": 6,
+            "cpu_units": 1748451,
+            "memory_units": 6124
+          },
+          "longer_list": {
+            "result": 6,
+            "cpu_units": 1748451,
+            "memory_units": 6124
+          },
+          "short_list": {
+            "result": null,
+            "cpu_units": 898353,
+            "memory_units": 3828
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 56,
+        "cbor_bytes": 58,
+        "inputs": {
+          "empty_list": {
+            "result": null,
+            "cpu_units": 491696,
+            "memory_units": 2564
+          },
+          "exact_prefix": {
+            "result": 6,
+            "cpu_units": 1748451,
+            "memory_units": 6124
+          },
+          "longer_list": {
+            "result": 6,
+            "cpu_units": 1748451,
+            "memory_units": 6124
+          },
+          "short_list": {
+            "result": null,
+            "cpu_units": 898353,
+            "memory_units": 3828
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 128,
+        "cbor_bytes": 130,
+        "inputs": {
+          "empty_list": {
+            "result": null,
+            "cpu_units": 826525,
+            "memory_units": 3996
+          },
+          "exact_prefix": {
+            "result": 6,
+            "cpu_units": 2430439,
+            "memory_units": 8788
+          },
+          "longer_list": {
+            "result": 6,
+            "cpu_units": 2430439,
+            "memory_units": 8788
+          },
+          "short_list": {
+            "result": null,
+            "cpu_units": 2071627,
+            "memory_units": 8052
+          }
+        }
+      }
+    },
+    "small_local_constant": {
+      "compact": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 39,
+        "cbor_bytes": 41,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "silent": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 39,
+        "cbor_bytes": 41,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      },
+      "verbose": {
+        "uplc_version": [
+          1,
+          1,
+          0
+        ],
+        "flat_bytes": 39,
+        "cbor_bytes": 41,
+        "inputs": {
+          "first_pair": {
+            "result": 1,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          },
+          "second_pair": {
+            "result": 3,
+            "cpu_units": 649598,
+            "memory_units": 2644
+          }
+        }
+      }
+    }
+  }
+}
