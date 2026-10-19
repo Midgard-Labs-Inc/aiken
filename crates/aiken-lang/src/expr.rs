@@ -1,4 +1,4 @@
-use crate::ast::well_known;
+use crate::{ast::well_known, gen_uplc::builder::constr_index};
 pub(crate) use crate::{
     ast::{
         self, Annotation, ArgBy, ArgName, AssignmentKind, AssignmentPattern, BinOp, Bls12_381Point,
@@ -1326,12 +1326,14 @@ impl UntypedExpr {
                     let ix = convert_tag_to_constr(tag).or(any_constructor).unwrap() as usize;
 
                     if let Type::App { args, .. } = tipo.deref()
-                        && let Some(DataType {
+                        && let Some(data_type) = lookup_data_type_by_tipo(data_types, &tipo)
+                    {
+                        let DataType {
                             constructors,
                             typed_parameters,
                             ..
-                        }) = lookup_data_type_by_tipo(data_types, &tipo)
-                    {
+                        } = &data_type;
+
                         if constructors.is_empty() {
                             return Ok(UntypedExpr::Var {
                                 location: Span::empty(),
@@ -1339,7 +1341,18 @@ impl UntypedExpr {
                             });
                         }
 
-                        let constructor = &constructors[ix];
+                        // The constructor index of the Data is the constructor's tag, which is
+                        // not its position when a `@tag` decorates the constructor or the type.
+                        let constructor = constructors
+                            .iter()
+                            .enumerate()
+                            .find(|(position, constructor)| {
+                                constr_index(&data_type, *position, constructor) == ix
+                            })
+                            .map(|(_, constructor)| constructor)
+                            .ok_or_else(|| {
+                                format!("no constructor of {tipo:?} has index {ix}: {fields:?}")
+                            })?;
 
                         let generics = typed_parameters.iter().zip(args).fold(
                             IndexMap::new(),

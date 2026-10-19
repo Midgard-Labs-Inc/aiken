@@ -331,6 +331,52 @@ mod test {
         );
     }
 
+    /// The constructor index in the Data of a value is its `@tag`, not its position among the
+    /// constructors: reifying the operands of a failing test must look the constructor up by tag.
+    #[test]
+    fn reify_tagged_constructors() {
+        for (declaration, constructor, one, two) in [
+            (
+                "pub opaque type T {\n  @tag(3)\n  T(Int)\n}",
+                "T",
+                "T(1)",
+                "T(2)",
+            ),
+            (
+                "pub type T {\n  A\n  @tag(5)\n  B(Int)\n}",
+                "B",
+                "B(1)",
+                "B(2)",
+            ),
+            (
+                "@tag(4)\npub type T {\n  a: Int,\n}",
+                "T",
+                "T { a: 1 }",
+                "T { a: 2 }",
+            ),
+        ] {
+            let assertion = unit_test(&format!(
+                r#"
+                {declaration}
+
+                fn mk(n: Int) -> T {{
+                  {constructor}(n)
+                }}
+
+                test failing() {{
+                  mk(1) == mk(2)
+                }}
+                "#
+            ));
+
+            assert_eq!(
+                assertion,
+                Some(format!("× expected\n│ {one}\n× to equal\n│ {two}")),
+                "{declaration}"
+            );
+        }
+    }
+
     #[test]
     fn test_prop_basic() {
         let (prop, _) = property_raw(indoc! { r#"
