@@ -3987,7 +3987,7 @@ fn forbid_expect_into_opaque_type_constructor_with_typecasting() {
 }
 
 #[test]
-fn forbid_expect_into_nested_opaque_in_record_without_typecasting() {
+fn allow_expect_into_nested_opaque_in_record_without_typecasting() {
     let source_code = r#"
         opaque type Thing { inner: Int }
 
