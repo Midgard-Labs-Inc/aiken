@@ -1,0 +1,89 @@
+---
+title: Casts through Data
+description: How each type is represented at runtime, how it converts to and from Data, and the rules for upcasts, expect, if/is and coerce.
+sidebar:
+  order: 3
+---
+
+Every type that can appear in a datum, a redeemer or a field of a data type has a `Data` form. A cast converts a value between its own runtime form and `Data`. Aiken has four casts:
+
+- an **upcast** to `Data`, which happens implicitly when a value is passed where `Data` is expected (a `let` with a `Data` annotation, a function argument, a return annotation, `==`, a pipe);
+- `expect x: T = data`, which converts `Data` to `T` and fails if `data` doesn't have the shape of a `T`;
+- `if data is x: T { … } else { … }`, which converts `Data` to `T` and takes the `else` branch if `data` doesn't have the shape of a `T`;
+- `coerce x: T = value`, which converts `value` to `T` through `Data` without checking anything.
+
+In a validator, failing is how a script rejects a transaction. A cast that can fail is a check; a cast that can't fail is a total conversion (it still costs execution units).
+
+## Runtime forms and conversions
+
+The builtins below are those of the [Plutus Core specification](https://github.com/IntersectMBO/plutus/tree/master/doc/plutus-core-spec). "Fails" lists when a builtin fails on a value of the right Plutus type.
+
+| Aiken type | Runtime form in UPLC | To `Data` | Fails | From `Data` (`expect`) | Fails when |
+| --- | --- | --- | --- | --- | --- |
+| `Int` | `integer` | `iData` | never | `unIData` | not an `I` |
+| `ByteArray` | `bytestring` | `bData` | never | `unBData` | not a `B` |
+| `String` | `string` | `bData (encodeUtf8 s)` | never | `decodeUtf8 (unBData d)` | not a `B`, or the bytes aren't valid UTF-8 |
+| `Bool` | `bool` | `ifThenElse b (Constr 1 []) (Constr 0 [])` | never | `unConstrData`, index and fields checked | not a `Constr`, index not 0 or 1, or fields not empty |
+| `Void` | `unit` | the constant `Constr 0 []` | never | `unConstrData`, index and fields checked | not `Constr 0 []` |
+| `List<a>` | `list data` | `listData` | never | `unListData`, then each element as an `a` | not a `List`, or an element fails |
+| `Pairs<k, v>` (`List<Pair<k, v>>`) | `list (pair data data)` | `mapData` | never | `unMapData`, then each key as a `k` and value as a `v` | not a `Map`, or an entry fails |
+| `Pair<a, b>` | `pair data data` | `listData [fst, snd]` | never | `unListData`, then `headList`/`tailList` | not a `List` of exactly 2 elements, or an element fails |
+| tuple `(a, b, …)` | `list data` | `listData` | never | `unListData`, then each element | not a `List` of exactly the tuple's length, or an element fails |
+| record or sum type | `data` (a `Constr`) | none: it already is `Data` | never | `unConstrData`, index and field count checked, then each field | not a `Constr`, index of no constructor, wrong field count, or a field fails |
+| record with `@list` | `list data` (its fields) | `listData` | never | `unListData`, field count checked, then each field | not a `List`, wrong number of fields, or a field fails |
+| opaque type | as its definition | as its definition | as its definition | refused by `expect` and `if … is` | (see below) |
+| opaque type with one constructor, one field and no decorator | erased: the runtime form of the field | as the field | as the field | refused by `expect` and `if … is` | (see below) |
+| `Data` | `data` | none | never | none | never |
+| `Value` | `value` | `valueData` | more than 40,000 tokens | `unValueData` | not a well-formed value (below) |
+| `G1Element` | `bls12_381_G1_element` | `bData (bls12_381_G1_compress p)` | never | `bls12_381_G1_uncompress (unBData d)` | not a `B`, not 48 bytes, or not a point of the G1 subgroup ([CIP-0381](https://cips.cardano.org/cip/CIP-0381)) |
+| `G2Element` | `bls12_381_G2_element` | `bData (bls12_381_G2_compress p)` | never | `bls12_381_G2_uncompress (unBData d)` | not a `B`, not 96 bytes, or not a point of the G2 subgroup |
+| `MillerLoopResult` | `bls12_381_mlresult` | none | | none | |
+| function | a closure | none | | none | |
+
+`unValueData` ([CIP-0153](https://cips.cardano.org/cip/CIP-0153)) fails unless the `Data` is a `Map` whose keys are byte strings of at most 32 bytes in strictly ascending order, each mapped to a non-empty `Map` whose keys are byte strings of at most 32 bytes in strictly ascending order, each mapped to a non-zero integer in $[-2^{127}, 2^{127} - 1]$.
+
+`MillerLoopResult` and functions have no `Data` form: no builtin converts them, so every cast refuses them, as well as any type that contains them.
+
+A field of a record, an element of a list and the like stay in `Data` form inside their container. They are converted when they're read, with the same builtins but without the structural checks, because `expect` has already checked them (or `coerce` has assumed them).
+
+## Rules
+
+A type is **Data-like** if it has a `Data` form: every type above except `MillerLoopResult`, functions, and types that contain them.
+
+| Cast | Rule |
+| --- | --- |
+| Upcast to `Data` | Allowed from any Data-like type, opaque types included. Emits the "To `Data`" conversion. An empty list `[]` whose element type is unknown is ambiguous and refused. `a == b` where either side is `Data` upcasts the other side and compares both with `equalsData`. |
+| `expect x: T = data` | `T` must be Data-like and must not contain an opaque type where it's converted from `Data`. Emits the "From `Data`" conversion and every check in the table, recursively; any mismatch fails. When the value isn't `Data`, `expect` is a pattern match on a value of the same type (opaque types included), and a value of another type is a type mismatch. |
+| `if data is x: T` | The same as `expect`, except that a mismatch takes the `else` branch. So `T` must also be testable without failing: it must not contain `String`, `Value`, `G1Element` or `G2Element`, because no builtin can tell valid UTF-8, a valid compressed point or a well-formed value from invalid bytes without failing. Use `expect`, or test for `ByteArray` (or `Data`) and convert explicitly. |
+| `coerce x: T = value` | Both the type of `value` and `T` must be Data-like; opaque types are allowed. Converts `value` to `Data`, then to `T` with the field conversions only: no index, length or field check. Converting between an opaque type and the type it wraps compiles to nothing. A coerce of malformed `Data` is undefined: a conversion builtin may fail on it (for example `unIData` on a `B`), or the optimizer may remove the conversion, for instance when the value is converted back to `Data`. |
+| Two function types | Must match exactly, in both argument and return positions. A function can't convert its arguments or its result: a `fn(Int) -> Bool` called with `Data`, or a `fn(Data) -> Bool` called with an `Int`, would misread its input. To pass a `fn(Int) -> Bool` where a `fn(Data) -> Bool` is expected, wrap it in a function that takes `Data` and `expect`s an `Int` from it. Calls and pipes upcast their arguments: `a \|> f` is typed like `f(a)`. |
+| A type variable whose type isn't known yet | When a cast meets it, the variable is linked to `Data`, so it can't later become a type that converts differently or not at all. The empty-list ambiguity check runs first. |
+
+### `coerce` and `when`
+
+`coerce` doesn't check the constructor index of a sum type. A `when` that lists every constructor tests every index but the last listed one, which it takes for any other index. So `when` on a coerced value whose constructor index is out of range takes the last clause, or the `_` clause if there is one:
+
+```aiken
+type Three {
+  One
+  Two
+  Three
+}
+
+test out_of_range() {
+  coerce t: Three = builtin.constr_data(7, [])
+  when t is {
+    One -> False
+    Two -> False
+    Three -> True // taken for index 7
+  }
+}
+```
+
+`expect t: Three = builtin.constr_data(7, [])` fails instead.
+
+### Opaque types
+
+`expect` and `if … is` refuse to convert `Data` into a type that contains an opaque type, since `Data` can't be trusted to respect the opaque type's invariants. A validator's parameters, datum and redeemer are converted from `Data` too, so they can't contain an opaque type either. `coerce` converts into opaque types: the caller is responsible for the value's validity.
+
+A type argument that no constructor field uses (a phantom argument, as `a` in `type Tagged<a> { Tagged(Int) }`) never appears in a value, so an opaque type there doesn't count. An imported opaque type is checked the same way as a local one.
