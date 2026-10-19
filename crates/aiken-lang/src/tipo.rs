@@ -1337,6 +1337,11 @@ pub struct TypeInfo {
     pub values: HashMap<String, ValueConstructor>,
     pub accessors: HashMap<String, AccessorsMap>,
     pub annotations: HashMap<Annotation, Rc<Type>>,
+    /// For each function, the ids of its generic variables that it compares with `==` or `!=`,
+    /// directly or through another function. They can't be instantiated with a type that has no
+    /// Data form.
+    #[serde(default)]
+    pub compared_generics: HashMap<String, Vec<u64>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

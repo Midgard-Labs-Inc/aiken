@@ -6506,11 +6506,10 @@ fn expect_links_an_unknown_type_argument_to_data() {
 }
 
 /// `==` compares through Data, and functions and `MillerLoopResult` have no Data form. A type
-/// variable that meets `==` isn't linked to anything, so instantiating it later with a function
-/// (or a `MillerLoopResult`) type-checks: the function case compiles to `equalsData` on two
-/// lambdas, which fails at runtime, and the `MillerLoopResult` case panics the code generator.
+/// variable that meets `==` can't become one later, whether it's known by the end of the
+/// definition (a lambda's argument) or a generic of a function that compares it, directly or
+/// through another function, and is instantiated with one.
 #[test]
-#[ignore = "open hole: == on a type variable later instantiated with a function or MillerLoopResult type-checks"]
 fn equality_refuses_types_without_a_data_form_through_type_variables() {
     for source_code in [
         r#"
@@ -6540,12 +6539,164 @@ fn equality_refuses_types_without_a_data_form_through_type_variables() {
           same(ml, ml)
         }
         "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x != y
+        }
+
+        fn same_again(x: b, y: b) -> Bool {
+          same(x, y)
+        }
+
+        fn main() -> Bool {
+          same_again(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn comparer() -> fn(a, a) -> Bool {
+          fn(x, y) { x == y }
+        }
+
+        fn main() -> Bool {
+          comparer()(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn apply(f: fn(b, b) -> Bool, x: b) -> Bool {
+          f(x, x)
+        }
+
+        fn main() -> Bool {
+          apply(same, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn other(x: a, y: a) -> Bool {
+          same(x, y, False)
+        }
+
+        fn same(x: a, y: a, b: Bool) -> Bool {
+          if b { other(x, y) } else { x == y }
+        }
+
+        fn main() -> Bool {
+          other(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn main() -> Bool {
+          same(fn(n: Int) { n }, fn(n: Int) { n }, True)
+        }
+
+        fn same(x: a, y: a, b: Bool) -> Bool {
+          if b { other(x, y) } else { x == y }
+        }
+
+        fn other(x: a, y: a) -> Bool {
+          same(x, y, False) && main()
+        }
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn id(n: Int) -> Int {
+          n
+        }
+
+        const compared: Bool = same(id, id)
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn id(n: Int) -> Int {
+          n
+        }
+
+        fn pick(b: Bool) -> Fuzzer<Int> {
+          fn(prng) { if b { Some((prng, 1)) } else { None } }
+        }
+
+        test prop(n via pick(same(id, id))) {
+          n == 1
+        }
+        "#,
     ] {
+        let result = check(parse(source_code));
+
         assert!(
-            check(parse(source_code)).is_err(),
-            "type-checks:\n{source_code}"
+            matches!(result, Err((_, Error::IllegalComparison { .. }))),
+            "{source_code}\n{result:#?}"
         );
     }
+
+    let dependency = r#"
+        pub fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+    "#;
+
+    let source_code = r#"
+        use dep
+
+        fn main() -> Bool {
+          dep.same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+    "#;
+
+    let result = check_with_deps(parse(source_code), vec![parse_as(dependency, "dep")]);
+
+    assert!(
+        matches!(result, Err((_, Error::IllegalComparison { .. }))),
+        "{result:#?}"
+    );
+}
+
+/// The check above only refuses types without a Data form: comparing through type variables
+/// that end up with one still type-checks.
+#[test]
+fn equality_through_type_variables_accepts_types_with_a_data_form() {
+    let dependency = r#"
+        pub fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+    "#;
+
+    let source_code = r#"
+        use dep
+
+        fn same_again(x: b, y: b) -> Bool {
+          dep.same(x, y)
+        }
+
+        fn has(xs: List<a>, x: a) -> Bool {
+          when xs is {
+            [] -> False
+            [head, ..tail] -> head == x || has(tail, x)
+          }
+        }
+
+        fn main(g: G1Element) -> Bool {
+          let same = fn(x, y) { x == y }
+          and {
+            same_again(1, 1),
+            dep.same([#"00"], []),
+            has([Some(g)], None),
+            same(as_data(1), as_data(1)),
+          }
+        }
+    "#;
+
+    let result = check_with_deps(parse(source_code), vec![parse_as(dependency, "dep")]);
+
+    assert!(result.is_ok(), "{result:#?}");
 }
 
 /// casts.mdx: "An empty list `[]` whose element type is unknown is ambiguous and refused" (its Data

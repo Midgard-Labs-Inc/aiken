@@ -53,6 +53,7 @@ pub fn prelude(id_gen: &IdGenerator) -> TypeInfo {
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),
+        compared_generics: HashMap::new(),
     };
 
     // Data
@@ -588,6 +589,7 @@ pub fn plutus(id_gen: &IdGenerator) -> TypeInfo {
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),
+        compared_generics: HashMap::new(),
     };
 
     for builtin in DefaultFunction::iter() {

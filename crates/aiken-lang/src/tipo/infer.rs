@@ -125,6 +125,10 @@ impl UntypedModule {
             definitions.push(definition);
         }
 
+        // Check every comparison now that the whole module is inferred (and work out which
+        // generics each function compares, for its callers in other modules).
+        environment.check_comparisons()?;
+
         // Generalise functions now that the entire module has been inferred
         let definitions = definitions
             .into_iter()
@@ -180,6 +184,7 @@ impl UntypedModule {
             module_values: values,
             accessors,
             annotations,
+            compared_generics,
             ..
         } = environment;
 
@@ -199,6 +204,7 @@ impl UntypedModule {
                 annotations,
                 kind,
                 package: package.to_string(),
+                compared_generics,
             },
         })
     }
@@ -712,7 +718,9 @@ fn infer_definition(
             public,
             value,
         }) => {
-            let typed_assignment = ExprTyper::new(environment, tracing).infer_assignment(
+            let mut expr_typer = ExprTyper::new(environment, tracing);
+
+            let typed_assignment = expr_typer.infer_assignment(
                 UntypedPattern::Var {
                     location,
                     name: name.clone(),
@@ -723,6 +731,9 @@ fn infer_definition(
                 None,
                 location,
             )?;
+
+            let compared = std::mem::take(&mut expr_typer.compared);
+            environment.comparisons.push((None, compared));
 
             // NOTE: The assignment above is only a convenient way to create the TypedExpression
             // that will be reduced at compile-time. We must increment its usage to not
@@ -785,7 +796,12 @@ fn extract_via_information<F>(
 where
     F: FnOnce(&mut Environment<'_>, Option<Rc<Type>>, &Rc<Type>, &Span) -> Result<Rc<Type>, Error>,
 {
-    let typed_via = ExprTyper::new(environment, tracing).infer(arg.via.clone())?;
+    let mut expr_typer = ExprTyper::new(environment, tracing);
+
+    let typed_via = expr_typer.infer(arg.via.clone())?;
+
+    let compared = std::mem::take(&mut expr_typer.compared);
+    environment.comparisons.push((None, compared));
 
     let hydrator: &mut Hydrator = hydrators.get_mut(&f.name).unwrap();
 

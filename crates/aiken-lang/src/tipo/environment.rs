@@ -69,6 +69,15 @@ pub struct Environment<'a> {
     /// Top-level functions that have been inferred
     pub inferred_functions: HashMap<String, TypedFunction>,
 
+    /// For each function of the module, the ids of its generic variables that it compares with
+    /// `==` or `!=`, directly or through another function. Filled once the whole module is
+    /// inferred (`check_comparisons`).
+    pub compared_generics: HashMap<String, Vec<u64>>,
+
+    /// The comparisons of each definition inferred so far, by the function that owns them (if
+    /// any). They're checked once the whole module is inferred (`check_comparisons`).
+    pub(crate) comparisons: Vec<(Option<String>, Comparisons)>,
+
     previous_id: u64,
 
     /// Values defined in the current function (or the prelude)
@@ -782,6 +791,89 @@ impl<'a> Environment<'a> {
         Ok(())
     }
 
+    /// Check every comparison of the module, once the whole module is inferred, and work out the
+    /// generic variables each function compares (`compared_generics`).
+    ///
+    /// A function compares the variables of the types it compares directly, and the types it
+    /// instantiates the compared generics of the functions it references with. Those may be
+    /// functions of this module inferred later, so this runs to a fixed point. Every compared
+    /// type must have a Data form by then: type variables shared with functions that aren't
+    /// generalised may have been bound by their callers since.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn check_comparisons(&mut self) -> Result<(), Error> {
+        let comparisons = std::mem::take(&mut self.comparisons);
+
+        let mut generics: HashMap<String, BTreeSet<u64>> = HashMap::new();
+
+        loop {
+            let mut next: HashMap<String, BTreeSet<u64>> = HashMap::new();
+
+            for (owner, comparisons) in &comparisons {
+                if let Some(owner) = owner {
+                    let ids = next.entry(owner.clone()).or_default();
+
+                    for (tipo, _) in self.compared_types(comparisons, &generics) {
+                        collect_var_ids(&tipo, ids);
+                    }
+                }
+            }
+
+            if next == generics {
+                break;
+            }
+
+            generics = next;
+        }
+
+        for (_, comparisons) in &comparisons {
+            for (tipo, location) in self.compared_types(comparisons, &generics) {
+                if !self.data_traits(&tipo).is_serialisable() {
+                    return Err(Error::IllegalComparison { location });
+                }
+            }
+        }
+
+        self.compared_generics = generics
+            .into_iter()
+            .map(|(name, ids)| (name, ids.into_iter().collect()))
+            .collect();
+
+        Ok(())
+    }
+
+    /// The types a definition compares: directly, and through the compared generics of the
+    /// module functions it references, given `generics` for the functions of this module.
+    fn compared_types(
+        &self,
+        comparisons: &Comparisons,
+        generics: &HashMap<String, BTreeSet<u64>>,
+    ) -> Vec<(Rc<Type>, Span)> {
+        let mut types = comparisons.direct.clone();
+
+        for instance in &comparisons.instances {
+            let compared: Vec<u64> = if instance.module == *self.current_module {
+                generics
+                    .get(&instance.name)
+                    .map(|ids| ids.iter().copied().collect())
+                    .unwrap_or_default()
+            } else {
+                self.importable_modules
+                    .get(&instance.module)
+                    .and_then(|module| module.compared_generics.get(&instance.name))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+
+            for id in compared {
+                if let Some(tipo) = instance.types.get(&id) {
+                    types.push((tipo.clone(), instance.location));
+                }
+            }
+        }
+
+        types
+    }
+
     pub fn ensure_serialisable_at_top_level(
         &mut self,
         tipo: Rc<Type>,
@@ -1345,6 +1437,8 @@ impl<'a> Environment<'a> {
             id_gen,
             ungeneralised_functions: HashSet::new(),
             inferred_functions: HashMap::new(),
+            compared_generics: HashMap::new(),
+            comparisons: Vec::new(),
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
             opaque_types: HashSet::new(),
@@ -2578,6 +2672,26 @@ fn unify_unbound_type(tipo: Rc<Type>, own_id: u64, location: Span) -> Result<(),
     }
 }
 
+/// What a definition compares with `==` or `!=`, recorded during inference and checked once the
+/// whole module is inferred (`Environment::check_comparisons`).
+#[derive(Debug, Default)]
+pub(crate) struct Comparisons {
+    /// The types of the operands, with the comparison's location.
+    pub direct: Vec<(Rc<Type>, Span)>,
+    /// Each reference to a module function.
+    pub instances: Vec<Instance>,
+}
+
+/// A reference to a module function, and how its generic variables were instantiated there.
+#[derive(Debug)]
+pub(crate) struct Instance {
+    pub module: String,
+    pub name: String,
+    /// The types the function's generic variables were instantiated with, by id.
+    pub types: HashMap<u64, Rc<Type>>,
+    pub location: Span,
+}
+
 /// Follow type links until reaching a type that isn't a linked variable.
 fn resolve_links(tipo: Rc<Type>) -> Rc<Type> {
     let mut tipo = tipo;
@@ -2649,6 +2763,28 @@ fn collect_generic_ids(tipo: &Type, ids: &mut HashSet<u64>) {
         Type::Pair { fst, snd, .. } => {
             collect_generic_ids(fst, ids);
             collect_generic_ids(snd, ids);
+        }
+    }
+}
+
+/// The ids of the type variables, unbound or generic, that appear in a type.
+fn collect_var_ids(tipo: &Type, ids: &mut BTreeSet<u64>) {
+    match tipo {
+        Type::Var { tipo, .. } => match tipo.borrow().deref() {
+            TypeVar::Link { tipo } => collect_var_ids(tipo, ids),
+            TypeVar::Generic { id } | TypeVar::Unbound { id } => {
+                ids.insert(*id);
+            }
+        },
+        Type::App { args, .. } => args.iter().for_each(|arg| collect_var_ids(arg, ids)),
+        Type::Fn { args, ret, .. } => {
+            args.iter().for_each(|arg| collect_var_ids(arg, ids));
+            collect_var_ids(ret, ids);
+        }
+        Type::Tuple { elems, .. } => elems.iter().for_each(|elem| collect_var_ids(elem, ids)),
+        Type::Pair { fst, snd, .. } => {
+            collect_var_ids(fst, ids);
+            collect_var_ids(snd, ids);
         }
     }
 }

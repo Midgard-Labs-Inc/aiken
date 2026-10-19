@@ -1,7 +1,8 @@
 use super::{
     RecordAccessor, Type, ValueConstructor, ValueConstructorVariant,
     environment::{
-        EntityKind, Environment, ScopeResetData, assert_no_labeled_arguments, generalise,
+        Comparisons, EntityKind, Environment, Instance, ScopeResetData,
+        assert_no_labeled_arguments, generalise,
     },
     error::{Error, Warning},
     hydrator::Hydrator,
@@ -183,11 +184,18 @@ pub(crate) fn infer_function(
 
     let safe_to_generalise = !expr_typer.ungeneralised_function_used;
 
+    let compared = std::mem::take(&mut expr_typer.compared);
+
     environment.close_scope(initial_scope);
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
     // Assert that the inferred type matches the type of any recursive call
     environment.unify(preregistered_type, tipo.clone(), *location)?;
+
+    // A type variable met by `==` may only become a function later, in a caller, and a function
+    // referenced here may only be inferred later: comparisons are checked once the whole module
+    // is inferred.
+    environment.comparisons.push((Some(name.clone()), compared));
 
     // Generalise the function if safe to do so
     let tipo = if safe_to_generalise {
@@ -251,6 +259,11 @@ pub(crate) struct ExprTyper<'a, 'b> {
     // to determine whether it is safe to generalise this expression after
     // it has been inferred.
     pub(crate) ungeneralised_function_used: bool,
+
+    // What this definition compares with `==` or `!=`, directly or through the module functions
+    // it references. Checked once the whole module is inferred (see
+    // `Environment::check_comparisons`).
+    pub(crate) compared: Comparisons,
 }
 
 impl<'a, 'b> ExprTyper<'a, 'b> {
@@ -261,6 +274,27 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             environment,
             tracing,
             ungeneralised_function_used: false,
+            compared: Comparisons::default(),
+        }
+    }
+
+    /// Record a reference to a module function and how its generic variables were instantiated,
+    /// in case it compares some of them.
+    fn note_compared_instances(
+        &mut self,
+        variant: &ValueConstructorVariant,
+        ids: HashMap<u64, Rc<Type>>,
+        location: Span,
+    ) {
+        if let ValueConstructorVariant::ModuleFn { module, name, .. } = variant
+            && !ids.is_empty()
+        {
+            self.compared.instances.push(Instance {
+                module: module.clone(),
+                name: name.clone(),
+                types: ids,
+                location,
+            });
         }
     }
 
@@ -788,8 +822,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
                 for tipo in [left.tipo(), right.tipo()] {
                     self.environment
-                        .ensure_serialisable(tipo, location)
+                        .ensure_serialisable(tipo.clone(), location)
                         .map_err(|_| Error::IllegalComparison { location })?;
+
+                    self.compared.direct.push((tipo, location));
                 }
 
                 return Ok(TypedExpr::BinOp {
@@ -1256,7 +1292,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             (module.name.clone(), constructor.clone())
         };
 
-        let tipo = self.instantiate(constructor.tipo, &mut HashMap::new(), select_location)?;
+        let mut ids = HashMap::new();
+
+        let tipo = self.instantiate(constructor.tipo, &mut ids, select_location)?;
+
+        self.note_compared_instances(&constructor.variant, ids, select_location);
 
         let constructor = match &constructor.variant {
             variant @ ValueConstructorVariant::ModuleFn { name, module, .. } => {
@@ -2856,7 +2896,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         } = constructor;
 
         // Instantiate generic variables into unbound variables for this usage
-        let tipo = self.instantiate(tipo, &mut HashMap::new(), *location)?;
+        let mut ids = HashMap::new();
+
+        let tipo = self.instantiate(tipo, &mut ids, *location)?;
+
+        self.note_compared_instances(&variant, ids, *location);
 
         Ok(ValueConstructor {
             public,
