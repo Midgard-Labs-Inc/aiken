@@ -41,8 +41,8 @@ use crate::{
     },
 };
 use builder::{
-    DISCARDED, get_constr_index_variant, introduce_name, introduce_pattern, pop_pattern,
-    softcast_data_to_type_otherwise, unknown_data_to_type,
+    DISCARDED, constr_index, get_constr_index_variant, introduce_name, introduce_pattern,
+    pop_pattern, softcast_data_to_type_otherwise, unknown_data_to_type,
 };
 use decision_tree::{Assigned, CaseTest, DecisionTree, TreeGen, get_tipo_by_path};
 use indexmap::IndexMap;
@@ -2569,15 +2569,7 @@ impl<'a> CodeGenerator<'a> {
                                 return acc;
                             }
 
-                            let index = if let Some(tag) =
-                                constr.decorators.iter().find_map(|d| match &d.kind {
-                                    DecoratorKind::Tag { value, .. } => Some(value),
-                                    _ => None,
-                                }) {
-                                *tag
-                            } else {
-                                index
-                            };
+                            let index = constr_index(&data_type, index, constr);
 
                             let mut constr_args = vec![];
 

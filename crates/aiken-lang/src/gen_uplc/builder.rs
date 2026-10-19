@@ -1381,19 +1381,23 @@ pub fn get_constr_index_variant<'a>(
         .iter()
         .enumerate()
         .find(|(_, dt)| dt.name == name)
-        .map(|(index, dt)| {
-            if let Some(tag) = dt
-                .decorators
-                .iter()
-                .chain(data_type.decorators.iter())
-                .find_map(|d| match &d.kind {
-                    DecoratorKind::Tag { value, .. } => Some(value),
-                    _ => None,
-                })
-            {
-                (*tag, dt)
-            } else {
-                (index, dt)
-            }
+        .map(|(position, dt)| (constr_index(data_type, position, dt), dt))
+}
+
+/// The index of the constructor at `position` in its Data form: the constructor's `@tag`, else
+/// the type's `@tag`, else its position.
+pub fn constr_index(
+    data_type: &TypedDataType,
+    position: usize,
+    constr: &RecordConstructor<Rc<Type>>,
+) -> usize {
+    constr
+        .decorators
+        .iter()
+        .chain(data_type.decorators.iter())
+        .find_map(|d| match &d.kind {
+            DecoratorKind::Tag { value, .. } => Some(*value),
+            _ => None,
         })
+        .unwrap_or(position)
 }

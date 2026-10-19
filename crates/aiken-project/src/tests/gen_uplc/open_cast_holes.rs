@@ -224,10 +224,8 @@ fn spend_datum_is_checked_like_a_redeemer() {
 }
 
 /// A record-level `@tag(5)` makes construction (`get_constr_index_variant`) and the blueprint use
-/// constructor index 5, but `expect_type_assign` only reads tags on constructors, so `expect` and
-/// `if … is` check index 0.
+/// constructor index 5, so `expect` and `if … is` must check index 5, not 0.
 #[test]
-#[ignore = "open hole: expect and if/is ignore a record-level @tag and check constructor index 0"]
 fn expect_checks_the_index_a_record_level_tag_gives() {
     let tagged = Data::constr(5, vec![int(1)]);
     let untagged = Data::constr(0, vec![int(1)]);
