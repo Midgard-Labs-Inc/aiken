@@ -1099,3 +1099,120 @@ fn record_update_of_an_erased_opaque_record_is_the_new_field() {
         }
     }
 }
+
+/// An erased opaque constructor is the identity at runtime, also as a function value: the compiler
+/// used to panic ("could not find data-type definition for fn(Int) -> Int").
+#[test]
+fn erased_opaque_constructor_as_a_function_is_the_identity() {
+    for (what, source, input, expected) in [
+        (
+            "passed to a function",
+            r#"
+            pub opaque type W {
+              W(Int)
+            }
+
+            fn apply(f: fn(Int) -> W, x: Int) -> W {
+              f(x)
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let W(m) = apply(W, n)
+              as_data(m)
+            }
+            "#,
+            int(5),
+            int(5),
+        ),
+        (
+            "bound to a name, over a list",
+            r#"
+            pub opaque type WL {
+              WL(List<Int>)
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect xs: List<Int> = d
+              let f = WL
+              let WL(ys) = f(xs)
+              as_data(ys)
+            }
+            "#,
+            Data::list(vec![int(1), int(2)]),
+            Data::list(vec![int(1), int(2)]),
+        ),
+        (
+            "over Data",
+            r#"
+            pub opaque type P {
+              P(Data)
+            }
+
+            fn apply(f: fn(Data) -> P, x: Data) -> P {
+              f(x)
+            }
+
+            pub fn observe(d: Data) -> Data {
+              let P(x) = apply(P, d)
+              x
+            }
+            "#,
+            int(5),
+            int(5),
+        ),
+        (
+            "generic",
+            r#"
+            pub opaque type Box<a> {
+              Box(a)
+            }
+
+            fn apply(f: fn(a) -> Box<a>, x: a) -> Box<a> {
+              f(x)
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let Box(m) = apply(Box, n)
+              as_data(m)
+            }
+            "#,
+            int(5),
+            int(5),
+        ),
+        (
+            "mapped over a list",
+            r#"
+            pub opaque type W {
+              W(Int)
+            }
+
+            fn map(xs: List<a>, f: fn(a) -> b) -> List<b> {
+              when xs is {
+                [] -> []
+                [x, ..rest] -> [f(x), ..map(rest, f)]
+              }
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              expect [W(a), W(b)] = map([n, n + 1], W)
+              as_data(a * 10 + b)
+            }
+            "#,
+            int(5),
+            int(56),
+        ),
+    ] {
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&input)),
+                    Ok(Term::data(expected.clone())),
+                    "{what}, {tracing:?}, {build}"
+                );
+            }
+        }
+    }
+}

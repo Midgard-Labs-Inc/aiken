@@ -246,6 +246,27 @@ pub fn erase_opaque_type_operations(
             }
             None => record,
         };
+    } else if let AirTree::Var { constructor, .. } = air_tree
+        && matches!(constructor.variant, ValueConstructorVariant::Record { .. })
+        && check_replaceable_opaque_type(&constructor.tipo, data_types)
+    {
+        // An erased constructor used as a function value is the identity.
+        const ARG: &str = "__erased_opaque_arg";
+
+        let arg_type = convert_opaque_type(
+            &constructor
+                .tipo
+                .arg_types()
+                .expect("a constructor is a function")[0],
+            data_types,
+            true,
+        );
+
+        *air_tree = AirTree::anon_func(
+            vec![ARG.to_string()],
+            AirTree::local_var(ARG, arg_type),
+            false,
+        );
     }
 
     let mut held_types = air_tree.mut_held_types();

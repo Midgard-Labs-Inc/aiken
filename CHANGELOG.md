@@ -40,6 +40,7 @@
 - **aiken-lang**: `if x is C(..): T`, where `T` is an opaque type erased to its only field and `x` isn't `Data`, tested the field against the constructor index: it matched only when the field was 0, failed at runtime for a `ByteArray` or `String` field, and crashed the compiler for a `List`, `Pair`, tuple or `Data` field. An erased opaque type has no constructor at runtime, so the index is no longer tested.
 - **aiken-lang**: An opaque type erased to its only field, of type `Data`, dropped the upcast of its constructor's argument: `Payload(5)` held the integer 5 where `I 5` was expected, and using it failed at runtime. The argument is now upcast. **Validators that build such a value from a value that isn't `Data` compile to different code once rebuilt, and so get a new hash.**
 - **aiken-lang**: A record update of an opaque record erased to its only field (`W { ..w, inner: 3 }`) crashed the code generator. It now gives the new field value.
+- **aiken-lang**: The constructor of an opaque type erased to its only field, used as a function value (`apply(W, 5)`, `list.map(xs, W)`), crashed the code generator. It now compiles to the identity function.
 
 ## v1.3.0 - 2026-10-16
 
