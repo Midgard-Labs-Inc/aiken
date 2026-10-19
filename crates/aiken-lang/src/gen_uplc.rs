@@ -310,6 +310,25 @@ impl<'a> CodeGenerator<'a> {
         validator: &TypedValidator,
         module_name: &str,
     ) -> Result<Program<Name>, Error> {
+        self.generate_inner(validator, module_name, true)
+    }
+
+    /// Like [`Self::generate`], but skips the UPLC shrinker, so the program can be compared with
+    /// the optimized one.
+    pub fn generate_unoptimized(
+        &mut self,
+        validator: &TypedValidator,
+        module_name: &str,
+    ) -> Result<Program<Name>, Error> {
+        self.generate_inner(validator, module_name, false)
+    }
+
+    fn generate_inner(
+        &mut self,
+        validator: &TypedValidator,
+        module_name: &str,
+        optimize: bool,
+    ) -> Result<Program<Name>, Error> {
         let context_name = "__context__".to_string();
         let context_name_interned = introduce_name(&mut self.interner, &context_name);
         validator.params.iter().for_each(|arg| {
@@ -350,7 +369,7 @@ impl<'a> CodeGenerator<'a> {
                 .for_each(|arg_name| self.interner.pop_text(arg_name.to_string()))
         });
 
-        Ok(self.finalize(term))
+        Ok(self.finalize_with(term, optimize))
     }
 
     pub fn generate_raw(
@@ -426,10 +445,6 @@ impl<'a> CodeGenerator<'a> {
         };
 
         Program { version, term }
-    }
-
-    fn finalize(&mut self, term: Term<Name>) -> Program<Name> {
-        self.finalize_with(term, true)
     }
 
     fn finalize_with(&mut self, mut term: Term<Name>, optimize: bool) -> Program<Name> {

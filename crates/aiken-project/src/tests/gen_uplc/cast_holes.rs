@@ -52,6 +52,16 @@ fn compile_observe(source: &str, tracing: Tracing) -> [(&'static str, Program<De
 }
 
 fn compile_validator(source: &str, tracing: Tracing) -> Program<DeBruijn> {
+    let [(_, optimized), _] = compile_validator_builds(source, tracing);
+    optimized
+}
+
+/// The validator compiled as the shrinker leaves it, and with only the markers the shrinker
+/// relies on removed, like `compile_observe`.
+fn compile_validator_builds(
+    source: &str,
+    tracing: Tracing,
+) -> [(&'static str, Program<DeBruijn>); 2] {
     let mut project = TestProject::new();
     let module = project.check(project.parse(source));
 
@@ -64,12 +74,22 @@ fn compile_validator(source: &str, tracing: Tracing) -> Program<DeBruijn> {
         })
         .expect("source should define a validator");
 
-    project
+    let optimized = project
         .new_generator(tracing)
         .generate(&validator, &module.name)
-        .unwrap()
-        .try_into()
-        .unwrap()
+        .unwrap();
+
+    let mut unoptimized = project
+        .new_generator(tracing)
+        .generate_unoptimized(&validator, &module.name)
+        .unwrap();
+    CodeGenInterner::new().program(&mut unoptimized);
+    let unoptimized = unoptimized.clean_up_no_inlines();
+
+    [
+        ("optimized", optimized.try_into().unwrap()),
+        ("unoptimized", unoptimized.try_into().unwrap()),
+    ]
 }
 
 fn evaluate(program: &Program<DeBruijn>, args: &[Data]) -> Result<Term<NamedDeBruijn>, ()> {
@@ -124,32 +144,32 @@ fn spend_datum_is_checked_like_a_redeemer() {
     let owner = Data::bytestring(vec![0]);
 
     for tracing in TRACINGS {
-        let program = compile_validator(source, tracing);
-
-        assert!(
-            evaluate(
-                &program,
-                &[context(Data::constr(0, vec![owner.clone(), int(1)]))]
-            )
-            .is_ok(),
-            "{tracing:?}: a well-formed datum must be accepted"
-        );
-
-        for (what, datum) in [
-            ("a missing field", Data::constr(0, vec![owner.clone()])),
-            (
-                "an amount that is bytes",
-                Data::constr(0, vec![owner.clone(), Data::bytestring(vec![0xff])]),
-            ),
-            (
-                "an extra field",
-                Data::constr(0, vec![owner.clone(), int(1), int(2)]),
-            ),
-        ] {
+        for (build, program) in compile_validator_builds(source, tracing) {
             assert!(
-                evaluate(&program, &[context(datum)]).is_err(),
-                "{tracing:?}: the validator accepts a datum with {what}"
+                evaluate(
+                    &program,
+                    &[context(Data::constr(0, vec![owner.clone(), int(1)]))]
+                )
+                .is_ok(),
+                "{tracing:?}, {build}: a well-formed datum must be accepted"
             );
+
+            for (what, datum) in [
+                ("a missing field", Data::constr(0, vec![owner.clone()])),
+                (
+                    "an amount that is bytes",
+                    Data::constr(0, vec![owner.clone(), Data::bytestring(vec![0xff])]),
+                ),
+                (
+                    "an extra field",
+                    Data::constr(0, vec![owner.clone(), int(1), int(2)]),
+                ),
+            ] {
+                assert!(
+                    evaluate(&program, &[context(datum)]).is_err(),
+                    "{tracing:?}, {build}: the validator accepts a datum with {what}"
+                );
+            }
         }
     }
 }
@@ -318,16 +338,16 @@ fn redeemer_check_runs_before_a_branch_that_reads_it() {
     };
 
     for tracing in TRACINGS {
-        let program = compile_validator(source, tracing);
-
-        assert!(
-            evaluate(&program, &[context(int(5), 1)]).is_ok(),
-            "{tracing:?}: a well-formed redeemer must be accepted"
-        );
-        assert!(
-            evaluate(&program, &[context(Data::bytestring(vec![0xaa]), 1)]).is_err(),
-            "{tracing:?}: the validator accepts a redeemer that is not an Int"
-        );
+        for (build, program) in compile_validator_builds(source, tracing) {
+            assert!(
+                evaluate(&program, &[context(int(5), 1)]).is_ok(),
+                "{tracing:?}, {build}: a well-formed redeemer must be accepted"
+            );
+            assert!(
+                evaluate(&program, &[context(Data::bytestring(vec![0xaa]), 1)]).is_err(),
+                "{tracing:?}, {build}: the validator accepts a redeemer that is not an Int"
+            );
+        }
     }
 }
 
