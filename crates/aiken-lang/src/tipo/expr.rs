@@ -1743,7 +1743,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
         let value_type = typed_value.tipo();
 
-        if value_type.is_unbounded_list() {
+        if value_type.contains_unbounded_list() {
             return Err(Error::AmbiguousEmptyList {
                 location: typed_value.location(),
             });

@@ -358,13 +358,22 @@ impl Type {
         }
     }
 
-    pub fn is_unbounded_list(&self) -> bool {
+    /// Whether the type is, or contains (as a type argument, a tuple element or a pair half), a
+    /// list whose element type isn't known yet.
+    pub fn contains_unbounded_list(&self) -> bool {
         match self {
             Self::App {
                 module, name, args, ..
-            } if "List" == name && module.is_empty() => args.iter().any(|arg| arg.is_unbound()),
-            Self::Var { tipo, .. } => tipo.borrow().is_unbounded_list(),
-            _ => false,
+            } => {
+                ("List" == name && module.is_empty() && args.iter().any(|arg| arg.is_unbound()))
+                    || args.iter().any(|arg| arg.contains_unbounded_list())
+            }
+            Self::Var { tipo, .. } => tipo.borrow().contains_unbounded_list(),
+            Self::Tuple { elems, .. } => elems.iter().any(|elem| elem.contains_unbounded_list()),
+            Self::Pair { fst, snd, .. } => {
+                fst.contains_unbounded_list() || snd.contains_unbounded_list()
+            }
+            Self::Fn { .. } => false,
         }
     }
 
@@ -1017,9 +1026,9 @@ impl TypeVar {
         }
     }
 
-    pub fn is_unbounded_list(&self) -> bool {
+    pub fn contains_unbounded_list(&self) -> bool {
         match self {
-            Self::Link { tipo } => tipo.is_unbounded_list(),
+            Self::Link { tipo } => tipo.contains_unbounded_list(),
             _ => false,
         }
     }

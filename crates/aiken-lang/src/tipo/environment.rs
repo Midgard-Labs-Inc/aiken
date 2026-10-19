@@ -2791,7 +2791,7 @@ fn collect_var_ids(tipo: &Type, ids: &mut BTreeSet<u64>) {
 
 #[allow(clippy::result_large_err)]
 fn assert_no_unbounded_empty_list(rhs: &Type, location: Span) -> Result<(), Error> {
-    if rhs.is_unbounded_list() {
+    if rhs.contains_unbounded_list() {
         return Err(Error::AmbiguousEmptyList { location });
     }
 

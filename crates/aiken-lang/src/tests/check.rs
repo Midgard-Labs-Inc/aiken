@@ -6700,22 +6700,23 @@ fn equality_through_type_variables_accepts_types_with_a_data_form() {
 }
 
 /// casts.mdx: "An empty list `[]` whose element type is unknown is ambiguous and refused" (its Data
-/// form is `List []` as a `List<a>` and `Map []` as `Pairs<k, v>`). Only a top-level empty list is
-/// refused: a nested one has its element type linked to Data and becomes `List []`.
+/// form is `List []` as a `List<a>` and `Map []` as `Pairs<k, v>`). That holds for a list nested
+/// in a type argument, a tuple or a pair too, in an upcast and in a `coerce`.
 #[test]
-#[ignore = "open hole: an empty list of unknown element type nested in an upcast value isn't refused as ambiguous"]
 fn upcast_refuses_a_nested_empty_list_of_unknown_type() {
-    let source_code = r#"
-        fn main() -> Data {
-          let d: Data = Some([])
-          d
-        }
-    "#;
+    for value in ["Some([])", "([], 1)", "Pair(1, [])", "[[]]"] {
+        for source_code in [
+            format!("fn main() -> Data {{\n  let d: Data = {value}\n  d\n}}"),
+            format!("fn main() -> Int {{\n  coerce n: Int = {value}\n  n\n}}"),
+        ] {
+            let result = check(parse(&source_code));
 
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::AmbiguousEmptyList { .. }))
-    ))
+            assert!(
+                matches!(result, Err((_, Error::AmbiguousEmptyList { .. }))),
+                "{source_code}\n{result:#?}"
+            );
+        }
+    }
 }
 
 /// casts.mdx: a phantom type argument "never appears in a value, so an opaque type there doesn't
