@@ -79,6 +79,10 @@ pub struct Environment<'a> {
     /// (if any). Checked once the whole module is inferred (`check_data_uses`).
     pub(crate) data_uses: Vec<(Option<String>, DataUses)>,
 
+    /// The casts of the definition being inferred that were allowed while some of their types
+    /// weren't known yet (`resolve_pending_casts`).
+    pub(crate) pending_casts: Vec<PendingCast>,
+
     previous_id: u64,
 
     /// Values defined in the current function (or the prelude)
@@ -767,18 +771,118 @@ impl<'a> Environment<'a> {
                 .any(|module| module.opaque_types.contains(qualifier))
     }
 
-    /// Whether a value of this type can be converted to and from Data, which `expect`, `coerce`
-    /// and upcasts rely on. A type variable whose type isn't known yet is linked to Data, so that
-    /// it can't later be bound to a type that converts differently (or not at all).
-    pub(crate) fn is_data_like(&mut self, tipo: &Type) -> bool {
-        let traits = self.data_traits(tipo);
-        let is_data_like = traits.is_data_like();
+    /// Whether a cast through Data is allowed between `lhs` and `rhs`, given what is known of
+    /// their types now. If it is, returns what was found in the type that converts to or from
+    /// Data.
+    ///
+    /// A cast whose types still have unknown parts is checked again, on the resolved types, once
+    /// its definition is inferred (`resolve_pending_casts`).
+    #[allow(clippy::result_large_err)]
+    fn check_cast(
+        &mut self,
+        lhs: &Rc<Type>,
+        rhs: &Rc<Type>,
+        location: Span,
+        unify_mode: UnifyMode,
+    ) -> Result<Option<DataTraits>, Error> {
+        if matches!(
+            unify_mode,
+            UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast
+        ) && self.casts_data_into_opaque(lhs, rhs)
+        {
+            return Err(Error::ExpectOnOpaqueType { location });
+        }
 
-        if is_data_like {
+        if lhs.is_data() {
+            assert_no_unbounded_empty_list(rhs, location)?;
+
+            let traits = self.data_traits(rhs);
+
+            return Ok(traits.is_data_like().then_some(traits));
+        }
+
+        if matches!(
+            unify_mode,
+            UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast
+        ) && rhs.is_data()
+        {
+            let traits = self.data_traits(lhs);
+
+            if traits.is_data_like() {
+                if matches!(unify_mode, UnifyMode::AllowSoftCast) && !traits.is_soft_castable() {
+                    return Err(Error::IllegalSoftCast {
+                        location,
+                        tipo: lhs.clone(),
+                    });
+                }
+
+                return Ok(Some(traits));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Check that a type can be converted to and from Data, for a `coerce`.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn check_coerce(&mut self, tipo: &Rc<Type>, location: Span) -> Result<(), Error> {
+        if !self.data_traits(tipo).is_data_like() {
+            return Err(Error::IllegalCoerce {
+                location,
+                tipo: tipo.clone(),
+            });
+        }
+
+        if has_unbound_vars(tipo) {
+            self.pending_casts.push(PendingCast::Coerce {
+                tipo: tipo.clone(),
+                location,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Check again the casts of the definition that was just inferred, now that their types are
+    /// as resolved as they will be: a type that was unknown when a cast allowed it may have
+    /// become one the cast refuses. Then link every type variable still unknown to Data.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn resolve_pending_casts(&mut self) -> Result<(), Error> {
+        for cast in std::mem::take(&mut self.pending_casts) {
+            let traits = match cast {
+                PendingCast::Unify {
+                    lhs,
+                    rhs,
+                    location,
+                    unify_mode,
+                } => match self.check_cast(&lhs, &rhs, location, unify_mode)? {
+                    Some(traits) => traits,
+                    None => {
+                        return Err(Error::CouldNotUnify {
+                            location,
+                            expected: lhs,
+                            given: rhs,
+                            situation: None,
+                            rigid_type_names: HashMap::new(),
+                        });
+                    }
+                },
+
+                PendingCast::Coerce { tipo, location } => {
+                    let traits = self.data_traits(&tipo);
+
+                    if !traits.is_data_like() {
+                        return Err(Error::IllegalCoerce { location, tipo });
+                    }
+
+                    traits
+                }
+            };
+
             traits.link_unbound_to_data();
         }
 
-        is_data_like
+        Ok(())
     }
 
     pub fn ensure_serialisable(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
@@ -1470,6 +1574,7 @@ impl<'a> Environment<'a> {
             inferred_functions: HashMap::new(),
             data_generics: HashMap::new(),
             data_uses: Vec::new(),
+            pending_casts: Vec::new(),
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
             opaque_types: HashSet::new(),
@@ -2254,45 +2359,20 @@ impl<'a> Environment<'a> {
 
         match unify_mode {
             UnifyMode::Strict => {}
-            UnifyMode::AllowUpCast => {
-                if lhs.is_data() {
-                    assert_no_unbounded_empty_list(&rhs, location)?;
-
-                    if self.is_data_like(&rhs) {
-                        return Ok(());
+            UnifyMode::AllowUpCast | UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast => {
+                if self.check_cast(&lhs, &rhs, location, unify_mode)?.is_some() {
+                    // A type that isn't known yet may still become one the cast refuses: the
+                    // cast is checked again once its definition is inferred.
+                    if has_unbound_vars(&lhs) || has_unbound_vars(&rhs) {
+                        self.pending_casts.push(PendingCast::Unify {
+                            lhs,
+                            rhs,
+                            location,
+                            unify_mode,
+                        });
                     }
-                }
-            }
-            UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast => {
-                if self.casts_data_into_opaque(&lhs, &rhs) {
-                    return Err(Error::ExpectOnOpaqueType { location });
-                }
 
-                // Check which side is Data before asking whether the other side is Data-like:
-                // `is_data_like` links the type variables it meets to Data.
-                if lhs.is_data() {
-                    assert_no_unbounded_empty_list(&rhs, location)?;
-
-                    if self.is_data_like(&rhs) {
-                        return Ok(());
-                    }
-                } else if rhs.is_data() {
-                    let traits = self.data_traits(&lhs);
-
-                    if traits.is_data_like() {
-                        if matches!(unify_mode, UnifyMode::AllowSoftCast)
-                            && !traits.is_soft_castable()
-                        {
-                            return Err(Error::IllegalSoftCast {
-                                location,
-                                tipo: lhs,
-                            });
-                        }
-
-                        traits.link_unbound_to_data();
-
-                        return Ok(());
-                    }
+                    return Ok(());
                 }
             }
         };
@@ -2583,6 +2663,21 @@ impl<'a> Environment<'a> {
     }
 }
 
+/// A cast through Data that was allowed while some of its types weren't known yet, to be checked
+/// again once its definition is inferred (`Environment::resolve_pending_casts`).
+#[derive(Debug)]
+pub(crate) enum PendingCast {
+    /// An upcast, `expect` or `if ... is`.
+    Unify {
+        lhs: Rc<Type>,
+        rhs: Rc<Type>,
+        location: Span,
+        unify_mode: UnifyMode,
+    },
+    /// One side of a `coerce`.
+    Coerce { tipo: Rc<Type>, location: Span },
+}
+
 /// Captures unification policy rules, influenced by let/expect/if-is
 #[derive(Debug, Clone, Copy)]
 pub enum UnifyMode {
@@ -2826,6 +2921,23 @@ pub(crate) fn has_type_vars(tipo: &Type) -> bool {
     let mut ids = BTreeSet::new();
     collect_var_ids(tipo, &mut ids);
     !ids.is_empty()
+}
+
+/// Whether a type has an unbound type variable in it, one whose type isn't known yet.
+fn has_unbound_vars(tipo: &Type) -> bool {
+    match tipo {
+        Type::Var { tipo, .. } => match tipo.borrow().deref() {
+            TypeVar::Link { tipo } => has_unbound_vars(tipo),
+            TypeVar::Unbound { .. } => true,
+            TypeVar::Generic { .. } => false,
+        },
+        Type::App { args, .. } => args.iter().any(|arg| has_unbound_vars(arg)),
+        Type::Fn { args, ret, .. } => {
+            args.iter().any(|arg| has_unbound_vars(arg)) || has_unbound_vars(ret)
+        }
+        Type::Tuple { elems, .. } => elems.iter().any(|elem| has_unbound_vars(elem)),
+        Type::Pair { fst, snd, .. } => has_unbound_vars(fst) || has_unbound_vars(snd),
+    }
 }
 
 #[allow(clippy::result_large_err)]

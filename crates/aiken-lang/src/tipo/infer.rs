@@ -736,6 +736,8 @@ fn infer_definition(
             let data_uses = std::mem::take(&mut expr_typer.data_uses);
             environment.data_uses.push((None, data_uses));
 
+            environment.resolve_pending_casts()?;
+
             // NOTE: The assignment above is only a convenient way to create the TypedExpression
             // that will be reduced at compile-time. We must increment its usage to not
             // automatically trigger a warning since we are virtually creating a block with a
@@ -803,6 +805,8 @@ where
 
     let data_uses = std::mem::take(&mut expr_typer.data_uses);
     environment.data_uses.push((None, data_uses));
+
+    environment.resolve_pending_casts()?;
 
     let hydrator: &mut Hydrator = hydrators.get_mut(&f.name).unwrap();
 

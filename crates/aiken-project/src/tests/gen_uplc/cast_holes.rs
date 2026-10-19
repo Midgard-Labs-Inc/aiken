@@ -569,3 +569,119 @@ fn erased_opaque_type_matches_a_literal_inside_its_constructor() {
         }
     }
 }
+
+/// `expect xs: List<_>` doesn't know its element type yet. It learns `Int` from the next line, and
+/// the check the `expect` compiles to is the one `expect xs: List<Int>` has: it accepts a list of
+/// integers and refuses a list that holds anything else.
+#[test]
+fn expect_of_an_unknown_type_argument_checks_the_type_it_becomes() {
+    let source = r#"
+        pub fn observe(d: Data) -> Data {
+          expect xs: List<_> = d
+          let ys: List<Int> = xs
+          as_data(ys)
+        }
+    "#;
+
+    let ints = Data::list(vec![int(1), int(2)]);
+
+    for tracing in TRACINGS {
+        for (build, program) in compile_observe(source, tracing) {
+            pretty_assertions::assert_eq!(
+                evaluate(&program, std::slice::from_ref(&ints)),
+                Ok(Term::data(ints.clone())),
+                "{tracing:?}, {build}: expect List<Int> must accept {ints:?}"
+            );
+
+            for malformed in [
+                Data::list(vec![int(1), Data::bytestring(vec![0xaa])]),
+                Data::list(vec![Data::bytestring(vec![0xaa])]),
+                Data::bytestring(vec![0xaa]),
+            ] {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&malformed)),
+                    Err(()),
+                    "{tracing:?}, {build}: expect List<Int> accepts {malformed:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A capture, or a lambda bound by `let`, whose body upcasts its argument takes the type of the
+/// higher-order function it's passed to, and converts with that type: `iData` here.
+#[test]
+fn captures_that_upcast_their_argument_convert_it_with_the_type_it_becomes() {
+    let helpers = r#"
+        use aiken/builtin
+
+        fn eq_data(d: Data, n: Int) -> Bool {
+          d == as_data(n)
+        }
+
+        fn serialise(d: Data) -> ByteArray {
+          builtin.serialise_data(d)
+        }
+
+        fn both(xs: List<a>, f: fn(a) -> Bool) -> Bool {
+          when xs is {
+            [x, y] -> f(x) && f(y)
+            _ -> False
+          }
+        }
+
+        fn map_two(xs: List<a>, f: fn(a) -> b) -> List<b> {
+          when xs is {
+            [x, y] -> [f(x), f(y)]
+            _ -> []
+          }
+        }
+
+        fn apply(f: fn(Int) -> Bool, n: Int) -> Bool {
+          f(n)
+        }
+    "#;
+
+    for body in [
+        "both([n, n], eq_data(_, 1))",
+        "apply(eq_data(_, 1), n)",
+        "both([n, n], fn(x) { eq_data(x, 1) })",
+        "{ let is_one = fn(x) { eq_data(x, 1) }\n both([n, n], is_one) }",
+    ] {
+        let source = format!(
+            "{helpers}\npub fn observe(d: Data) -> Bool {{\n  expect n: Int = d\n  {body}\n}}\n"
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, &[int(1)]),
+                    Ok(Term::bool(true)),
+                    "{body}\n{tracing:?}, {build}: 1"
+                );
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, &[int(2)]),
+                    Ok(Term::bool(false)),
+                    "{body}\n{tracing:?}, {build}: 2"
+                );
+            }
+        }
+    }
+
+    let source = format!(
+        "{helpers}\npub fn observe(d: Data) -> Data {{\n  expect n: Int = d\n  as_data(map_two([n, 2], serialise(_)))\n}}\n"
+    );
+
+    for tracing in TRACINGS {
+        for (build, program) in compile_observe(&source, tracing) {
+            pretty_assertions::assert_eq!(
+                evaluate(&program, &[int(1)]),
+                Ok(Term::data(Data::list(vec![
+                    Data::bytestring(vec![1]),
+                    Data::bytestring(vec![2]),
+                ]))),
+                "serialise capture\n{tracing:?}, {build}"
+            );
+        }
+    }
+}

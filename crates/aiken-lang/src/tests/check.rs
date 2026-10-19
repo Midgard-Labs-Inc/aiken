@@ -6432,8 +6432,11 @@ fn pipe_does_not_cast_function_arguments() {
     ))
 }
 
+/// A cast that meets a type whose type isn't known yet allows it, as long as it turns out to be a
+/// type the cast can convert once its definition is inferred. What's still unknown then is linked
+/// to Data.
 #[test]
-fn upcast_links_an_unknown_type_to_data() {
+fn upcast_refuses_an_unknown_type_that_becomes_a_function() {
     let source_code = r#"
         fn main() -> Data {
           let to_data = fn(x) {
@@ -6452,7 +6455,7 @@ fn upcast_links_an_unknown_type_to_data() {
 }
 
 #[test]
-fn expect_links_an_unknown_type_to_data() {
+fn expect_refuses_an_unknown_type_that_becomes_a_function() {
     let source_code = r#"
         fn main() -> Data {
           let to_data = fn(x) {
@@ -6470,8 +6473,10 @@ fn expect_links_an_unknown_type_to_data() {
     ))
 }
 
+// The refusal is reported by the coerce, not as a type mismatch: the cast is checked once the
+// type is known, and a coerce never unifies its value with anything.
 #[test]
-fn coerce_links_an_unknown_type_to_data() {
+fn coerce_refuses_an_unknown_type_that_becomes_a_function() {
     let source_code = r#"
         fn main() -> Int {
           let to_int = fn(x) {
@@ -6485,12 +6490,117 @@ fn coerce_links_an_unknown_type_to_data() {
 
     assert!(matches!(
         check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+#[test]
+fn upcast_refuses_an_unknown_type_that_becomes_a_miller_loop_result() {
+    let source_code = r#"
+        use aiken/builtin
+
+        fn main(g1: G1Element, g2: G2Element) -> Data {
+          let to_data = fn(x) {
+            let data: Data = x
+            data
+          }
+
+          to_data(builtin.bls12_381_miller_loop(g1, g2))
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
         Err((_, Error::CouldNotUnify { .. }))
     ))
 }
 
 #[test]
-fn expect_links_an_unknown_type_argument_to_data() {
+fn coerce_refuses_an_unknown_type_that_becomes_a_miller_loop_result() {
+    let source_code = r#"
+        use aiken/builtin
+
+        fn main(g1: G1Element, g2: G2Element) -> Int {
+          let to_int = fn(x) {
+            coerce n: Int = x
+            n
+          }
+
+          to_int(builtin.bls12_381_miller_loop(g1, g2))
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+/// `expect xs: List<_>` doesn't know its element type yet, so it can't tell the cast is opaque.
+/// The element type becomes `Secret` after, which the cast is refused for.
+#[test]
+fn expect_refuses_an_unknown_type_argument_that_becomes_opaque() {
+    let local = r#"
+        opaque type Secret { inner: Int }
+
+        fn main(data: Data) -> List<Secret> {
+          expect xs: List<_> = data
+          let hidden: List<Secret> = xs
+          hidden
+        }
+    "#;
+
+    let dependency = r#"
+        pub opaque type Secret { inner: Int }
+    "#;
+
+    let imported = r#"
+        use secret.{Secret}
+
+        fn main(data: Data) -> List<Secret> {
+          expect xs: List<_> = data
+          let hidden: List<Secret> = xs
+          hidden
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(local)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+
+    assert!(matches!(
+        check_with_deps(parse(imported), vec![parse_as(dependency, "secret")]),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_refuses_an_unknown_type_argument_that_becomes_a_string() {
+    let source_code = r#"
+        fn main(data: Data) -> Int {
+          if data is xs: List<_> {
+            let strings: List<String> = xs
+            list_length(strings)
+          } else {
+            0
+          }
+        }
+
+        fn list_length(xs: List<a>) -> Int {
+          todo
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ))
+}
+
+/// Once the element type is known, the cast is the one a `List<Int>` annotation would make.
+#[test]
+fn expect_accepts_an_unknown_type_argument_that_becomes_known() {
     let source_code = r#"
         fn main(data: Data) -> List<Int> {
           expect xs: List<_> = data
@@ -6499,10 +6609,73 @@ fn expect_links_an_unknown_type_argument_to_data() {
         }
     "#;
 
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::CouldNotUnify { .. }))
-    ))
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn a_type_still_unknown_at_the_end_of_its_definition_is_linked_to_data() {
+    let source_code = r#"
+        pub fn main(data: Data) {
+          expect xs: List<_> = data
+          xs
+        }
+    "#;
+
+    let (_, module) = check(parse(source_code)).expect("should type-check");
+
+    let tipo = &module.type_info.values["main"].tipo;
+
+    assert_eq!(tipo.to_pretty(0), "fn(Data) -> List<Data>");
+}
+
+#[test]
+fn captures_and_lambdas_that_upcast_their_argument_can_be_passed_to_higher_order_functions() {
+    let prelude = r#"
+        fn eq_data(d: Data, n: Int) -> Bool {
+          todo
+        }
+
+        fn serialise(d: Data) -> ByteArray {
+          todo
+        }
+
+        fn all(xs: List<a>, f: fn(a) -> Bool) -> Bool {
+          todo
+        }
+
+        fn map(xs: List<a>, f: fn(a) -> b) -> List<b> {
+          todo
+        }
+
+        fn apply(f: fn(Int) -> Bool) -> Bool {
+          f(1)
+        }
+    "#;
+
+    let cases = [
+        // A capture.
+        "all([1, 1], eq_data(_, 1))",
+        // A capture passed to a function of the module.
+        "apply(eq_data(_, 1))",
+        // A capture of a function that takes Data.
+        "map([1, 2], serialise(_)) == [#\"01\", #\"02\"]",
+        // A lambda bound by `let`, which is only used afterwards.
+        "{ let is_one = fn(x) { eq_data(x, 1) }\n all([1, 1], is_one) }",
+        // The same, inline.
+        "all([1, 1], fn(x) { eq_data(x, 1) })",
+        // The same, piped.
+        "1 |> eq_data(_, 1)",
+    ];
+
+    for case in cases {
+        let source_code = format!("{prelude}\nfn main() -> Bool {{\n{case}\n}}\n");
+
+        let result = check(parse(&source_code));
+
+        assert!(result.is_ok(), "{case}: {result:#?}");
+    }
 }
 
 /// `==` compares through Data, and functions and `MillerLoopResult` have no Data form. A type

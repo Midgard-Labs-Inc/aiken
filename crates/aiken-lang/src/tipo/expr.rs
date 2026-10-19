@@ -48,6 +48,10 @@ pub(crate) fn infer_function(
         return Ok(typed_fun.clone());
     };
 
+    // Casts are checked per definition. Those of an attempt that was abandoned to infer a callee
+    // first are dropped with it.
+    environment.pending_casts.clear();
+
     let Function {
         doc,
         location,
@@ -188,6 +192,11 @@ pub(crate) fn infer_function(
 
     environment.close_scope(initial_scope);
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    // A type that was unknown when a cast allowed it may have become one the cast refuses since:
+    // check the casts again now, before generalising what's left. This also links what's still
+    // unknown to Data.
+    environment.resolve_pending_casts()?;
 
     // Assert that the inferred type matches the type of any recursive call
     environment.unify(preregistered_type, tipo.clone(), *location)?;
@@ -1787,23 +1796,15 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             });
         }
 
-        if !self.environment.is_data_like(&value_type) {
-            return Err(Error::IllegalCoerce {
-                location: typed_value.location(),
-                tipo: value_type,
-            });
-        }
+        self.environment
+            .check_coerce(&value_type, typed_value.location())?;
 
         let tipo = self
             .type_from_annotation(annotation)
             .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
 
-        if !self.environment.is_data_like(&tipo) {
-            return Err(Error::IllegalCoerce {
-                location: annotation.location(),
-                tipo,
-            });
-        }
+        self.environment
+            .check_coerce(&tipo, annotation.location())?;
 
         let pattern = PatternTyper::new(self.environment, &self.hydrator).unify(
             untyped_pattern,
