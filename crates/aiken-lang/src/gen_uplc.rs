@@ -2829,9 +2829,16 @@ impl<'a> CodeGenerator<'a> {
             DecisionTree::ListSwitch {
                 path,
                 cases,
-                tail_cases,
+                mut tail_cases,
                 default,
             } => {
+                // Each tail case contains the tail clauses that fit its prefix length.
+                // The final case must have the longest prefix, regardless of source order.
+                tail_cases.sort_by_key(|(case, _)| match case {
+                    CaseTest::ListWithTail(length) => *length,
+                    _ => unreachable!(),
+                });
+
                 //Current path to test
                 let current_tipo = get_tipo_by_path(subject_tipo.clone(), &path);
                 let builtins_path = Builtins::new_from_path(subject_tipo.clone(), path);
@@ -2910,7 +2917,7 @@ impl<'a> CodeGenerator<'a> {
                         itertools::Position::First(index) | itertools::Position::Only(index) => {
                             let (_, tree) = cases
                                 .iter()
-                                .chain(tail_cases.iter())
+                                .chain(tail_cases.iter().rev())
                                 .find(|x| match x.0 {
                                     CaseTest::List(i) => i == index,
                                     CaseTest::ListWithTail(i) => i <= index,
@@ -2952,7 +2959,7 @@ impl<'a> CodeGenerator<'a> {
                         itertools::Position::Middle(index) | itertools::Position::Last(index) => {
                             let (_, tree) = cases
                                 .iter()
-                                .chain(tail_cases.iter())
+                                .chain(tail_cases.iter().rev())
                                 .find(|x| match x.0 {
                                     CaseTest::List(i) => i == index,
                                     CaseTest::ListWithTail(i) => i <= index,

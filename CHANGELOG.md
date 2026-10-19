@@ -42,6 +42,7 @@
 - **aiken-lang**: A record update of an opaque record erased to its only field (`W { ..w, inner: 3 }`) crashed the code generator. It now gives the new field value.
 - **aiken-lang**: The constructor of an opaque type erased to its only field, used as a function value (`apply(W, 5)`, `list.map(xs, W)`), crashed the code generator. It now compiles to the identity function.
 - **uplc**: A call to `bls12_381_g1_hash_to_group` or `bls12_381_g2_hash_to_group` with constant arguments, and point additions or scalar multiplications built on it, was folded into a point constant that a script can't contain, so `aiken build` crashed with "BLS12-381 G1 points are not supported for flat encoding", even in a branch never taken. These calls are no longer folded, so tests that use them now report their real cost.
+- **aiken-lang**: Fix list matches that select the wrong clause when tail patterns have different prefix lengths.
 
 ## v1.3.0 - 2026-10-16
 

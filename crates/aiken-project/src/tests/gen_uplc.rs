@@ -24,6 +24,7 @@ mod cast_agreement;
 mod cast_holes;
 mod coerce;
 mod expect_cast;
+mod list_patterns;
 
 fn assert_uplc(source_code: &str, expected: Term<Name>, should_fail: bool, verbose_mode: bool) {
     let mut project = TestProject::new();
