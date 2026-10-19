@@ -6943,3 +6943,122 @@ fn expect_into_imported_opaque_phantom_type_argument() {
 
     assert!(result.is_ok(), "{result:#?}");
 }
+
+#[test]
+fn expect_into_prelude_option_of_opaque_with_local_constructors_named_like_its_own() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        type Maybe<a> {
+          Some(Int)
+          None
+        }
+
+        fn bar(data: Data) -> Option<Thing> {
+          expect x: Option<Thing> = data
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn expect_into_prelude_option_of_opaque_with_unqualified_imported_constructors_named_like_its_own()
+{
+    let dependency = r#"
+        pub type Maybe<a> {
+          Some(Int)
+          Nothing
+        }
+    "#;
+
+    let source_code = r#"
+        use maybe.{Some}
+
+        opaque type Thing { inner: Int }
+
+        fn bar(data: Data) -> Option<Thing> {
+          expect x: Option<Thing> = data
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check_with_deps(parse(source_code), vec![parse_as(dependency, "maybe")]),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn expect_into_prelude_types_of_opaque_with_local_types_named_like_them() {
+    let dependency = r#"
+        pub opaque type Thing { inner: Int }
+
+        pub type MaybeThing = Option<Thing>
+
+        pub type Things = List<Thing>
+    "#;
+
+    let shadowed_option = r#"
+        use thing.{MaybeThing}
+
+        type Option<a> {
+          Nope
+        }
+
+        fn bar(data: Data) -> MaybeThing {
+          expect x: MaybeThing = data
+          x
+        }
+    "#;
+
+    let shadowed_list = r#"
+        use thing.{Things}
+
+        type List<a> {
+          Nil
+        }
+
+        fn bar(data: Data) -> Things {
+          expect x: Things = data
+          x
+        }
+    "#;
+
+    for source_code in [shadowed_option, shadowed_list] {
+        assert!(matches!(
+            check_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]),
+            Err((_, Error::ExpectOnOpaqueType { .. }))
+        ));
+    }
+}
+
+#[test]
+fn a_record_holding_a_prelude_option_of_opaque_is_opaque_despite_a_local_some() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        type Maybe<a> {
+          Some(Int)
+          None
+        }
+
+        type Holder {
+          held: Option<Thing>,
+        }
+
+        fn bar(data: Data) -> Holder {
+          expect x: Holder = data
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}

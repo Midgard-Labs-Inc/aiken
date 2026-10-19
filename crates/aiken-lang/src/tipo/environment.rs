@@ -1145,7 +1145,9 @@ impl<'a> Environment<'a> {
     ) -> Vec<&'t Rc<Type>> {
         let all = || args.iter().collect();
 
-        let constructors = if module.is_empty() || module == self.current_module {
+        // The prelude's types are read from its interface: the current module may shadow their
+        // names, and their constructors' names, in its own tables.
+        let constructors = if module == self.current_module {
             self.module_types_constructors
                 .get(name)
                 .map(|constructors| {
@@ -1155,16 +1157,20 @@ impl<'a> Environment<'a> {
                         .collect::<Option<Vec<_>>>()
                 })
         } else {
-            self.importable_modules.get(module).and_then(|interface| {
-                interface.types_constructors.get(name).map(|constructors| {
-                    constructors
-                        .iter()
-                        .map(|constructor| {
-                            interface.values.get(constructor).map(|c| c.tipo.clone())
-                        })
-                        .collect::<Option<Vec<_>>>()
+            let interface = if module.is_empty() { "aiken" } else { module };
+
+            self.importable_modules
+                .get(interface)
+                .and_then(|interface| {
+                    interface.types_constructors.get(name).map(|constructors| {
+                        constructors
+                            .iter()
+                            .map(|constructor| {
+                                interface.values.get(constructor).map(|c| c.tipo.clone())
+                            })
+                            .collect::<Option<Vec<_>>>()
+                    })
                 })
-            })
         };
 
         let Some(Some(constructors)) = constructors else {
@@ -1183,9 +1189,20 @@ impl<'a> Environment<'a> {
                 _ => (&[][..], constructor.clone()),
             };
 
-            let Type::App { args: params, .. } = resolve_links(ret).deref().clone() else {
+            let Type::App {
+                module: ret_module,
+                name: ret_name,
+                args: params,
+                ..
+            } = resolve_links(ret).deref().clone()
+            else {
                 return all();
             };
+
+            // A constructor of another type with the same name stands in for this one's.
+            if ret_module != module || ret_name != name {
+                return all();
+            }
 
             if params.len() != args.len() {
                 return all();
