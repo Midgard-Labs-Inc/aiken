@@ -125,9 +125,10 @@ impl UntypedModule {
             definitions.push(definition);
         }
 
-        // Check every comparison now that the whole module is inferred (and work out which
-        // generics each function compares, for its callers in other modules).
-        environment.check_comparisons()?;
+        // Check what every definition needs a Data form for now that the whole module is inferred
+        // (and work out which generics each function needs one for, for its callers in other
+        // modules).
+        environment.check_data_uses()?;
 
         // Generalise functions now that the entire module has been inferred
         let definitions = definitions
@@ -184,7 +185,7 @@ impl UntypedModule {
             module_values: values,
             accessors,
             annotations,
-            compared_generics,
+            data_generics,
             ..
         } = environment;
 
@@ -204,7 +205,7 @@ impl UntypedModule {
                 annotations,
                 kind,
                 package: package.to_string(),
-                compared_generics,
+                data_generics,
             },
         })
     }
@@ -732,8 +733,8 @@ fn infer_definition(
                 location,
             )?;
 
-            let compared = std::mem::take(&mut expr_typer.compared);
-            environment.comparisons.push((None, compared));
+            let data_uses = std::mem::take(&mut expr_typer.data_uses);
+            environment.data_uses.push((None, data_uses));
 
             // NOTE: The assignment above is only a convenient way to create the TypedExpression
             // that will be reduced at compile-time. We must increment its usage to not
@@ -800,8 +801,8 @@ where
 
     let typed_via = expr_typer.infer(arg.via.clone())?;
 
-    let compared = std::mem::take(&mut expr_typer.compared);
-    environment.comparisons.push((None, compared));
+    let data_uses = std::mem::take(&mut expr_typer.data_uses);
+    environment.data_uses.push((None, data_uses));
 
     let hydrator: &mut Hydrator = hydrators.get_mut(&f.name).unwrap();
 
@@ -1065,6 +1066,11 @@ fn infer_sampler(
 #[allow(clippy::result_large_err)]
 fn is_valid_fuzzer(tipo: &Type, location: &Span) -> Result<(), Error> {
     match tipo {
+        Type::App { .. } if tipo.is_ml_result() => Err(Error::IllegalTypeInData {
+            location: *location,
+            tipo: Rc::new(tipo.clone()),
+        }),
+
         Type::App {
             name: _name,
             module: _module,

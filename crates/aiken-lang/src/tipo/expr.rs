@@ -1,8 +1,8 @@
 use super::{
-    RecordAccessor, Type, ValueConstructor, ValueConstructorVariant,
+    DataUse, RecordAccessor, Type, ValueConstructor, ValueConstructorVariant,
     environment::{
-        Comparisons, EntityKind, Environment, Instance, ScopeResetData,
-        assert_no_labeled_arguments, generalise,
+        DataUses, EntityKind, Environment, Instance, ScopeResetData, assert_no_labeled_arguments,
+        generalise, has_type_vars,
     },
     error::{Error, Warning},
     hydrator::Hydrator,
@@ -184,7 +184,7 @@ pub(crate) fn infer_function(
 
     let safe_to_generalise = !expr_typer.ungeneralised_function_used;
 
-    let compared = std::mem::take(&mut expr_typer.compared);
+    let data_uses = std::mem::take(&mut expr_typer.data_uses);
 
     environment.close_scope(initial_scope);
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
@@ -192,10 +192,10 @@ pub(crate) fn infer_function(
     // Assert that the inferred type matches the type of any recursive call
     environment.unify(preregistered_type, tipo.clone(), *location)?;
 
-    // A type variable met by `==` may only become a function later, in a caller, and a function
-    // referenced here may only be inferred later: comparisons are checked once the whole module
-    // is inferred.
-    environment.comparisons.push((Some(name.clone()), compared));
+    // A type variable met by `==` or stored in Data may only become a function later, in a
+    // caller, and a function referenced here may only be inferred later: what needs a Data form
+    // is checked once the whole module is inferred.
+    environment.data_uses.push((Some(name.clone()), data_uses));
 
     // Generalise the function if safe to do so
     let tipo = if safe_to_generalise {
@@ -260,10 +260,10 @@ pub(crate) struct ExprTyper<'a, 'b> {
     // it has been inferred.
     pub(crate) ungeneralised_function_used: bool,
 
-    // What this definition compares with `==` or `!=`, directly or through the module functions
-    // it references. Checked once the whole module is inferred (see
-    // `Environment::check_comparisons`).
-    pub(crate) compared: Comparisons,
+    // What this definition needs a Data form for: the types it compares with `==` or `!=` and
+    // the types it stores in Data, directly or through the module functions it references.
+    // Checked once the whole module is inferred (see `Environment::check_data_uses`).
+    pub(crate) data_uses: DataUses,
 }
 
 impl<'a, 'b> ExprTyper<'a, 'b> {
@@ -274,28 +274,64 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             environment,
             tracing,
             ungeneralised_function_used: false,
-            compared: Comparisons::default(),
+            data_uses: DataUses::default(),
         }
     }
 
-    /// Record a reference to a module function and how its generic variables were instantiated,
-    /// in case it compares some of them.
-    fn note_compared_instances(
+    /// Record what a reference to a value needs a Data form for, given how its generic variables
+    /// were instantiated: the generics of a module function, which are checked once its module
+    /// is inferred, or the fields of a generic record. A field that only mentions a phantom type
+    /// argument can't, so a phantom argument is never in the way.
+    fn note_data_uses(
         &mut self,
         variant: &ValueConstructorVariant,
+        tipo: &Rc<Type>,
         ids: HashMap<u64, Rc<Type>>,
         location: Span,
     ) {
-        if let ValueConstructorVariant::ModuleFn { module, name, .. } = variant
-            && !ids.is_empty()
-        {
-            self.compared.instances.push(Instance {
-                module: module.clone(),
-                name: name.clone(),
-                types: ids,
-                location,
-            });
+        if ids.is_empty() {
+            return;
         }
+
+        match variant {
+            ValueConstructorVariant::ModuleFn { module, name, .. } => {
+                self.data_uses.instances.push(Instance {
+                    module: module.clone(),
+                    name: name.clone(),
+                    types: ids,
+                    location,
+                })
+            }
+
+            ValueConstructorVariant::Record { .. } => {
+                if let Type::Fn { args, .. } = tipo.as_ref() {
+                    for arg in args {
+                        self.data_uses
+                            .direct
+                            .push((DataUse::Stored, arg.clone(), location));
+                    }
+                }
+            }
+
+            ValueConstructorVariant::LocalVariable { .. }
+            | ValueConstructorVariant::ModuleConstant { .. } => {}
+        }
+    }
+
+    /// A list, tuple or pair element is stored in Data. Whether it can be is checked now if its
+    /// type is known, and once the whole module is inferred if it isn't.
+    #[allow(clippy::result_large_err)]
+    fn ensure_stored(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
+        self.environment
+            .ensure_serialisable(tipo.clone(), location)?;
+
+        if has_type_vars(&tipo) {
+            self.data_uses
+                .direct
+                .push((DataUse::Stored, tipo, location));
+        }
+
+        Ok(())
     }
 
     #[allow(clippy::result_large_err)]
@@ -825,7 +861,9 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                         .ensure_serialisable(tipo.clone(), location)
                         .map_err(|_| Error::IllegalComparison { location })?;
 
-                    self.compared.direct.push((tipo, location));
+                    self.data_uses
+                        .direct
+                        .push((DataUse::Compared, tipo, location));
                 }
 
                 return Ok(TypedExpr::BinOp {
@@ -1296,7 +1334,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
         let tipo = self.instantiate(constructor.tipo, &mut ids, select_location)?;
 
-        self.note_compared_instances(&constructor.variant, ids, select_location);
+        self.note_data_uses(&constructor.variant, &tipo, ids, select_location);
 
         let constructor = match &constructor.variant {
             variant @ ValueConstructorVariant::ModuleFn { name, module, .. } => {
@@ -2176,8 +2214,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         }
 
         // Ensure elements are serialisable to Data.
-        self.environment
-            .ensure_serialisable(tipo.clone(), location)?;
+        self.ensure_stored(tipo.clone(), location)?;
 
         // Type check the ..tail, if there is one
         let tipo = Type::list(tipo);
@@ -2591,12 +2628,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         location: Span,
     ) -> Result<TypedExpr, Error> {
         let typed_fst = self.infer(fst)?;
-        self.environment
-            .ensure_serialisable(typed_fst.tipo(), location)?;
+        self.ensure_stored(typed_fst.tipo(), location)?;
 
         let typed_snd = self.infer(snd)?;
-        self.environment
-            .ensure_serialisable(typed_snd.tipo(), location)?;
+        self.ensure_stored(typed_snd.tipo(), location)?;
 
         Ok(TypedExpr::Pair {
             location,
@@ -2614,8 +2649,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             let typed_elem = self.infer(elem)?;
 
             // Ensure elements are serialisable to Data.
-            self.environment
-                .ensure_serialisable(typed_elem.tipo(), location)?;
+            self.ensure_stored(typed_elem.tipo(), location)?;
 
             typed_elems.push(typed_elem);
         }
@@ -2900,7 +2934,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
         let tipo = self.instantiate(tipo, &mut ids, *location)?;
 
-        self.note_compared_instances(&variant, ids, *location);
+        self.note_data_uses(&variant, &tipo, ids, *location);
 
         Ok(ValueConstructor {
             public,

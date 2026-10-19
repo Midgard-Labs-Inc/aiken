@@ -1,6 +1,6 @@
 use super::{
-    AccessorsMap, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar, ValueConstructor,
-    ValueConstructorVariant,
+    AccessorsMap, DataUse, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar,
+    ValueConstructor, ValueConstructorVariant,
     error::{Error, Warning},
     exhaustive::{Matrix, PatternStack, simplify},
     hydrator::Hydrator,
@@ -13,6 +13,7 @@ use crate::{
         TypedDefinition, TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport,
         UntypedArg, UntypedDefinition, UntypedFunction, Use, Validator,
     },
+    builtins,
     expr::AssignmentKind,
     tipo::{TypeAliasAnnotation, fields::FieldMap, well_known},
 };
@@ -69,14 +70,14 @@ pub struct Environment<'a> {
     /// Top-level functions that have been inferred
     pub inferred_functions: HashMap<String, TypedFunction>,
 
-    /// For each function of the module, the ids of its generic variables that it compares with
-    /// `==` or `!=`, directly or through another function. Filled once the whole module is
-    /// inferred (`check_comparisons`).
-    pub compared_generics: HashMap<String, Vec<u64>>,
+    /// For each function of the module, the ids of its generic variables that need a Data form,
+    /// and why: it compares them with `==` or `!=`, or stores them in Data, directly or through
+    /// another function. Filled once the whole module is inferred (`check_data_uses`).
+    pub data_generics: HashMap<String, Vec<(u64, DataUse)>>,
 
-    /// The comparisons of each definition inferred so far, by the function that owns them (if
-    /// any). They're checked once the whole module is inferred (`check_comparisons`).
-    pub(crate) comparisons: Vec<(Option<String>, Comparisons)>,
+    /// What each definition inferred so far needs a Data form for, by the function that owns it
+    /// (if any). Checked once the whole module is inferred (`check_data_uses`).
+    pub(crate) data_uses: Vec<(Option<String>, DataUses)>,
 
     previous_id: u64,
 
@@ -791,29 +792,32 @@ impl<'a> Environment<'a> {
         Ok(())
     }
 
-    /// Check every comparison of the module, once the whole module is inferred, and work out the
-    /// generic variables each function compares (`compared_generics`).
+    /// Check what every definition of the module needs a Data form for, once the whole module is
+    /// inferred, and work out the generic variables each function needs one for
+    /// (`data_generics`).
     ///
-    /// A function compares the variables of the types it compares directly, and the types it
-    /// instantiates the compared generics of the functions it references with. Those may be
-    /// functions of this module inferred later, so this runs to a fixed point. Every compared
-    /// type must have a Data form by then: type variables shared with functions that aren't
-    /// generalised may have been bound by their callers since.
+    /// A function needs a Data form for the variables of the types it compares or stores
+    /// directly, and for the types it instantiates the generics of the functions it references
+    /// with. Those may be functions of this module inferred later, so this runs to a fixed
+    /// point. Every such type must have a Data form by then: type variables shared with
+    /// functions that aren't generalised may have been bound by their callers since.
     #[allow(clippy::result_large_err)]
-    pub(crate) fn check_comparisons(&mut self) -> Result<(), Error> {
-        let comparisons = std::mem::take(&mut self.comparisons);
+    pub(crate) fn check_data_uses(&mut self) -> Result<(), Error> {
+        let data_uses = std::mem::take(&mut self.data_uses);
 
-        let mut generics: HashMap<String, BTreeSet<u64>> = HashMap::new();
+        let mut generics: HashMap<String, BTreeSet<(u64, DataUse)>> = HashMap::new();
 
         loop {
-            let mut next: HashMap<String, BTreeSet<u64>> = HashMap::new();
+            let mut next: HashMap<String, BTreeSet<(u64, DataUse)>> = HashMap::new();
 
-            for (owner, comparisons) in &comparisons {
+            for (owner, uses) in &data_uses {
                 if let Some(owner) = owner {
                     let ids = next.entry(owner.clone()).or_default();
 
-                    for (tipo, _) in self.compared_types(comparisons, &generics) {
-                        collect_var_ids(&tipo, ids);
+                    for (usage, tipo, _) in self.used_types(uses, &generics) {
+                        let mut vars = BTreeSet::new();
+                        collect_var_ids(&tipo, &mut vars);
+                        ids.extend(vars.into_iter().map(|id| (id, usage)));
                     }
                 }
             }
@@ -825,15 +829,18 @@ impl<'a> Environment<'a> {
             generics = next;
         }
 
-        for (_, comparisons) in &comparisons {
-            for (tipo, location) in self.compared_types(comparisons, &generics) {
+        for (_, uses) in &data_uses {
+            for (usage, tipo, location) in self.used_types(uses, &generics) {
                 if !self.data_traits(&tipo).is_serialisable() {
-                    return Err(Error::IllegalComparison { location });
+                    return Err(match usage {
+                        DataUse::Compared => Error::IllegalComparison { location },
+                        DataUse::Stored => Error::IllegalTypeInData { tipo, location },
+                    });
                 }
             }
         }
 
-        self.compared_generics = generics
+        self.data_generics = generics
             .into_iter()
             .map(|(name, ids)| (name, ids.into_iter().collect()))
             .collect();
@@ -841,32 +848,39 @@ impl<'a> Environment<'a> {
         Ok(())
     }
 
-    /// The types a definition compares: directly, and through the compared generics of the
-    /// module functions it references, given `generics` for the functions of this module.
-    fn compared_types(
+    /// The types a definition needs a Data form for: directly, and through the data generics of
+    /// the module functions it references, given `generics` for the functions of this module.
+    fn used_types(
         &self,
-        comparisons: &Comparisons,
-        generics: &HashMap<String, BTreeSet<u64>>,
-    ) -> Vec<(Rc<Type>, Span)> {
-        let mut types = comparisons.direct.clone();
+        uses: &DataUses,
+        generics: &HashMap<String, BTreeSet<(u64, DataUse)>>,
+    ) -> Vec<(DataUse, Rc<Type>, Span)> {
+        let mut types = uses.direct.clone();
 
-        for instance in &comparisons.instances {
-            let compared: Vec<u64> = if instance.module == *self.current_module {
+        for instance in &uses.instances {
+            let needed: Vec<(u64, DataUse)> = if instance.module == *self.current_module {
                 generics
                     .get(&instance.name)
                     .map(|ids| ids.iter().copied().collect())
                     .unwrap_or_default()
             } else {
+                // The builtins' functions have no module.
+                let module = if instance.module.is_empty() {
+                    builtins::BUILTIN
+                } else {
+                    &instance.module
+                };
+
                 self.importable_modules
-                    .get(&instance.module)
-                    .and_then(|module| module.compared_generics.get(&instance.name))
+                    .get(module)
+                    .and_then(|module| module.data_generics.get(&instance.name))
                     .cloned()
                     .unwrap_or_default()
             };
 
-            for id in compared {
+            for (id, usage) in needed {
                 if let Some(tipo) = instance.types.get(&id) {
-                    types.push((tipo.clone(), instance.location));
+                    types.push((usage, tipo.clone(), instance.location));
                 }
             }
         }
@@ -1454,8 +1468,8 @@ impl<'a> Environment<'a> {
             id_gen,
             ungeneralised_functions: HashSet::new(),
             inferred_functions: HashMap::new(),
-            compared_generics: HashMap::new(),
-            comparisons: Vec::new(),
+            data_generics: HashMap::new(),
+            data_uses: Vec::new(),
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
             opaque_types: HashSet::new(),
@@ -2689,12 +2703,13 @@ fn unify_unbound_type(tipo: Rc<Type>, own_id: u64, location: Span) -> Result<(),
     }
 }
 
-/// What a definition compares with `==` or `!=`, recorded during inference and checked once the
-/// whole module is inferred (`Environment::check_comparisons`).
+/// What a definition needs a Data form for (it compares it with `==` or `!=`, or stores it in
+/// Data), recorded during inference and checked once the whole module is inferred
+/// (`Environment::check_data_uses`).
 #[derive(Debug, Default)]
-pub(crate) struct Comparisons {
-    /// The types of the operands, with the comparison's location.
-    pub direct: Vec<(Rc<Type>, Span)>,
+pub(crate) struct DataUses {
+    /// The types needing a Data form, with the expression's location.
+    pub direct: Vec<(DataUse, Rc<Type>, Span)>,
     /// Each reference to a module function.
     pub instances: Vec<Instance>,
 }
@@ -2804,6 +2819,13 @@ fn collect_var_ids(tipo: &Type, ids: &mut BTreeSet<u64>) {
             collect_var_ids(snd, ids);
         }
     }
+}
+
+/// Whether a type has a type variable in it, unbound or generic.
+pub(crate) fn has_type_vars(tipo: &Type) -> bool {
+    let mut ids = BTreeSet::new();
+    collect_var_ids(tipo, &mut ids);
+    !ids.is_empty()
 }
 
 #[allow(clippy::result_large_err)]

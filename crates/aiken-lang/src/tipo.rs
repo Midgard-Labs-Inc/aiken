@@ -1346,11 +1346,22 @@ pub struct TypeInfo {
     pub values: HashMap<String, ValueConstructor>,
     pub accessors: HashMap<String, AccessorsMap>,
     pub annotations: HashMap<Annotation, Rc<Type>>,
-    /// For each function, the ids of its generic variables that it compares with `==` or `!=`,
-    /// directly or through another function. They can't be instantiated with a type that has no
-    /// Data form.
+    /// For each function, the ids of its generic variables that it needs a Data form for,
+    /// directly or through another function, and why. They can't be instantiated with a type that
+    /// has none (a function, a `MillerLoopResult`, or a type that contains one).
     #[serde(default)]
-    pub compared_generics: HashMap<String, Vec<u64>>,
+    pub data_generics: HashMap<String, Vec<(u64, DataUse)>>,
+}
+
+/// Why a type must have a Data form.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum DataUse {
+    /// It's compared with `==` or `!=`.
+    Compared,
+    /// It's stored in Data: a constructor's field, or an element of a list, a tuple or a pair.
+    Stored,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

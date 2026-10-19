@@ -7062,3 +7062,257 @@ fn a_record_holding_a_prelude_option_of_opaque_is_opaque_despite_a_local_some() 
         Err((_, Error::ExpectOnOpaqueType { .. }))
     ));
 }
+
+#[test]
+fn forbid_a_miller_loop_result_in_a_generic_constructor() {
+    let in_a_box = r#"
+        use aiken/builtin
+
+        type Box<a> {
+          Box(a)
+        }
+
+        fn main(g1: G1Element, g2: G2Element) -> Bool {
+          let ml = builtin.bls12_381_miller_loop(g1, g2)
+          when Box(ml) is {
+            Box(inner) -> builtin.bls12_381_final_verify(inner, ml)
+          }
+        }
+    "#;
+
+    let in_an_option = r#"
+        use aiken/builtin
+
+        fn main(g1: G1Element, g2: G2Element) -> Bool {
+          let ml = builtin.bls12_381_miller_loop(g1, g2)
+          when Some(ml) is {
+            Some(inner) -> builtin.bls12_381_final_verify(inner, ml)
+            None -> False
+          }
+        }
+    "#;
+
+    for source_code in [in_a_box, in_an_option] {
+        assert!(
+            matches!(
+                check(parse(source_code)),
+                Err((_, Error::IllegalTypeInData { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_a_function_in_a_generic_constructor() {
+    let in_a_box = r#"
+        type Box<a> {
+          Box(a)
+        }
+
+        fn main() -> Bool {
+          when Box(fn(x) { x + 1 }) is {
+            Box(g) -> g(1) == 2
+          }
+        }
+    "#;
+
+    let in_an_option = r#"
+        fn main() -> Bool {
+          when Some(fn(x) { x + 1 }) is {
+            Some(g) -> g(1) == 2
+            None -> False
+          }
+        }
+    "#;
+
+    for source_code in [in_a_box, in_an_option] {
+        assert!(
+            matches!(
+                check(parse(source_code)),
+                Err((_, Error::IllegalTypeInData { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_a_miller_loop_result_stored_by_a_generic_function() {
+    let source_code = r#"
+        use aiken/builtin
+
+        type Box<a> {
+          Box(a)
+        }
+
+        fn unbox(b: Box<a>) -> a {
+          let Box(x) = b
+          x
+        }
+
+        fn main(g1: G1Element, g2: G2Element) -> Bool {
+          let ml = builtin.bls12_381_miller_loop(g1, g2)
+          builtin.bls12_381_final_verify(unbox(Box(ml)), ml)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn forbid_a_function_stored_by_a_generic_function_of_the_same_module() {
+    let source_code = r#"
+        fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        fn main() -> Int {
+          let _ = wrap(fn(n: Int) { n })
+          1
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn forbid_a_function_stored_by_a_generic_function_of_an_imported_module() {
+    let dependency = r#"
+        pub fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        pub fn pair_up(x: a, y: b) -> Pair<a, b> {
+          Pair(x, y)
+        }
+
+        pub fn through(x: a) -> List<a> {
+          wrap(x)
+        }
+    "#;
+
+    let wrap = r#"
+        use dep
+
+        fn main() -> Int {
+          1
+        }
+
+        test t() {
+          let _ = dep.wrap(fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    let pair_up = r#"
+        use dep
+
+        test t() {
+          let _ = dep.pair_up(1, fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    let through = r#"
+        use dep
+
+        test t() {
+          let _ = dep.through(fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    for source_code in [wrap, pair_up, through] {
+        assert!(
+            matches!(
+                check_with_deps(parse(source_code), vec![parse_as(dependency, "dep")]),
+                Err((_, Error::IllegalTypeInData { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_a_function_consed_by_the_builtin() {
+    let source_code = r#"
+        use aiken/builtin
+
+        fn main() -> Int {
+          let _xs = builtin.cons_list(fn(n: Int) { n }, [])
+          1
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn allow_generic_constructors_and_functions_holding_data_forms() {
+    let source_code = r#"
+        use aiken/builtin
+
+        type Box<a> {
+          Box(a)
+        }
+
+        type Tagged<a> {
+          Tagged(Int)
+        }
+
+        fn unbox(b: Box<a>) -> a {
+          let Box(x) = b
+          x
+        }
+
+        fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        fn main(g1: G1Element) -> Bool {
+          let tagged: Tagged<Int> = Tagged(1)
+          let _ = Some(g1)
+          let ys = wrap(Box([1, 2]))
+          unbox(Box(1)) == 1 && builtin.length_of_bytearray(#"") == 0 && ys != []
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn forbid_a_fuzzer_of_miller_loop_results() {
+    let source_code = r#"
+        fn int() -> Fuzzer<Int> { todo }
+
+        fn map(fuzzer: Fuzzer<a>, f: fn(a) -> b) -> Fuzzer<b> {
+          fn(prng) {
+            when fuzzer(prng) is {
+              Some((next, a)) -> Some((next, f(a)))
+              None -> None
+            }
+          }
+        }
+
+        fn to_ml(_n: Int) -> MillerLoopResult { todo }
+
+        test prop(ml via map(int(), to_ml)) { True }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}

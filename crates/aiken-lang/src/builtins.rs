@@ -7,7 +7,7 @@ use crate::{
     },
     expr::TypedExpr,
     tipo::{
-        Type, TypeConstructor, TypeInfo, ValueConstructor, ValueConstructorVariant,
+        DataUse, Type, TypeConstructor, TypeInfo, ValueConstructor, ValueConstructorVariant,
         fields::FieldMap,
     },
 };
@@ -53,7 +53,7 @@ pub fn prelude(id_gen: &IdGenerator) -> TypeInfo {
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),
-        compared_generics: HashMap::new(),
+        data_generics: HashMap::new(),
     };
 
     // Data
@@ -589,12 +589,21 @@ pub fn plutus(id_gen: &IdGenerator) -> TypeInfo {
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),
-        compared_generics: HashMap::new(),
+        data_generics: HashMap::new(),
     };
 
     for builtin in DefaultFunction::iter() {
         let value = from_default_function(builtin, id_gen);
         plutus.values.insert(builtin.aiken_name(), value);
+    }
+
+    // `cons_list` (`mkCons`) is the only generic builtin that stores its argument in a list.
+    if let Some(Type::Fn { args, .. }) = plutus.values.get("cons_list").map(|v| v.tipo.as_ref())
+        && let Some(id) = args.first().and_then(|a| a.get_generic_id())
+    {
+        plutus
+            .data_generics
+            .insert("cons_list".to_string(), vec![(id, DataUse::Stored)]);
     }
 
     let index_tipo = Type::function(vec![Type::data()], Type::int());
