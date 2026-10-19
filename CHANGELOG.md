@@ -23,6 +23,7 @@
 - **aiken-lang**: `if data is s: String` crashed on bytes that aren't valid UTF-8 instead of taking the `else` branch. It's now a compile error (see above).
 - **aiken-lang**: Validator parameters can no longer be or contain opaque types, like datums and redeemers already couldn't: they are converted from `Data` without the opaque type's invariants.
 - **aiken-lang**: `expect` only reports an opaque-type error when it would convert `Data` into an opaque type. `expect x: Thing = id(thing)` now type-checks, and `expect x: Thing = 1` reports a type mismatch.
+- **uplc**: The shrinker moved a check (an `expect`'s, or the one a handler adds for a typed redeemer) into the one branch of an `if`, `when`, `||` or `&&` that used its result, so the other branch accepted malformed input. With traces off this hit casts to `Int`, `ByteArray`, `Bool`, `String`, `List<Data>`, `Void`, `G1Element` and `Value`; with traces on, `String`, `Value` and `G1Element`. A value that can fail now only moves into a branch when the other branch is `error`. This has been the case since upstream v1.1.10. **Validators where the optimizer did this compile to different code once rebuilt, and so get a new hash;** they also cost a little more to run, since the check now runs on every branch.
 
 ## v1.3.0 - 2026-10-16
 

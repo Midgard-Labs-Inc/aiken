@@ -31,34 +31,37 @@ expression: program.to_pretty()
                   __inner_expect_on_list
                   (lam
                     __list_to_check
-                    (force
-                      (case
-                        (constr
-                          0
-                        __list_to_check
-                          (delay [ (builtin listData) xs_id_1 ])
-                          (delay
-                            [
-                              (lam
-                                __item_span_76_78_id_3
+                    [
+                      (lam
+                        __curried_expect_on_list_id_5
+                        (force
+                          (case
+                            (constr
+                              0
+                            __list_to_check
+                              (delay [ (builtin listData) xs_id_1 ])
+                              (delay
                                 [
+                                  (lam
+                                    __item_span_76_78_id_3
+                                    [
+                                      __curried_expect_on_list_id_5
+                                      [ __tail_list_wrapped __list_to_check ]
+                                    ]
+                                  )
                                   [
-                                    __inner_expect_on_list
-                                    __inner_expect_on_list
+                                    (builtin unListData)
+                                    [ __head_list_wrapped __list_to_check ]
                                   ]
-                                  [ __tail_list_wrapped __list_to_check ]
                                 ]
                               )
-                              [
-                                (builtin unListData)
-                                [ __head_list_wrapped __list_to_check ]
-                              ]
-                            ]
+                            )
+                          __choose_list_wrapped
                           )
                         )
-                      __choose_list_wrapped
                       )
-                    )
+                      [ __inner_expect_on_list __inner_expect_on_list ]
+                    ]
                   )
                 )
               ]

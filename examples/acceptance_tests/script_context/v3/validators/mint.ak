@@ -138,7 +138,7 @@ fn assert_mint(mint: Assets, our_policy_id: PolicyId, other_policy_id: PolicyId)
 ///
 validator test_2 {
   mint(_tmp2: Void, _policy_id: PolicyId, _transaction: Transaction) {
-    trace @"1"
+    trace @"5"
     True
   }
 

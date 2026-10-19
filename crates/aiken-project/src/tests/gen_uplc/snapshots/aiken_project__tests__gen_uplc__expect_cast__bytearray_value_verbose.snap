@@ -75,34 +75,34 @@ expression: program.to_pretty()
                                                                   (lam
                                                                     __pair_0
                                                                     [
-                                                                      (lam
-                                                                        __val
-                                                                        (force
-                                                                          (case
-                                                                            (constr
-                                                                              0
+                                                                      [
+                                                                        (lam
+                                                                          __discard___0_id_2
+                                                                          (lam
                                                                             __val
-                                                                              expectPair(_,v):Pair<Data,ByteArray>=d
-                                                                              expectPair(_,v):Pair<Data,ByteArray>=d
-                                                                              expectPair(_,v):Pair<Data,ByteArray>=d
-                                                                              expectPair(_,v):Pair<Data,ByteArray>=d
-                                                                              (delay
-                                                                                [
-                                                                                  (lam
-                                                                                    __discard_expect___id_3
+                                                                            (force
+                                                                              (case
+                                                                                (constr
+                                                                                  0
+                                                                                __val
+                                                                                  expectPair(_,v):Pair<Data,ByteArray>=d
+                                                                                  expectPair(_,v):Pair<Data,ByteArray>=d
+                                                                                  expectPair(_,v):Pair<Data,ByteArray>=d
+                                                                                  expectPair(_,v):Pair<Data,ByteArray>=d
+                                                                                  (delay
                                                                                     __val
                                                                                   )
-                                                                                  [
-                                                                                    __fst_pair_wrapped
-                                                                                    __pair_0
-                                                                                  ]
-                                                                                ]
+                                                                                )
+                                                                              __choose_data_wrapped
                                                                               )
                                                                             )
-                                                                          __choose_data_wrapped
                                                                           )
                                                                         )
-                                                                      )
+                                                                        [
+                                                                          __fst_pair_wrapped
+                                                                          __pair_0
+                                                                        ]
+                                                                      ]
                                                                       [
                                                                         __snd_pair_wrapped
                                                                         __pair_0

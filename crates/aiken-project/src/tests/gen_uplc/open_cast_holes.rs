@@ -287,7 +287,6 @@ fn expect_checks_the_index_a_record_level_tag_gives() {
 /// so `inline_reducer` moves the check of an `expect` into the one branch that uses its result.
 /// With traces the check has another shape and stays put, so silent and verbose builds disagree.
 #[test]
-#[ignore = "open hole: the shrinker moves an expect check into the only if-branch that uses its result (carry_args_to_branch)"]
 fn expect_check_runs_before_a_branch_that_uses_its_result() {
     let source = r#"
         pub fn observe(d: Data) -> Data {
@@ -320,7 +319,6 @@ fn expect_check_runs_before_a_branch_that_uses_its_result() {
 /// `bls12_381_G1_uncompress`) the same move happens with traces on: no trace level keeps the
 /// check of the casts C made legal.
 #[test]
-#[ignore = "open hole: at every trace level the shrinker moves decodeUtf8 / unValueData / G1 uncompress checks into the only if-branch that uses them"]
 fn conversion_check_runs_before_a_branch_at_every_trace_level() {
     let zero_quantity = Data::map(vec![(
         Data::bytestring(vec![]),
@@ -361,7 +359,6 @@ fn conversion_check_runs_before_a_branch_at_every_trace_level() {
 /// The same hole on the `expect` the handler wrapper emits for a typed redeemer: at `-t silent`
 /// (the default of `aiken build`) the redeemer check only runs on the branch that reads it.
 #[test]
-#[ignore = "open hole: the shrinker moves the redeemer check of a handler into the only if-branch that reads the redeemer (carry_args_to_branch)"]
 fn redeemer_check_runs_before_a_branch_that_reads_it() {
     let source = r#"
         validator typed_redeemer {

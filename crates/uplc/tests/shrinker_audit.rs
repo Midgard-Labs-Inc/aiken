@@ -521,6 +521,41 @@ fn carry_args_to_branch_keeps_the_argument_when_the_other_branch_is_not_an_error
 }
 
 #[test]
+fn carry_args_to_branch_keeps_a_failing_argument_out_of_an_ordinary_branch() {
+    // Neither branch is an error, so taking the other branch must still run
+    // `unIData d`: `x` occurs in one branch only, under its `delay`, and stays
+    // bound outside the `ifThenElse`.
+    for (src, taken, skipped) in [
+        (
+            "(lam c (lam d [(lam x (force [(force (builtin ifThenElse)) c \
+                (delay x) (delay (con integer 1))])) [(builtin unIData) d]]))",
+            "(con bool True)",
+            "(con bool False)",
+        ),
+        (
+            "(lam c (lam d [(lam x (force [(force (builtin ifThenElse)) c \
+                (delay (con integer 1)) (delay x)])) [(builtin unIData) d]]))",
+            "(con bool False)",
+            "(con bool True)",
+        ),
+    ] {
+        let src = program(src);
+
+        let runs = assert_sound_on(
+            &src,
+            &[
+                on(&[taken, GOOD], true),
+                on(&[taken, BAD], false),
+                on(&[skipped, GOOD], true),
+                on(&[skipped, BAD], false),
+            ],
+        );
+
+        assert!(runs[0].text().contains("(lam x"), "{}", runs[0].text());
+    }
+}
+
+#[test]
 #[ignore = "shrinker bug: carry_args_to_branch counts a delay nested in the then-branch as executed when the else branch is `error`, so a failing argument is inlined under it; reported, not fixed"]
 fn carry_args_to_branch_error_branch_nested_delay_keeps_the_failing_argument() {
     // CONFIRMED by running (c = True, d = B #aa):

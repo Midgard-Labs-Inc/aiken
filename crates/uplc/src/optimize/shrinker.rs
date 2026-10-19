@@ -1683,7 +1683,8 @@ impl Term<Name> {
     // This handles the very common case of (if condition then body else error)
     // or (if condition then error else body)
     // In this case it is fine to treat the body as if it is not delayed
-    // since the other branch is error
+    // since the other branch is error. Any other branch is scanned with its
+    // `delay`, so an occurrence in it doesn't count as executed.
     fn carry_args_to_branch(
         &self,
         then_arg: &Rc<Term<Name>>,
@@ -1719,14 +1720,14 @@ impl Term<Name> {
         // unwrap apply and add void to arg stack!
         arg_stack.push(());
 
-        let Term::Delay(else_arg) = else_arg.as_ref() else {
+        let Term::Delay(else_body) = else_arg.as_ref() else {
             let lookup = var_occurrence_stack(builtin, arg_stack, cap);
             let lookup = combine_capped(lookup, condition);
             let lookup = combine_capped(lookup, then_arg);
             return combine_capped(lookup, else_arg);
         };
 
-        let Term::Delay(then_arg) = then_arg.as_ref() else {
+        let Term::Delay(then_body) = then_arg.as_ref() else {
             let lookup = var_occurrence_stack(builtin, arg_stack, cap);
             let lookup = combine_capped(lookup, condition);
             let lookup = combine_capped(lookup, then_arg);
@@ -1738,7 +1739,7 @@ impl Term<Name> {
                 if a.text == DefaultFunction::IfThenElse.wrapped_name()
                     || a.text == DefaultFunction::ChooseList.wrapped_name() =>
             {
-                if matches!(else_arg.as_ref(), Term::Error) {
+                if matches!(else_body.as_ref(), Term::Error) {
                     // Pop 3 args of arg_stack due to branch execution
                     arg_stack.pop();
                     arg_stack.pop();
@@ -1752,8 +1753,8 @@ impl Term<Name> {
 
                     let remaining = cap - lookup.occurrences;
 
-                    lookup.combine(var_occurrence_stack(then_arg, arg_stack, remaining))
-                } else if matches!(then_arg.as_ref(), Term::Error) {
+                    lookup.combine(var_occurrence_stack(then_body, arg_stack, remaining))
+                } else if matches!(then_body.as_ref(), Term::Error) {
                     // Pop 3 args of arg_stack due to branch execution
                     arg_stack.pop();
                     arg_stack.pop();
@@ -1767,7 +1768,7 @@ impl Term<Name> {
 
                     let remaining = cap - lookup.occurrences;
 
-                    lookup.combine(var_occurrence_stack(else_arg, arg_stack, remaining))
+                    lookup.combine(var_occurrence_stack(else_body, arg_stack, remaining))
                 } else {
                     let lookup = var_occurrence_stack(builtin, arg_stack, cap);
                     let lookup = combine_capped(lookup, condition);

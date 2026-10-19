@@ -39,46 +39,49 @@ expression: program.to_pretty()
                       __inner_expect_on_list
                       (lam
                         __list_to_check
-                        (force
-                          (case
-                            (constr
-                              0
-                            __list_to_check
-                              (delay [ (builtin mapData) m_id_1 ])
-                              (delay
-                                [
-                                  (lam
-                                    __pair_0
+                        [
+                          (lam
+                            __curried_expect_on_list_id_6
+                            (force
+                              (case
+                                (constr
+                                  0
+                                __list_to_check
+                                  (delay [ (builtin mapData) m_id_1 ])
+                                  (delay
                                     [
-                                      [
-                                        (lam
-                                          __pair_fst_span_76_77_id_4
-                                          (lam
-                                            __pair_snd_span_76_77_id_5
-                                            [
-                                              [
-                                                __inner_expect_on_list
-                                                __inner_expect_on_list
-                                              ]
-                                              [
-                                                __tail_list_wrapped
-                                                __list_to_check
-                                              ]
-                                            ]
-                                          )
-                                        )
-                                        [ __fst_pair_wrapped __pair_0 ]
-                                      ]
-                                      [ __snd_pair_wrapped __pair_0 ]
+                                      (lam
+                                        __pair_0
+                                        [
+                                          [
+                                            (lam
+                                              __pair_fst_span_76_77_id_4
+                                              (lam
+                                                __pair_snd_span_76_77_id_5
+                                                [
+                                                  __curried_expect_on_list_id_6
+                                                  [
+                                                    __tail_list_wrapped
+                                                    __list_to_check
+                                                  ]
+                                                ]
+                                              )
+                                            )
+                                            [ __fst_pair_wrapped __pair_0 ]
+                                          ]
+                                          [ __snd_pair_wrapped __pair_0 ]
+                                        ]
+                                      )
+                                      [ __head_list_wrapped __list_to_check ]
                                     ]
                                   )
-                                  [ __head_list_wrapped __list_to_check ]
-                                ]
+                                )
+                              __choose_list_wrapped
                               )
                             )
-                          __choose_list_wrapped
                           )
-                        )
+                          [ __inner_expect_on_list __inner_expect_on_list ]
+                        ]
                       )
                     )
                   ]
