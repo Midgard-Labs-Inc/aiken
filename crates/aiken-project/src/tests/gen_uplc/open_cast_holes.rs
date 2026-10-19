@@ -433,11 +433,10 @@ fn expect_check_runs_before_the_closure_it_precedes() {
     }
 }
 
-/// `builtin_curry_reducer` hoists `sliceByteString i 2` for three sites sharing a non-constant
-/// first argument without ever defining the prefix variable: the optimizer panics with
-/// `FreeUnique`.
+/// Three sites sharing a non-constant first argument: `builtin_curry_reducer` must not hoist
+/// `sliceByteString i 2`, whose prefix variable it never defines (the optimizer panicked with
+/// `FreeUnique`).
 #[test]
-#[ignore = "open bug: builtin_curry_reducer panics (FreeUnique) on three slice_bytearray calls sharing a variable start"]
 fn three_slices_with_a_shared_variable_start_compile() {
     let source = r#"
         use aiken/builtin

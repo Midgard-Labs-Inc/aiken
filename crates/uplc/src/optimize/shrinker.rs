@@ -3326,7 +3326,14 @@ impl Program<Name> {
                             };
 
                             while let Some(node) = id_vec.pop() {
-                                if !matches!(node.term, Term::Constant { .. }) {
+                                // Only constant arguments are hoisted, and an entry with a
+                                // prefix refers to the prefix's variable, so every argument of
+                                // the prefix must be a constant too for that variable to exist.
+                                if !matches!(node.term, Term::Constant { .. })
+                                    || id_vec
+                                        .iter()
+                                        .any(|item| !matches!(item.term, Term::Constant { .. }))
+                                {
                                     continue;
                                 }
 

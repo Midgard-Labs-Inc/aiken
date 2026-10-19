@@ -1111,16 +1111,11 @@ fn builtin_curry_reducer_three_arg_builtin_with_constant_prefix() {
 }
 
 #[test]
-#[ignore = "shrinker bug: builtin_curry_reducer panics (FreeUnique) on a 3-arg builtin whose first argument is not a constant; reported, not fixed"]
 fn builtin_curry_reducer_three_arg_builtin_with_a_failing_first_argument() {
-    // CONFIRMED by running, three sites of
-    // `sliceByteString (unIData d) 2 b_i` (audit 2.4):
-    //   reference: Error for d = B #aa, a value for d = I 5
-    //   optimized: `aiken_optimize_and_intern` PANICS at
-    //   `afterwards()`: `Program::<NamedDeBruijn>::try_from(..).unwrap()`
-    //   with `FreeUnique(__slice_bytearray_4_curried)`: the hoisted binding
-    //   refers to a prefix variable that is never defined, and the call
-    //   sites lost the `unIData d` operand.
+    // Three sites of `sliceByteString (unIData d) 2 b_i` (audit 2.4). The
+    // prefix `sliceByteString (unIData d)` isn't a constant, so nothing that
+    // extends it is hoisted: hoisting `prefix 2` used to refer to a prefix
+    // variable that was never defined (`FreeUnique` in `afterwards()`).
     let site = |b: &str| {
         format!(
             "[(builtin sliceByteString) [(builtin unIData) d] (con integer 2) (con bytestring #{b})]"
@@ -1137,10 +1132,9 @@ fn builtin_curry_reducer_three_arg_builtin_with_a_failing_first_argument() {
 }
 
 #[test]
-#[ignore = "shrinker bug: builtin_curry_reducer panics (FreeUnique) on a 3-arg builtin whose first argument is a variable; reported, not fixed"]
 fn builtin_curry_reducer_three_arg_builtin_with_a_variable_first_argument() {
-    // CONFIRMED by running: same panic as above with a plain variable as the
-    // first argument (`sliceByteString s 2 b_i`), a well-typed program.
+    // Same shape with a plain variable as the first argument
+    // (`sliceByteString s 2 b_i`), a well-typed program.
     let site =
         |b: &str| format!("[(builtin sliceByteString) s (con integer 2) (con bytestring #{b})]");
     let src = program(&format!(
