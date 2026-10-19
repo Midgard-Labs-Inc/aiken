@@ -685,3 +685,93 @@ fn captures_that_upcast_their_argument_convert_it_with_the_type_it_becomes() {
         }
     }
 }
+
+/// A record update builds the record's Data form, so it keeps the `@tag` the type, or its
+/// constructor, carries: it used to build `Constr 0` whatever the tag, and the record it returned
+/// failed every check of that type.
+#[test]
+fn record_update_keeps_the_tag_of_the_record() {
+    let bytes = || Data::bytestring(vec![0]);
+
+    for (decl, index) in [
+        ("@tag(5)\npub type R { a: Int, b: ByteArray }", 5),
+        (
+            "pub type R {\n  @tag(6)\n  R { a: Int, b: ByteArray }\n}",
+            6,
+        ),
+    ] {
+        let source = format!(
+            r#"
+            {decl}
+
+            pub fn observe(d: Data) -> Data {{
+              expect r: R = d
+              let updated = R {{ ..r, a: 3 }}
+              as_data(updated)
+            }}
+            "#
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, &[Data::constr(index, vec![int(1), bytes()])]),
+                    Ok(Term::data(Data::constr(index, vec![int(3), bytes()]))),
+                    "{decl}, {tracing:?}, {build}: the update doesn't build the Data of R"
+                );
+            }
+        }
+    }
+}
+
+/// A state machine that updates its tagged datum demands the well-formed next datum, so the output
+/// it produces can be spent in turn.
+#[test]
+fn state_machine_with_a_tagged_datum_demands_the_well_formed_next_datum() {
+    let source = r#"
+        @tag(5)
+        pub type State {
+          count: Int,
+          owner: ByteArray,
+        }
+
+        validator sm {
+          spend(datum: Option<State>, redeemer: Data, _own_ref: Data, _self: Data) {
+            expect Some(s) = datum
+            as_data(State { ..s, count: s.count + 1 }) == redeemer
+          }
+
+          else(_) {
+            fail
+          }
+        }
+    "#;
+
+    let state =
+        |tag: u64, count: i64| Data::constr(tag, vec![int(count), Data::bytestring(vec![0])]);
+
+    // ScriptContext { transaction, redeemer, info: Spending { output, datum: Some(datum) } }
+    let context = |datum: Data, redeemer: Data| {
+        Data::constr(
+            0,
+            vec![
+                int(0),
+                redeemer,
+                Data::constr(1, vec![int(0), Data::constr(0, vec![datum])]),
+            ],
+        )
+    };
+
+    for tracing in TRACINGS {
+        let program = compile_validator(source, tracing);
+
+        assert!(
+            evaluate(&program, &[context(state(5, 1), state(5, 2))]).is_ok(),
+            "{tracing:?}: the well-formed next datum is turned down"
+        );
+        assert!(
+            evaluate(&program, &[context(state(5, 1), state(0, 2))]).is_err(),
+            "{tracing:?}: the malformed next datum is accepted"
+        );
+    }
+}

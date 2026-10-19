@@ -5319,7 +5319,9 @@ impl<'a> CodeGenerator<'a> {
 
                 if !list_decorator {
                     term = Term::constr_data()
-                        .apply(Term::integer(0.into()))
+                        .apply(Term::integer(
+                            constr_index(&data_type, 0, &data_type.constructors[0]).into(),
+                        ))
                         .apply(term);
                 }
 
