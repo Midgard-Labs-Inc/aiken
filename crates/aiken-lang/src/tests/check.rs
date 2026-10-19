@@ -6180,3 +6180,97 @@ fn coerce_binding_has_the_annotated_type() {
         Err((_, Error::CouldNotUnify { .. }))
     ))
 }
+
+#[test]
+fn function_argument_types_match_exactly_when_passed() {
+    let source_code = r#"
+        fn apply(f: fn(Data) -> Bool, data: Data) -> Bool {
+          f(data)
+        }
+
+        fn is_positive(n: Int) -> Bool {
+          n > 0
+        }
+
+        fn main(data: Data) -> Bool {
+          apply(is_positive, data)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn function_argument_types_match_exactly_in_expect() {
+    let source_code = r#"
+        fn is_unit(data: Data) -> Bool {
+          data == Void
+        }
+
+        fn main() -> Bool {
+          expect f: fn(Int) -> Bool = is_unit
+          f(42)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn function_argument_types_match_exactly_in_a_generic_list() {
+    let source_code = r#"
+        fn any(xs: List<a>, predicate: fn(a) -> Bool) -> Bool {
+          when xs is {
+            [] -> False
+            [x, ..rest] -> predicate(x) || any(rest, predicate)
+          }
+        }
+
+        fn is_positive(n: Int) -> Bool {
+          n > 0
+        }
+
+        fn main(xs: List<Data>) -> Bool {
+          any(xs, is_positive)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn pipe_does_not_cast_function_arguments() {
+    let source_code = r#"
+        fn apply(f: fn(Data) -> Bool) -> Bool {
+          f(Void)
+        }
+
+        fn is_positive(n: Int) -> Bool {
+          n > 0
+        }
+
+        fn main() -> Bool {
+          is_positive |> apply
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((
+            _,
+            Error::CouldNotUnify {
+                situation: Some(UnifyErrorSituation::PipeTypeMismatch),
+                ..
+            }
+        ))
+    ))
+}

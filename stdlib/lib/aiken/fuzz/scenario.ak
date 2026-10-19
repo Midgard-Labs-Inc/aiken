@@ -50,6 +50,10 @@ pub type Scenario<st> {
 /// Run a given scenario for a given set of handlers. See also: [`ok`](#ok) and
 /// [`ko`](#ko) for generating scenarii.
 ///
+/// Handlers receive the redeemer as `Data`. A function type must match exactly, so a
+/// validator handler that takes a typed redeemer can't be passed as is: wrap it in an
+/// adapter that `expect`s the redeemer, as in the examples of [`ok`](#ok) and [`ko`](#ko).
+///
 /// Any missing handler from the validator can be plucked using one of the following:
 ///
 /// - [`into_mint_handler`](#into_mint_handler)
@@ -87,8 +91,22 @@ pub fn run(
 ///   scenario.run(
 ///     scenario,
 ///     my_script,
-///     handlers.mint,
-///     handlers.spend,
+///     fn(redeemer: Data, policy_id, self) {
+///       expect redeemer: MyRedeemer = redeemer
+///       handlers.mint(redeemer, policy_id, self)
+///     },
+///     fn(datum: Option<Data>, redeemer: Data, utxo, self) {
+///       expect redeemer: MyRedeemer = redeemer
+///       let datum =
+///         option.map(
+///           datum,
+///           fn(datum) {
+///             expect datum: MyDatum = datum
+///             datum
+///           },
+///         )
+///       handlers.spend(datum, redeemer, utxo, self)
+///     },
 ///     scenario.into_withdraw_handler(handlers.else),
 ///     scenario.into_publish_handler(handlers.else),
 ///     scenario.into_vote_handler(handlers.else),
@@ -109,8 +127,22 @@ pub fn ko(
 ///   scenario.run(
 ///     scenario,
 ///     my_script,
-///     handlers.mint,
-///     handlers.spend,
+///     fn(redeemer: Data, policy_id, self) {
+///       expect redeemer: MyRedeemer = redeemer
+///       handlers.mint(redeemer, policy_id, self)
+///     },
+///     fn(datum: Option<Data>, redeemer: Data, utxo, self) {
+///       expect redeemer: MyRedeemer = redeemer
+///       let datum =
+///         option.map(
+///           datum,
+///           fn(datum) {
+///             expect datum: MyDatum = datum
+///             datum
+///           },
+///         )
+///       handlers.spend(datum, redeemer, utxo, self)
+///     },
 ///     scenario.into_withdraw_handler(handlers.else),
 ///     scenario.into_publish_handler(handlers.else),
 ///     scenario.into_vote_handler(handlers.else),

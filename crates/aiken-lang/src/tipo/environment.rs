@@ -2187,8 +2187,13 @@ impl<'a> Environment<'a> {
                         alias: _,
                     },
                 ) if args1.len() == args2.len() => {
+                    // Function types match exactly. A cast changes a value's runtime form, and
+                    // a function can't convert its arguments or result: a `fn(Int) -> Bool`
+                    // called with Data, or a `fn(Data) -> Bool` called with an Int, would misread
+                    // its input. Calls upcast their arguments instead (see `infer_call_argument`
+                    // and `infer_apply_pipe`).
                     for (a, b) in args1.iter().zip(args2) {
-                        self.unify_with(a.clone(), b.clone(), location, unify_mode)
+                        self.unify(a.clone(), b.clone(), location)
                             .map_err(|_| could_not_unify())?;
                     }
                     self.unify(retrn1.clone(), retrn2.clone(), location)

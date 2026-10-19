@@ -8,7 +8,7 @@ use crate::{
     expr::{TypedExpr, UntypedExpr},
     tipo::environment::UnifyMode,
 };
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 use vec1::Vec1;
 
 #[derive(Debug)]
@@ -254,27 +254,57 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
     }
 
     /// Attempt to infer a |> b as b(a)
+    ///
+    /// Typed like the call `b(a)`: `b` must be exactly a function of one argument, and `a` is
+    /// then upcast to that argument's type (see `infer_call_argument`).
     #[allow(clippy::result_large_err)]
     fn infer_apply_pipe(&mut self, func: UntypedExpr) -> Result<TypedExpr, Error> {
         let func = Box::new(self.expr_typer.infer(func)?);
+        let parameter_type = self.expr_typer.new_unbound_var();
         let return_type = self.expr_typer.new_unbound_var();
 
-        // Ensure that the function accepts one argument of the correct type
+        let pipe_type_mismatch = || Error::CouldNotUnify {
+            location: func.location(),
+            expected: func.tipo(),
+            given: Type::function(vec![self.argument_type.clone()], return_type.clone()),
+            situation: Some(UnifyErrorSituation::PipeTypeMismatch),
+            rigid_type_names: HashMap::new(),
+        };
+
+        // Ensure that the function accepts exactly one argument
+        self.expr_typer
+            .unify(
+                func.tipo(),
+                Type::function(vec![parameter_type.clone()], return_type.clone()),
+                func.location(),
+            )
+            .map_err(|e| match e {
+                Error::CouldNotUnify {
+                    location,
+                    situation,
+                    rigid_type_names,
+                    ..
+                } => Error::CouldNotUnify {
+                    location,
+                    expected: func.tipo(),
+                    given: Type::function(vec![self.argument_type.clone()], return_type.clone()),
+                    situation,
+                    rigid_type_names,
+                },
+                e => e,
+            })?;
+
+        // Ensure that the argument has the correct type, upcasting it if needed
         self.expr_typer
             .unify_with(
-                func.tipo(),
-                Type::function(vec![self.argument_type.clone()], return_type.clone()),
-                func.location(),
+                parameter_type,
+                self.argument_type.clone(),
+                self.argument_location,
                 UnifyMode::AllowUpCast,
             )
-            .map_err(|e| {
-                let is_pipe_mismatch = self.check_if_pipe_type_mismatch(&e, func.location());
-
-                if is_pipe_mismatch {
-                    e.with_unify_error_situation(UnifyErrorSituation::PipeTypeMismatch)
-                } else {
-                    e
-                }
+            .map_err(|e| match e {
+                Error::CouldNotUnify { .. } => pipe_type_mismatch(),
+                e => e,
             })?;
 
         Ok(TypedExpr::Call {
@@ -283,28 +313,5 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
             fun: func,
             args: vec![self.typed_left_hand_value_variable_call_argument()],
         })
-    }
-
-    fn check_if_pipe_type_mismatch(&mut self, error: &Error, location: Span) -> bool {
-        let types = match error {
-            Error::CouldNotUnify {
-                expected, given, ..
-            } => (expected.as_ref(), given.as_ref()),
-            _ => return false,
-        };
-
-        match types {
-            (Type::Fn { args: a, .. }, Type::Fn { args: b, .. }) if a.len() == b.len() => {
-                match (a.first(), b.first()) {
-                    (Some(a), Some(b)) => self
-                        .expr_typer
-                        .environment
-                        .unify_with(a.clone(), b.clone(), location, UnifyMode::AllowUpCast)
-                        .is_err(),
-                    _ => false,
-                }
-            }
-            _ => false,
-        }
     }
 }

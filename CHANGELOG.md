@@ -6,6 +6,10 @@
 
 - **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. It costs at most one builtin conversion from `Data`, and coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions, Miller-loop results, builtin `Value`s and BLS12-381 elements, whose conversions aren't free: `un_value_data` validates the whole map, and uncompressing a G1/G2 element checks it's on the curve. Call those builtins explicitly instead. `coerce` is now a keyword. @rvcas, @colll78
 
+### Changed
+
+- **aiken-lang**: Function types now match exactly, in both argument and return positions: a `fn(Int) -> Bool` is no longer accepted where a `fn(Data) -> Bool` is expected, as an argument or through `expect`, since the function would receive `Data` it can't read as an `Int`. `a |> f` is now typed like `f(a)`: `f` must be a function of one argument, and `a` is upcast to that argument's type. Wrap a function that takes a typed argument in one that takes `Data` and `expect`s it; the `aiken/fuzz/scenario` docs show how for validator handlers.
+
 ## v1.3.0 - 2026-10-16
 
 ### Added
