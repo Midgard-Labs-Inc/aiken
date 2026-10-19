@@ -84,6 +84,6 @@ test out_of_range() {
 
 ### Opaque types
 
-`expect` and `if … is` refuse to convert `Data` into a type that contains an opaque type, since `Data` can't be trusted to respect the opaque type's invariants. A validator's parameters, datum and redeemer are converted from `Data` too, so they can't contain an opaque type either. `coerce` converts into opaque types: the caller is responsible for the value's validity.
+`expect` and `if … is` refuse to convert `Data` into a type that contains an opaque type, since `Data` can't be trusted to respect the opaque type's invariants. A validator's parameters, datum and redeemer are converted from `Data` too, so they can't contain an opaque type either. The datum and redeemer are checked like an `expect`. Parameters aren't checked: they're applied off-chain, before the script is hashed, and are trusted. `coerce` converts into opaque types: the caller is responsible for the value's validity.
 
 A type argument that no constructor field uses (a phantom argument, as `a` in `type Tagged<a> { Tagged(Int) }`) never appears in a value, so an opaque type there doesn't count. An imported opaque type is checked the same way as a local one.

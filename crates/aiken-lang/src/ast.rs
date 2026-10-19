@@ -666,11 +666,24 @@ impl TypedValidator {
 
                         // Cast the datum, if any
                         if let Some(datum) = datum {
+                            // The datum is an `Option<Data>`, whose Data form is itself. Read
+                            // it as `Data` so that `expect` checks the declared type, like the
+                            // redeemer's; an `Option<Data>` datum needs no check.
+                            let datum_is_option_data = datum.tipo.is_option()
+                                && datum
+                                    .tipo
+                                    .arg_types()
+                                    .is_some_and(|args| args.len() == 1 && args[0].is_data());
+
                             // expect datum: tipo = __datum__
                             then.push(TypedExpr::flexible_expect(
                                 TypedExpr::local_var(
                                     var_datum,
-                                    Type::option(Type::data()),
+                                    if datum_is_option_data {
+                                        Type::option(Type::data())
+                                    } else {
+                                        Type::data()
+                                    },
                                     datum.location,
                                 ),
                                 TypedPattern::var(datum.get_variable_name().unwrap_or("_")),

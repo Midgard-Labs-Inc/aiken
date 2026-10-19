@@ -155,10 +155,9 @@ fn validator_parameters_are_checked_like_a_redeemer() {
 }
 
 /// The spend handler's datum is an `Option<Data>` in the script context. The handler wrapper
-/// (`into_script_context_handler`) binds it to the declared `Option<T>` with an `expect` whose
-/// value isn't `Data`, so codegen treats it as a pattern match and never checks the inner `T`.
+/// (`into_script_context_handler`) must check it against the declared `Option<T>`, inner `T`
+/// included, like the redeemer.
 #[test]
-#[ignore = "open hole: a spend handler's Option<T> datum is never checked (full_check needs a Data value, the datum is Option<Data>)"]
 fn spend_datum_is_checked_like_a_redeemer() {
     let source = r#"
         pub type MyDatum {
