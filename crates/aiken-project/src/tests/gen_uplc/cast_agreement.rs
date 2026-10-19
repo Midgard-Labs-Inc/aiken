@@ -12,8 +12,9 @@ use uplc::{
     ast::NamedDeBruijn, machine::cost_model::ExBudget, optimize::interner::CodeGenInterner,
 };
 
-const TRACINGS: [Tracing; 2] = [
+const TRACINGS: [Tracing; 3] = [
     Tracing::All(TraceLevel::Silent),
+    Tracing::All(TraceLevel::Compact),
     Tracing::All(TraceLevel::Verbose),
 ];
 
@@ -289,10 +290,16 @@ fn casts_accept_the_same_inputs_with_or_without_traces_and_optimizations() {
 
     for (name, source) in SOURCES {
         let programs = TRACINGS.map(|tracing| compile(source, tracing));
-        let [[silent, silent_unoptimized], [verbose, verbose_unoptimized]] = &programs;
+        let [
+            [silent, silent_unoptimized],
+            [compact, compact_unoptimized],
+            [verbose, verbose_unoptimized],
+        ] = &programs;
 
         let variants = [
             ("silent", silent),
+            ("compact", compact),
+            ("compact unoptimized", compact_unoptimized),
             ("verbose", verbose),
             ("verbose unoptimized", verbose_unoptimized),
         ];

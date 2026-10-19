@@ -6877,10 +6877,14 @@ fn equality_through_type_variables_accepts_types_with_a_data_form() {
 /// in a type argument, a tuple or a pair too, in an upcast and in a `coerce`.
 #[test]
 fn upcast_refuses_a_nested_empty_list_of_unknown_type() {
-    for value in ["Some([])", "([], 1)", "Pair(1, [])", "[[]]"] {
+    for value in ["Some([])", "Box([])", "([], 1)", "Pair(1, [])", "[[]]"] {
         for source_code in [
-            format!("fn main() -> Data {{\n  let d: Data = {value}\n  d\n}}"),
-            format!("fn main() -> Int {{\n  coerce n: Int = {value}\n  n\n}}"),
+            format!(
+                "type Box<a> {{ Box(a) }}\nfn main() -> Data {{\n  let d: Data = {value}\n  d\n}}"
+            ),
+            format!(
+                "type Box<a> {{ Box(a) }}\nfn main() -> Int {{\n  coerce n: Int = {value}\n  n\n}}"
+            ),
         ] {
             let result = check(parse(&source_code));
 

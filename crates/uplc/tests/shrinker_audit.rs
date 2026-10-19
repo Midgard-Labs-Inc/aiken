@@ -301,23 +301,27 @@ fn builtin_force_reducer_wraps_fully_forced_builtin_used_applied() {
 
 #[test]
 fn builtin_force_reducer_keeps_over_forcing_an_error() {
-    // Three forces of `fstPair` fail; so must the wrapped form.
-    let src = program("[(lam f (force f)) (force (force (builtin fstPair)))]");
-
-    assert_sound_on(&src, &[on(&[], false)]);
+    // Extra forces must fail, whether they are adjacent or supplied through a variable.
+    for source in [
+        "[(lam f (force f)) (force (force (builtin fstPair)))]",
+        "(force (force (force (builtin fstPair))))",
+        "(force (force (builtin headList)))",
+        "(force (builtin addInteger))",
+    ] {
+        assert_sound_on(&program(source), &[on(&[], false)]);
+    }
 }
 
 #[test]
-#[ignore = "shrinker bug: builtin_force_reducer replaces a half-forced builtin by the fully forced wrapper, so a later legal `force` fails; reported, not fixed"]
-fn builtin_force_reducer_does_not_force_a_half_forced_builtin_further() {
-    // CONFIRMED by running:
-    //   reference: Value(Force(Force(Builtin(FstPair)))), a legal partially
-    //              forced builtin value
-    //   optimized: Error, program `(force (force (force (builtin fstPair))))`
-    // The Aiken code generator never emits this shape.
-    let src = program("[(lam f (force f)) (force (builtin fstPair))]");
-
-    assert_sound_on(&src, &[on(&[], true)]);
+fn builtin_force_reducer_preserves_deferred_builtin_forces() {
+    // A builtin can receive its required forces in separate evaluation steps.
+    for source in [
+        "[(lam f (force f)) (force (builtin fstPair))]",
+        "[(lam f (force (force f))) (builtin fstPair)]",
+        "[(lam f (force f)) (builtin headList)]",
+    ] {
+        assert_sound_on(&program(source), &[on(&[], true)]);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +504,7 @@ fn carry_args_to_branch_inlines_an_argument_used_directly_in_the_branch() {
 
 #[test]
 fn carry_args_to_branch_keeps_the_argument_when_the_other_branch_is_not_an_error() {
-    // Control for the two ignored tests below: without the `error` branch the
+    // Control for the two tests below: without the `error` branch the
     // special case does not apply and `x`, under a nested delay, stays bound.
     let src = program(
         "(lam c (lam d [(lam x (force [(force (builtin ifThenElse)) c \
@@ -556,45 +560,58 @@ fn carry_args_to_branch_keeps_a_failing_argument_out_of_an_ordinary_branch() {
 }
 
 #[test]
-#[ignore = "shrinker bug: carry_args_to_branch counts a delay nested in the then-branch as executed when the else branch is `error`, so a failing argument is inlined under it; reported, not fixed"]
 fn carry_args_to_branch_error_branch_nested_delay_keeps_the_failing_argument() {
-    // CONFIRMED by running (c = True, d = B #aa):
-    //   reference: Error (the argument `unIData d` is evaluated first)
-    //   optimized: Value(Delay(unIData d)), i.e. the program
-    //   `(force (case (constr 0 c (delay (delay [unIData d])) (delay (error))) ite))`
-    let src = program(
-        "(lam c (lam d [(lam x (force [(force (builtin ifThenElse)) c \
-            (delay (delay x)) (delay (error))])) \
-            [(builtin unIData) d]]))",
-    );
+    // The outer force selects a branch. It does not force the nested delay,
+    // so moving `unIData d` into that delay would remove a required check.
+    for (branches, selected, other) in [
+        (
+            "(delay (delay x)) (delay (error))",
+            "(con bool True)",
+            "(con bool False)",
+        ),
+        (
+            "(delay (error)) (delay (delay x))",
+            "(con bool False)",
+            "(con bool True)",
+        ),
+    ] {
+        let src = program(&format!(
+            "(lam c (lam d [(lam x (force [(force (builtin ifThenElse)) c {branches}])) \
+                [(builtin unIData) d]]))"
+        ));
 
-    assert_sound_on(
-        &src,
-        &[
-            on(&["(con bool True)", GOOD], true),
-            on(&["(con bool True)", BAD], false),
-        ],
-    );
+        assert_sound_on(
+            &src,
+            &[
+                on(&[selected, GOOD], true),
+                on(&[selected, BAD], false),
+                on(&[other, GOOD], false),
+                on(&[other, BAD], false),
+            ],
+        );
+    }
 }
 
 #[test]
-#[ignore = "shrinker bug: the carry_args_to_branch error-branch special case does not require a `force` above the ifThenElse, so a failing argument is inlined into a thunk; reported, not fixed"]
 fn carry_args_to_branch_error_branch_without_force_keeps_the_failing_argument() {
-    // CONFIRMED by running (c = True, d = B #aa):
-    //   reference: Error
-    //   optimized: Value(Delay(unIData d))
-    let src = program(
-        "(lam c (lam d [(lam x [(force (builtin ifThenElse)) c (delay x) (delay (error))]) \
-            [(builtin unIData) d]]))",
-    );
+    // Either branch returns a delayed value. The argument check must run
+    // before that value is returned, even when its body is an error.
+    for branches in ["(delay x) (delay (error))", "(delay (error)) (delay x)"] {
+        let src = program(&format!(
+            "(lam c (lam d [(lam x [(force (builtin ifThenElse)) c {branches}]) \
+                [(builtin unIData) d]]))"
+        ));
 
-    assert_sound_on(
-        &src,
-        &[
-            on(&["(con bool True)", GOOD], true),
-            on(&["(con bool True)", BAD], false),
-        ],
-    );
+        assert_sound_on(
+            &src,
+            &[
+                on(&["(con bool True)", GOOD], true),
+                on(&["(con bool True)", BAD], false),
+                on(&["(con bool False)", GOOD], true),
+                on(&["(con bool False)", BAD], false),
+            ],
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,16 +1292,27 @@ fn typed_list_convert_arg_keeps_an_already_typed_constant_list_of_integers() {
 }
 
 #[test]
-#[ignore = "shrinker bug: typed_list_convert_arg always applies the points converter, so a well-typed `list bls12_381_G1_element` constant fails at runtime (unBData on a point); not reachable from Aiken, not fixed"]
-fn typed_list_convert_arg_keeps_already_typed_constant_lists_of_points() {
-    // CONFIRMED by running: the `list integer` scalars are left alone, but
-    // the `list G1` points go through `__g1_elements_converter` and fail.
-    let src = program(&format!(
-        "(lam d [(builtin bls12_381_G1_multiScalarMul) (con (list integer) [2]) \
-            (con (list bls12_381_G1_element) [0x{G1_BYTES}])])"
-    ));
+#[ignore = "raw UPLC bug: Aiken list conversion rejects a typed runtime G1 list; the raw optimizer boundary remains to be fixed"]
+fn typed_list_convert_arg_keeps_a_serialized_runtime_list_of_points() {
+    // Native point constants cannot be serialized. Build the typed list at
+    // runtime so this checks a valid script accepted by `uplc shrink`.
+    // The parameter also prevents folding of the whole computation.
+    let src = program(
+        "(lam d [(builtin bls12_381_G1_compress) \
+            [(builtin bls12_381_G1_multiScalarMul) (con (list integer) [2]) \
+                [(force (builtin mkCons)) \
+                    [(builtin bls12_381_G1_uncompress) [(builtin unBData) d]] \
+                    (con (list bls12_381_G1_element) [])]]])",
+    );
 
-    assert_sound_on(&src, &[on(&[GOOD], true)]);
+    let encoded: Program<uplc::ast::DeBruijn> = parse(&src).try_into().unwrap();
+    let bytes = encoded.to_flat().expect("runtime point list must encode");
+    let decoded =
+        Program::<uplc::ast::DeBruijn>::from_flat(&bytes).expect("runtime point list must decode");
+    let decoded: Program<Name> = decoded.try_into().unwrap();
+    let input = format!("(con data (B #{G1_BYTES}))");
+
+    assert_sound_on(&decoded.to_pretty(), &[on(&[&input], true)]);
 }
 
 // ---------------------------------------------------------------------------
