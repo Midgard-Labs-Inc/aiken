@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- **aiken-lang**: `x == d`, where `d` is `Data` and `x` is an `Int`, `ByteArray`, `Bool`, `G1Element` or `G2Element`, failed at runtime: the comparison used `x`'s own equality builtin on a `Data` operand. Equality now compares both operands as `Data` whenever either one is `Data`. `d == x` already worked.
 - **aiken-lang**: `if data is s: String` crashed on bytes that aren't valid UTF-8 instead of taking the `else` branch. It's now a compile error (see above).
 
 ## v1.3.0 - 2026-10-16

@@ -20,6 +20,7 @@ enum TestType {
     Validator(TypedValidator),
 }
 
+mod cast_agreement;
 mod coerce;
 
 fn assert_uplc(source_code: &str, expected: Term<Name>, should_fail: bool, verbose_mode: bool) {

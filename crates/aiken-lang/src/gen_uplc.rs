@@ -4554,7 +4554,13 @@ impl<'a> CodeGenerator<'a> {
                 let mut left = arg_stack.pop().unwrap();
                 let mut right = arg_stack.pop().unwrap();
 
-                let uplc_type = left_tipo.get_uplc_type();
+                // An operand typed Data means the other one was upcast to Data (equality unifies
+                // with an upcast in either order), so both must be compared as Data.
+                let uplc_type = if left_tipo.is_data() || right_tipo.is_data() {
+                    Some(UplcType::Data)
+                } else {
+                    left_tipo.get_uplc_type()
+                };
 
                 // When operators are symmetric, favor putting constant first to allow currying
                 // optimisation to kick-in more easily.
@@ -4644,7 +4650,8 @@ impl<'a> CodeGenerator<'a> {
                             Some(_) | None => builtin.apply(left).apply(right),
                         };
 
-                        if !left_tipo.is_bool() && matches!(op, BinOp::NotEq) {
+                        if !matches!(uplc_type, Some(UplcType::Bool)) && matches!(op, BinOp::NotEq)
+                        {
                             binop_eq.if_then_else(Term::bool(false), Term::bool(true))
                         } else {
                             binop_eq
