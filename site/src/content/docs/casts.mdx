@@ -7,7 +7,7 @@ sidebar:
 
 Every type that can appear in a datum, a redeemer or a field of a data type has a `Data` form. A cast converts a value between its own runtime form and `Data`. Aiken has four casts:
 
-- an **upcast** to `Data`, which happens implicitly when a value is passed where `Data` is expected (a `let` with a `Data` annotation, a function argument, a return annotation, `==`, a pipe);
+- an **upcast** to `Data`, which happens implicitly when a value is passed where `Data` is expected (a `let` with a `Data` annotation, a function argument, `==`, a pipe). A return annotation doesn't upcast: a function annotated `-> Data` must return a `Data` value, so use `as_data` there;
 - `expect x: T = data`, which converts `Data` to `T` and fails if `data` doesn't have the shape of a `T`;
 - `if data is x: T { … } else { … }`, which converts `Data` to `T` and takes the `else` branch if `data` doesn't have the shape of a `T`;
 - `coerce x: T = value`, which converts `value` to `T` through `Data` without checking anything.
