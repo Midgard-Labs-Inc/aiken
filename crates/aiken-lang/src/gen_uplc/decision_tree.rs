@@ -89,6 +89,16 @@ impl Ord for Path {
     }
 }
 
+/// Whether a row item sits in the column at `column`. Column paths have their `OpaqueConstr`
+/// steps removed (they're only type information), while row items keep them to know their type,
+/// so those steps are skipped on the row's side too.
+fn in_column(row_path: &[Path], column: &[Path]) -> bool {
+    row_path
+        .iter()
+        .filter(|step| !matches!(step, Path::OpaqueConstr(_)))
+        .eq(column.iter())
+}
+
 #[derive(Clone, Debug)]
 pub struct Assigned {
     pub path: Vec<Path>,
@@ -699,7 +709,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                         if !row
                             .columns
                             .get(index)
-                            .map(|col| col.path == *path)
+                            .map(|col| in_column(&col.path, path))
                             .unwrap_or(false)
                         {
                             row.columns.insert(index, self.wild_card_pattern.clone());
@@ -1071,7 +1081,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                     if !row
                         .columns
                         .get(index)
-                        .map(|col| col.path == *path)
+                        .map(|col| in_column(&col.path, path))
                         .unwrap_or(false)
                     {
                         row.columns.insert(index, self.wild_card_pattern.clone());
@@ -1100,7 +1110,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                                 if !row
                                     .columns
                                     .get(index)
-                                    .map(|col| col.path == *path)
+                                    .map(|col| in_column(&col.path, path))
                                     .unwrap_or(false)
                                 {
                                     row.columns.insert(index, self.wild_card_pattern.clone());

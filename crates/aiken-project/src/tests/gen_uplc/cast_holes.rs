@@ -510,3 +510,42 @@ fn decorated_opaque_type_keeps_its_constructor_in_a_nested_pattern() {
         }
     }
 }
+
+/// An erased opaque type is its field at runtime, and a literal pattern inside its constructor
+/// tests that field: the decision tree used to crash on it ("all rows have the same number of
+/// columns"), at the top of a `when` and nested in another pattern.
+#[test]
+fn erased_opaque_type_matches_a_literal_inside_its_constructor() {
+    let declaration = "pub opaque type U { U(Int) }";
+
+    for (body, cases) in [
+        (
+            "coerce u: U = d\n  when u is {\n    U(5) -> 1\n    U(6) -> 2\n    _ -> 0\n  }",
+            vec![(int(5), 1), (int(6), 2), (int(7), 0)],
+        ),
+        (
+            "coerce o: Option<U> = d\n  when o is {\n    Some(U(5)) -> 1\n    Some(_) -> 2\n    None -> 0\n  }",
+            vec![
+                (Data::constr(0, vec![int(5)]), 1),
+                (Data::constr(0, vec![int(4)]), 2),
+                (Data::constr(1, vec![]), 0),
+            ],
+        ),
+    ] {
+        let source = format!(
+            "{declaration}\n\npub fn observe(d: Data) -> Data {{\n  let n = {{\n  {body}\n  }}\n  as_data(n)\n}}\n"
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                for (input, expected) in &cases {
+                    pretty_assertions::assert_eq!(
+                        evaluate(&program, std::slice::from_ref(input)),
+                        Ok(Term::data(int(*expected))),
+                        "{body}\n{tracing:?}, {build}: {input:?}"
+                    );
+                }
+            }
+        }
+    }
+}
