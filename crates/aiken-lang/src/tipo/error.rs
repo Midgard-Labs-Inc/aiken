@@ -322,6 +322,26 @@ You can use '{discard}' and numbers to distinguish between similar names.
         location: Span,
     },
 
+    #[error("I can't check whether Data is a {} without failing.\n", tipo.to_pretty(0).if_supports_color(Stdout, |s| s.red()))]
+    #[diagnostic(code("illegal::soft_cast"))]
+    #[diagnostic(help(
+        r#"{if_is} takes its {otherwise} branch when the Data has a different shape, so it must be able to test the Data without failing. No builtin can check that bytes are valid UTF-8 (a {String}), a valid compressed BLS12-381 point (a {G1Element} or {G2Element}), or that Data is a well-formed {Value}, without failing on bad input. Use {expect}, which fails on bad input, or test for a type with the same Data representation (e.g. {ByteArray} or {Data}) and convert it explicitly."#,
+        if_is = "if ... is".if_supports_color(Stdout, |s| s.yellow()),
+        otherwise = "else".if_supports_color(Stdout, |s| s.yellow()),
+        expect = "expect".if_supports_color(Stdout, |s| s.yellow()),
+        String = "String".if_supports_color(Stdout, |s| s.cyan()),
+        G1Element = "G1Element".if_supports_color(Stdout, |s| s.cyan()),
+        G2Element = "G2Element".if_supports_color(Stdout, |s| s.cyan()),
+        Value = "Value".if_supports_color(Stdout, |s| s.cyan()),
+        ByteArray = "ByteArray".if_supports_color(Stdout, |s| s.cyan()),
+        Data = "Data".if_supports_color(Stdout, |s| s.cyan()),
+    ))]
+    IllegalSoftCast {
+        #[label("can't be tested without failing")]
+        location: Span,
+        tipo: Rc<Type>,
+    },
+
     #[error("I caught an opaque type in an exported interface.\n")]
     #[diagnostic(code("illegal::opaque_type_in_abi"))]
     #[diagnostic(url("https://aiken-lang.org/language-tour/modules#opaque-types"))]
@@ -370,12 +390,12 @@ Use an intermediate public representation instead, then re-construct the opaque 
     #[error("I can't coerce a value of type {}.\n", tipo.to_pretty(0).if_supports_color(Stdout, |s| s.red()))]
     #[diagnostic(code("illegal::coerce"))]
     #[diagnostic(help(
-        r#"A {coerce} converts its value through Plutus Data, so both the value and the type it's coerced to must have a Data representation that's free to convert to and from. Functions, {Value}s and BLS12-381 elements don't."#,
+        r#"A {coerce} converts its value through Plutus Data, so both the value and the type it's coerced to must have a Data representation. Functions and {MillerLoopResult}s don't."#,
         coerce = "coerce".if_supports_color(Stdout, |s| s.yellow()),
-        Value = "Value".if_supports_color(Stdout, |s| s.cyan()),
+        MillerLoopResult = "MillerLoopResult".if_supports_color(Stdout, |s| s.cyan()),
     ))]
     IllegalCoerce {
-        #[label("no free Data representation")]
+        #[label("no Data representation")]
         location: Span,
         tipo: Rc<Type>,
     },
@@ -1279,6 +1299,7 @@ impl ExtraData for Error {
             | Error::GenericLeftAtBoundary { .. }
             | Error::UnexpectedMultiPatternAssignment { .. }
             | Error::ExpectOnOpaqueType { .. }
+            | Error::IllegalSoftCast { .. }
             | Error::IllegalOpaqueType { .. }
             | Error::ValidatorMustReturnBool { .. }
             | Error::UnknownPurpose { .. }

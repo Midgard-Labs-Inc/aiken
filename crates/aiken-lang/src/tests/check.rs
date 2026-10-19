@@ -270,17 +270,16 @@ fn primitive_value_inequality_is_allowed() {
 }
 
 #[test]
-fn implicit_right_upcasting_to_value_is_not_allowed() {
+fn implicit_right_upcasting_of_value_is_allowed() {
     let source_code = r#"
         fn compare(left: Data, right: Value) -> Bool {
           left == right
         }
     "#;
 
-    assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { .. }))
-    ));
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
 }
 
 #[test]
@@ -326,17 +325,16 @@ fn named_value_field_errors_use_the_identifier_span() {
 }
 
 #[test]
-fn implicit_left_upcasting_to_value_is_not_allowed_symmetric() {
+fn implicit_left_upcasting_of_value_is_allowed_symmetric() {
     let source_code = r#"
         fn compare(left: Value, right: Data) -> Bool {
           left == right
         }
     "#;
 
-    assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { .. }))
-    ));
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
 }
 
 #[test]
@@ -4544,7 +4542,7 @@ fn soft_casts_from_data_to_value_is_illegal() {
 
     assert!(matches!(
         dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_value()
     ));
 }
 
@@ -4562,7 +4560,7 @@ fn soft_casts_from_data_to_list_value_is_illegal() {
 
     assert!(matches!(
         dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_list()
     ));
 }
 
@@ -4580,7 +4578,7 @@ fn soft_casts_from_data_to_option_value_is_illegal() {
 
     assert!(matches!(
         dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_option()
     ));
 }
 
@@ -4602,7 +4600,7 @@ fn soft_casts_from_data_to_wrapped_value_is_illegal() {
 
     assert!(matches!(
         dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { .. }))
     ));
 }
 
@@ -4651,7 +4649,7 @@ fn soft_casts_from_data_to_imported_generic_value_wrapper_is_illegal() {
 
     assert!(matches!(
         check_with_deps(parse(source_code), vec![parse_as(dependency, "wrapped")]),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { .. }))
     ));
 }
 
@@ -4682,7 +4680,84 @@ fn soft_cast_from_data_to_imported_opaque_value_wrapper_is_illegal() {
 }
 
 #[test]
-fn strict_cast_from_data_to_value_is_illegal() {
+fn soft_cast_from_data_to_g1_element_is_illegal() {
+    let source_code = r#"
+        fn decode(data: Data) -> Bool {
+          if data is point: G1Element {
+            True
+          } else {
+            False
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_g2_element_in_a_tuple_is_illegal() {
+    let source_code = r#"
+        fn decode(data: Data) -> Bool {
+          if data is pair: (Int, G2Element) {
+            True
+          } else {
+            False
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_string_is_illegal() {
+    let source_code = r#"
+        fn decode(data: Data) -> String {
+          if data is s: String {
+            s
+          } else {
+            @"not a string"
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_string()
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_record_with_a_string_is_illegal() {
+    let source_code = r#"
+        type Named {
+          name: String,
+          age: Int,
+        }
+
+        fn decode(data: Data) -> Bool {
+          if data is Named { age, .. }: Named {
+            age > 0
+          } else {
+            False
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ));
+}
+
+#[test]
+fn strict_cast_from_data_to_value_is_legal() {
     let source_code = r#"
         fn decode(data: Data) -> Value {
           expect value: Value = data
@@ -4690,10 +4765,45 @@ fn strict_cast_from_data_to_value_is_illegal() {
         }
     "#;
 
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::CouldNotUnify { .. })),
-    ))
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn strict_cast_from_data_to_bls12_381_elements_is_legal() {
+    let source_code = r#"
+        type Keys {
+          g1: G1Element,
+          g2: List<G2Element>,
+        }
+
+        fn decode(data: Data) -> Keys {
+          expect g1: G1Element = data
+          expect keys: Keys = data
+          Keys { ..keys, g1: g1 }
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn upcast_of_bls12_381_elements_and_value_to_data_is_legal() {
+    let source_code = r#"
+        fn encode(g1: G1Element, g2: G2Element, value: Value) -> List<Data> {
+          let g1: Data = g1
+          let g2: Data = g2
+          let value: Data = value
+          [g1, g2, value]
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
 }
 
 #[test]
@@ -6143,10 +6253,9 @@ fn coerce_into_value() {
         }
     "#;
 
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::IllegalCoerce { .. }))
-    ))
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
 }
 
 #[test]
@@ -6346,4 +6455,46 @@ fn expect_links_an_unknown_type_argument_to_data() {
         check(parse(source_code)),
         Err((_, Error::CouldNotUnify { .. }))
     ))
+}
+
+#[test]
+fn local_and_imported_opaque_wrappers_cast_the_same_way() {
+    let dependency = r#"
+        pub opaque type Wrapped {
+          Wrapped(Value)
+        }
+
+        pub opaque type Point {
+          Point(G1Element)
+        }
+    "#;
+
+    let casts = [
+        "fn cast(data: Data) -> Wrapped { coerce w: Wrapped = data\n w }",
+        "fn cast(w: Wrapped) -> Data { coerce d: Data = w\n d }",
+        "fn cast(w: Wrapped) -> Data { let d: Data = w\n d }",
+        "fn cast(data: Data) -> Wrapped { expect w: Wrapped = data\n w }",
+        "fn cast(data: Data) -> Point { coerce p: Point = data\n p }",
+        "fn cast(p: Point) -> Data { let d: Data = p\n d }",
+    ];
+
+    for cast in casts {
+        let local = format!(
+            "opaque type Wrapped {{ Wrapped(Value) }}\nopaque type Point {{ Point(G1Element) }}\n{cast}"
+        );
+        let imported = format!("use wrapped.{{Wrapped, Point}}\n{cast}");
+
+        let local = check(parse(&local)).map(|_| ()).map_err(|(_, e)| e);
+        let imported = check_with_deps(parse(&imported), vec![parse_as(dependency, "wrapped")])
+            .map(|_| ())
+            .map_err(|(_, e)| e);
+
+        match (&local, &imported) {
+            (Ok(()), Ok(())) => assert!(!cast.contains("expect"), "{cast}"),
+            (Err(Error::ExpectOnOpaqueType { .. }), Err(Error::ExpectOnOpaqueType { .. })) => {
+                assert!(cast.contains("expect"), "{cast}")
+            }
+            _ => panic!("{cast}\nlocal: {local:#?}\nimported: {imported:#?}"),
+        }
+    }
 }

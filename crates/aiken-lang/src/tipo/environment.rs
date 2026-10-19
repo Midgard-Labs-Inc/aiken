@@ -765,12 +765,7 @@ impl<'a> Environment<'a> {
             &mut HashMap::new(),
             &mut HashSet::new(),
             false,
-            &[
-                well_known::VALUE,
-                well_known::G1_ELEMENT,
-                well_known::G2_ELEMENT,
-                well_known::MILLER_LOOP_RESULT,
-            ],
+            &[well_known::MILLER_LOOP_RESULT],
         );
 
         if is_data_like {
@@ -778,6 +773,26 @@ impl<'a> Environment<'a> {
         }
 
         is_data_like
+    }
+
+    /// Whether `if ... is` can test Data against this type without failing. No builtin can check
+    /// that bytes are valid UTF-8 or a valid compressed BLS12-381 point, or that Data is a
+    /// well-formed Value, without failing on bad input; so a soft cast to a type that contains
+    /// any of these would crash instead of taking the `else` branch.
+    pub(crate) fn is_soft_castable(&mut self, tipo: &Type) -> bool {
+        self.assert_known_data_type(
+            tipo,
+            &mut HashMap::new(),
+            &mut HashSet::new(),
+            false,
+            &[
+                well_known::STRING,
+                well_known::VALUE,
+                well_known::G1_ELEMENT,
+                well_known::G2_ELEMENT,
+                well_known::MILLER_LOOP_RESULT,
+            ],
+        )
     }
 
     pub fn ensure_serialisable(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
@@ -2044,7 +2059,7 @@ impl<'a> Environment<'a> {
                     }
                 }
             }
-            UnifyMode::AllowDownCast => {
+            UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast => {
                 if self.contains_opaque(&lhs) {
                     return Err(Error::ExpectOnOpaqueType { location });
                 }
@@ -2058,6 +2073,15 @@ impl<'a> Environment<'a> {
                         return Ok(());
                     }
                 } else if rhs.is_data() && self.is_data_like(&lhs) {
+                    if matches!(unify_mode, UnifyMode::AllowSoftCast)
+                        && !self.is_soft_castable(&lhs)
+                    {
+                        return Err(Error::IllegalSoftCast {
+                            location,
+                            tipo: lhs,
+                        });
+                    }
+
                     return Ok(());
                 }
             }
@@ -2356,15 +2380,18 @@ pub enum UnifyMode {
     Strict,
     // Direct assignations or function calls, allow implicit upcast to `Data`
     AllowUpCast,
-    // Via `if/is` or `expect`, only allow non-opaque Data-like types on the left-hand side
+    // Via `expect`, only allow non-opaque Data-like types on the left-hand side
     AllowDownCast,
+    // Via `if/is`: like `AllowDownCast`, and the conversion from Data must be testable without
+    // failing (see `Environment::is_soft_castable`)
+    AllowSoftCast,
 }
 
 impl<T> From<AssignmentKind<T>> for UnifyMode {
     fn from(kind: AssignmentKind<T>) -> Self {
         match kind {
             AssignmentKind::Let { .. } => Self::AllowUpCast,
-            AssignmentKind::Is => Self::AllowDownCast,
+            AssignmentKind::Is => Self::AllowSoftCast,
             AssignmentKind::Expect { .. } => Self::AllowDownCast,
             // A coerce never unifies its value with its annotation; see `infer_coerce`.
             AssignmentKind::Coerce => Self::Strict,

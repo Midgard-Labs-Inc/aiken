@@ -4,12 +4,18 @@
 
 ### Added
 
-- **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. It costs at most one builtin conversion from `Data`, and coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions, Miller-loop results, builtin `Value`s and BLS12-381 elements, whose conversions aren't free: `un_value_data` validates the whole map, and uncompressing a G1/G2 element checks it's on the curve. Call those builtins explicitly instead. `coerce` is now a keyword. @rvcas, @colll78
+- **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. Coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions and Miller-loop results, which have no `Data` form. Coercing to a builtin `Value` or a BLS12-381 element goes through `un_value_data` or the element's uncompression, which still fail on malformed input. `coerce` is now a keyword. @rvcas, @colll78
 
 ### Changed
 
 - **aiken-lang**: Function types now match exactly, in both argument and return positions: a `fn(Int) -> Bool` is no longer accepted where a `fn(Data) -> Bool` is expected, as an argument or through `expect`, since the function would receive `Data` it can't read as an `Int`. `a |> f` is now typed like `f(a)`: `f` must be a function of one argument, and `a` is upcast to that argument's type. Wrap a function that takes a typed argument in one that takes `Data` and `expect`s it; the `aiken/fuzz/scenario` docs show how for validator handlers.
 - **aiken-lang**: When an upcast, `expect`, `if ... is` or `coerce` meets a type variable whose type isn't known yet, the variable is now linked to `Data`, instead of being left free to become a function or a type that converts differently.
+- **aiken-lang**: Builtin `Value`s and BLS12-381 `G1Element`s and `G2Element`s, and types that contain them, can now be upcast to `Data` (including in `==` against `Data`) and converted from `Data` with `expect` and `coerce`.
+- **aiken-lang**: `if ... is` refuses a type that contains a `String`, `Value`, `G1Element` or `G2Element`, with a new `illegal::soft_cast` error: no builtin can tell valid UTF-8, a valid compressed point or a well-formed value from malformed bytes without failing, so the cast would crash instead of taking the `else` branch. Use `expect`, or test for `ByteArray` and convert explicitly.
+
+### Fixed
+
+- **aiken-lang**: `if data is s: String` crashed on bytes that aren't valid UTF-8 instead of taking the `else` branch. It's now a compile error (see above).
 
 ## v1.3.0 - 2026-10-16
 
