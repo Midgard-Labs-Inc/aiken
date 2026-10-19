@@ -1292,24 +1292,20 @@ fn split_body_lambda_hoists_an_unapplied_lambda_over_a_value_argument() {
 }
 
 #[test]
-#[ignore = "shrinker bug: split_body_lambda moves an applied failing argument under an unapplied lambda, so the failure is deferred or lost; reported, not fixed"]
 fn split_body_lambda_does_not_defer_a_failing_argument_under_a_returned_closure() {
-    // CONFIRMED by running (d = B #aa):
-    //   reference: Error (the argument `unIData d` is evaluated first)
-    //   optimized: Value(Lambda z), the program
-    //   `(lam d (lam z [(lam v v) [(builtin unIData) d]]))`
+    // `unIData d` runs before the closure is returned. Hoisting `z` above it
+    // would give `(lam d (lam z [(lam v v) [(builtin unIData) d]]))`, which
+    // returns a closure for d = B #aa.
     let src = program("(lam d [(lam v (lam z v)) [(builtin unIData) d]])");
 
     assert_sound_on(&src, &[on(&[GOOD], true), on(&[BAD], false)]);
 }
 
 #[test]
-#[ignore = "shrinker bug: split_body_lambda moves an applied failing argument under an unapplied lambda, so a discarded closure no longer rejects; reported, not fixed"]
 fn split_body_lambda_does_not_drop_a_failing_argument_of_a_discarded_closure() {
-    // CONFIRMED by running (d = B #aa):
-    //   reference: Error
-    //   optimized: Value(Constant(Unit)), the program
-    //   `(lam d [(lam k (con unit ())) (lam z [(lam v v) [(builtin unIData) d]])])`
+    // Hoisting `z` would give
+    // `(lam d [(lam k (con unit ())) (lam z [(lam v v) [(builtin unIData) d]])])`,
+    // which never runs `unIData d`.
     let src = program("(lam d [(lam k (con unit ())) [(lam v (lam z v)) [(builtin unIData) d]]])");
 
     assert_sound_on(&src, &[on(&[GOOD], true), on(&[BAD], false)]);

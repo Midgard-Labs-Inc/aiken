@@ -405,7 +405,6 @@ fn redeemer_check_runs_before_a_branch_that_reads_it() {
 /// `split_body_lambda` moves an applied argument under an unapplied lambda: the check of an
 /// `expect` that precedes a returned closure only runs if the closure is called.
 #[test]
-#[ignore = "open hole: split_body_lambda moves an expect check under the closure that follows it"]
 fn expect_check_runs_before_the_closure_it_precedes() {
     let source = r#"
         fn ignore(_f: fn(Int) -> Int) -> Int {

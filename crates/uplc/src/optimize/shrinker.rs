@@ -1912,6 +1912,10 @@ impl Term<Name> {
     // This splits [lam fun_name [lam fun_name2 rest ..] ..] into
     // [[lam fun_name lam fun_name2 rest ..]..] thus
     // allowing for some crazy gains from cast_constr_apply_reducer
+    //
+    // A lambda without an argument is hoisted above every argument bound
+    // before it, which then only runs if the closure is called. So the walk
+    // stops at such a lambda once an argument that can fail has been bound.
     fn split_body_lambda(&mut self) {
         let mut arg_stack = vec![];
         let mut current_term = &mut std::mem::replace(self, Term::Error.force());
@@ -1920,8 +1924,16 @@ impl Term<Name> {
         let mut function_groups = vec![vec![]];
         let mut function_dependencies = vec![vec![]];
 
+        let mut bound_arg_can_fail = false;
+
         loop {
             match current_term {
+                Term::Lambda { .. }
+                    if bound_arg_can_fail && !matches!(arg_stack.last(), Some(Args::Apply(..))) =>
+                {
+                    current_term.split_body_lambda();
+                    break;
+                }
                 Term::Apply { function, argument } => {
                     current_term = Rc::make_mut(function);
 
@@ -1939,6 +1951,8 @@ impl Term<Name> {
 
                     if let Some(Args::Apply(_, arg)) = arg_stack.pop() {
                         let names = arg.get_var_names();
+
+                        bound_arg_can_fail |= !arg.cant_fail();
 
                         let func = (parameter_name.clone(), arg);
 
@@ -2050,6 +2064,35 @@ impl Term<Name> {
             });
 
         *self = term;
+    }
+
+    /// Whether evaluating the term can't fail: a value, or a builtin given
+    /// its forces, then fewer arguments than it takes, each of which can't
+    /// fail.
+    fn cant_fail(&self) -> bool {
+        // `forces` and `args` count the forces and arguments seen so far, from
+        // the outside in; a force can't come after an argument.
+        fn builtin_head(term: &Term<Name>, forces: u32, args: usize) -> bool {
+            match term {
+                Term::Builtin(b) if args == 0 => forces <= b.force_count(),
+                Term::Builtin(b) => forces == b.force_count() && args < b.arity(),
+                Term::Force(inner) => builtin_head(inner, forces + 1, args),
+                Term::Apply { function, argument } if forces == 0 => {
+                    argument.cant_fail() && builtin_head(function, forces, args + 1)
+                }
+                _ => false,
+            }
+        }
+
+        match self.pierce_no_inlines_ref() {
+            Term::Var(_)
+            | Term::Constant(_)
+            | Term::Delay(_)
+            | Term::Lambda { .. }
+            | Term::Builtin(_) => true,
+            term @ (Term::Force(_) | Term::Apply { .. }) => builtin_head(term, 0, 0),
+            _ => false,
+        }
     }
 
     fn get_var_names(&self) -> Vec<Rc<Name>> {
