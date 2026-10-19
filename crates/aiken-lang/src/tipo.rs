@@ -815,9 +815,10 @@ pub fn check_replaceable_opaque_type(
     {
         return constructor.arguments.len() == 1
             && data_type.opaque
-            // BIG WARNING: Adding any kind decorator
-            // will make the opaque type not replaceable
-            && data_type.decorators.is_empty();
+            // BIG WARNING: Adding any kind decorator, on the type or on its
+            // constructor, will make the opaque type not replaceable
+            && data_type.decorators.is_empty()
+            && constructor.decorators.is_empty();
     }
 
     false

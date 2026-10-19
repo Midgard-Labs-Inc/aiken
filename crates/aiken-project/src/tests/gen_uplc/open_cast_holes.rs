@@ -508,11 +508,10 @@ fn expect_of_a_malformed_constant_list_into_write_bits_fails_at_runtime() {
     }
 }
 
-/// casts.mdx erases an "opaque type with one constructor, one field and no decorator".
-/// `check_replaceable_opaque_type` only looks at type-level decorators, so an opaque type whose
-/// constructor carries `@tag` is erased too, and its documented Data form is refused.
+/// casts.mdx erases an "opaque type with one constructor, one field and no decorator". A `@tag`
+/// on the constructor is a decorator too: the type keeps its constructor, and its documented
+/// Data form is accepted.
 #[test]
-#[ignore = "open doc/code mismatch: an opaque type with a constructor-level @tag is erased although casts.mdx says decorated opaque types aren't"]
 fn opaque_type_with_a_tagged_constructor_keeps_its_constructor() {
     let source = r#"
         pub opaque type W {
@@ -540,6 +539,42 @@ fn opaque_type_with_a_tagged_constructor_keeps_its_constructor() {
                 Ok(Term::data(int(5))),
                 "{tracing:?}, {build}: the documented Data form of W(5) is refused"
             );
+        }
+    }
+}
+
+/// A decorated opaque type keeps its constructor in nested patterns too: the decision tree reads
+/// the field of `Some(V { inner })` instead of taking the whole constructor for it.
+#[test]
+fn decorated_opaque_type_keeps_its_constructor_in_a_nested_pattern() {
+    for (decl, index) in [
+        ("@tag(5)\npub opaque type V { inner: Int }", 5),
+        ("pub opaque type V {\n  @tag(3)\n  V { inner: Int }\n}", 3),
+    ] {
+        let source = format!(
+            r#"
+            {decl}
+
+            pub fn observe(d: Data) -> Data {{
+              coerce o: Option<V> = d
+              when o is {{
+                Some(V {{ inner }}) -> as_data(inner)
+                None -> as_data(0)
+              }}
+            }}
+            "#
+        );
+
+        let some_v = Data::constr(0, vec![Data::constr(index, vec![int(5)])]);
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&some_v)),
+                    Ok(Term::data(int(5))),
+                    "{decl}, {tracing:?}, {build}: Some(V {{ inner: 5 }}) doesn't give 5"
+                );
+            }
         }
     }
 }

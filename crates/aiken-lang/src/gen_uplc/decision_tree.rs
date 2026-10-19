@@ -9,7 +9,7 @@ use crate::{
     ast::{DataTypeKey, DecoratorKind, Pattern, TypedClause, TypedDataType, TypedPattern},
     expr::{Type, TypeVar, TypedExpr, lookup_data_type_by_tipo},
     gen_uplc::builder::get_constr_index_variant,
-    tipo::PatternConstructor,
+    tipo::{PatternConstructor, check_replaceable_opaque_type},
 };
 
 use super::{interner::AirInterner, tree::AirTree};
@@ -1221,9 +1221,8 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                     .iter()
                     .any(|dec| matches!(&dec.kind, DecoratorKind::List));
 
-                let is_transparent = data_type.opaque
-                    && data_type.constructors[0].arguments.len() == 1
-                    && !list_decorator;
+                // An erased opaque type: the value is its only field.
+                let is_transparent = check_replaceable_opaque_type(&current_tipo, self.data_types);
 
                 if data_type.constructors.len() == 1 || data_type.is_never() {
                     arguments
