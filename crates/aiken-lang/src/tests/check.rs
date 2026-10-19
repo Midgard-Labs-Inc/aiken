@@ -4338,6 +4338,54 @@ fn validator_forbid_imported_record_containing_opaque_type_in_redeemer_abi() {
 }
 
 #[test]
+fn validator_forbid_opaque_type_in_parameter_abi() {
+    let source_code = r#"
+        pub opaque type Config {
+          threshold: Int,
+        }
+
+        validator foo(config: Config) {
+          mint(_redeemer: Data, _policy_id: ByteArray, _ctx: Data) {
+            config == config
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check_validator(parse(source_code)),
+        Err((_, Error::IllegalOpaqueType { position, .. })) if position == "parameter"
+    ))
+}
+
+#[test]
+fn validator_forbid_record_containing_opaque_type_in_parameter_abi() {
+    let dependency = r#"
+        pub opaque type Thing {
+          inner: Int,
+        }
+
+        pub type Config {
+          things: List<Thing>,
+        }
+    "#;
+
+    let source_code = r#"
+        use thing.{Config}
+
+        validator foo(config: Config) {
+          else(_ctx) {
+            config == config
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check_validator_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]),
+        Err((_, Error::IllegalOpaqueType { position, .. })) if position == "parameter"
+    ))
+}
+
+#[test]
 fn tuple_access_on_call() {
     let source_code = r#"
         use aiken/builtin

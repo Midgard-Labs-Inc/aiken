@@ -357,7 +357,7 @@ fn infer_definition(
                         });
                     }
 
-                    let typed_params = typed_fallback
+                    let typed_params: Vec<TypedArg> = typed_fallback
                         .arguments
                         .drain(0..params_length)
                         .map(|mut arg| {
@@ -368,6 +368,12 @@ fn infer_definition(
                             arg
                         })
                         .collect();
+
+                    // Parameters are applied to the compiled validator as Data, like a datum or
+                    // redeemer, so they can't be opaque either.
+                    for param in typed_params.iter() {
+                        check_validator_abi_arg(environment, param, "parameter")?;
+                    }
 
                     if typed_fallback.arguments.len() != 1 {
                         return Err(Error::IncorrectValidatorArity {
