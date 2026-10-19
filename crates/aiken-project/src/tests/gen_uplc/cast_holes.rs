@@ -775,3 +775,107 @@ fn state_machine_with_a_tagged_datum_demands_the_well_formed_next_datum() {
         );
     }
 }
+
+/// An erased opaque type is its field at runtime, so `if x is W(m): W` on a value that isn't Data
+/// is a pattern match that can't fail: it used to compare the field with the constructor index
+/// (so it only matched a field equal to 0, and crashed the compiler or the program on the other
+/// field types).
+#[test]
+fn if_is_on_an_erased_opaque_value_always_matches() {
+    let bytes = Data::bytestring(vec![0]);
+
+    for (field, input) in [
+        ("Int", int(6)),
+        ("Int", int(0)),
+        ("ByteArray", bytes.clone()),
+        ("String", Data::bytestring(vec![97])),
+        ("Bool", Data::constr(1, vec![])),
+        ("Option<Int>", Data::constr(0, vec![int(3)])),
+        ("List<Int>", Data::list(vec![int(1), int(2)])),
+        (
+            "Pair<Int, ByteArray>",
+            Data::list(vec![int(1), bytes.clone()]),
+        ),
+        ("(Int, ByteArray)", Data::list(vec![int(1), bytes.clone()])),
+        ("Data", int(5)),
+    ] {
+        let source = format!(
+            r#"
+            pub opaque type W {{
+              W({field})
+            }}
+
+            pub fn observe(d: Data) -> Data {{
+              expect v: {field} = d
+              let w = W(v)
+              if w is W(m): W {{
+                as_data(m)
+              }} else {{
+                as_data(#"ee")
+              }}
+            }}
+            "#
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&input)),
+                    Ok(Term::data(input.clone())),
+                    "W({field}), {tracing:?}, {build}: if … is doesn't match {input:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The same on the validator side: `Amount(n)` matches whatever `n` is.
+#[test]
+fn if_is_on_an_erased_opaque_value_in_a_validator() {
+    let source = r#"
+        pub opaque type Amount {
+          Amount(Int)
+        }
+
+        fn amount_of(n: Int) -> Amount {
+          Amount(n)
+        }
+
+        validator f3 {
+          mint(redeemer: Int, _policy_id: Data, _self: Data) {
+            if amount_of(redeemer) is Amount(n): Amount {
+              n == redeemer
+            } else {
+              False
+            }
+          }
+
+          else(_) {
+            fail
+          }
+        }
+    "#;
+
+    // ScriptContext { transaction, redeemer, info: Minting(policy_id) }
+    let context = |redeemer: Data| {
+        Data::constr(
+            0,
+            vec![
+                int(0),
+                redeemer,
+                Data::constr(0, vec![Data::bytestring(vec![0])]),
+            ],
+        )
+    };
+
+    for tracing in TRACINGS {
+        let program = compile_validator(source, tracing);
+
+        for redeemer in [0, 5] {
+            assert!(
+                evaluate(&program, &[context(int(redeemer))]).is_ok(),
+                "{tracing:?}: redeemer {redeemer} is turned down"
+            );
+        }
+    }
+}

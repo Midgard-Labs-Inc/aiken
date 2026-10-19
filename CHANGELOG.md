@@ -37,6 +37,7 @@
 - **aiken-lang**: An empty list whose element type is unknown wasn't refused as ambiguous by an upcast or `coerce` when it went through a generic function, two `if` branches or two `when` arms (`list.reverse([])`, `if c { [] } else { [] }`): it became `List []`, and a `coerce` into `Pairs` then failed at runtime. It's now an `ambiguous::empty_list` error.
 - **aiken-lang**: A record update (`R { ..r, a: 1 }`) built constructor index 0 whatever the `@tag` on the record type or its constructor. With the datum check above, a validator that writes an updated tagged datum demanded a malformed next datum, and the outputs it produced couldn't be spent. A record update now keeps the tag. **Validators that update a tagged record compile to different code once rebuilt, and so get a new hash.**
 - **aiken-lang**: `aiken check` crashed with "index out of bounds" when it reported a failing test whose values contain a constructor with a `@tag`, on the constructor or on its type: it took the tag for the constructor's position. It now finds the constructor by its tag.
+- **aiken-lang**: `if x is C(..): T`, where `T` is an opaque type erased to its only field and `x` isn't `Data`, tested the field against the constructor index: it matched only when the field was 0, failed at runtime for a `ByteArray` or `String` field, and crashed the compiler for a `List`, `Pair`, tuple or `Data` field. An erased opaque type has no constructor at runtime, so the index is no longer tested.
 
 ## v1.3.0 - 2026-10-16
 

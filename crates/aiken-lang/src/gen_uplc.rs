@@ -1946,7 +1946,10 @@ impl<'a> CodeGenerator<'a> {
                     .iter()
                     .any(|dec| matches!(dec.kind, DecoratorKind::List));
 
-                let then = if check_replaceable_opaque_type(tipo, &self.data_types) {
+                // An erased opaque type is its field at runtime: there's no constructor to test.
+                let erased = check_replaceable_opaque_type(tipo, &self.data_types);
+
+                let then = if erased {
                     AirTree::let_assignment(&fields[0].1, local_value.clone(), then)
                 } else {
                     AirTree::fields_expose(
@@ -1960,6 +1963,7 @@ impl<'a> CodeGenerator<'a> {
                 };
 
                 let then = if props.kind.is_expect()
+                    && !erased
                     && !list_decorator
                     && (data_type.constructors.len() > 1
                         || props.full_check
