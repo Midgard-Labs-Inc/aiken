@@ -977,3 +977,125 @@ fn erased_opaque_type_over_data_in_a_validator() {
         );
     }
 }
+
+/// An erased opaque record is its only field at runtime, so its update is the new value of that
+/// field: the compiler used to panic ("Attempted record update on an unknown type!").
+#[test]
+fn record_update_of_an_erased_opaque_record_is_the_new_field() {
+    for (what, source, input, expected) in [
+        (
+            "an Int field",
+            r#"
+            pub opaque type W {
+              inner: Int,
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let w = W { inner: 1 }
+              let updated = W { ..w, inner: n + 2 }
+              as_data(updated.inner)
+            }
+            "#,
+            int(1),
+            int(3),
+        ),
+        (
+            "a Data field, given an Int",
+            r#"
+            pub opaque type P {
+              inner: Data,
+            }
+
+            pub fn unwrap(p: P) -> Data {
+              p.inner
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let p = P { inner: as_data(#"00") }
+              unwrap(P { ..p, inner: n })
+            }
+            "#,
+            int(5),
+            int(5),
+        ),
+        (
+            "a generic field",
+            r#"
+            pub opaque type Box<a> {
+              inner: a,
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let b = Box { inner: 1 }
+              let updated = Box { ..b, inner: n }
+              as_data(updated.inner)
+            }
+            "#,
+            int(5),
+            int(5),
+        ),
+        (
+            "no field",
+            r#"
+            pub opaque type W {
+              inner: Int,
+            }
+
+            pub fn observe(d: Data) -> Data {
+              expect n: Int = d
+              let w = W { inner: n }
+              let same = W { ..w }
+              as_data(same.inner)
+            }
+            "#,
+            int(4),
+            int(4),
+        ),
+    ] {
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&input)),
+                    Ok(Term::data(expected.clone())),
+                    "{what}, {tracing:?}, {build}"
+                );
+            }
+        }
+    }
+
+    // The spread is evaluated even though only the new field is kept: an `expect` in the
+    // expression that returns the record still fails on malformed input.
+    let source = r#"
+        pub opaque type W {
+          inner: Int,
+        }
+
+        fn checked(d: Data) -> W {
+          expect n: Int = d
+          W { inner: n }
+        }
+
+        pub fn observe(d: Data) -> Data {
+          let updated = W { ..checked(d), inner: 1 }
+          as_data(updated.inner)
+        }
+    "#;
+
+    for tracing in TRACINGS {
+        for (build, program) in compile_observe(source, tracing) {
+            pretty_assertions::assert_eq!(
+                evaluate(&program, &[int(5)]),
+                Ok(Term::data(int(1))),
+                "a spread that checks its input, {tracing:?}, {build}: I 5"
+            );
+            pretty_assertions::assert_eq!(
+                evaluate(&program, &[Data::bytestring(vec![0xaa])]),
+                Err(()),
+                "a spread that checks its input, {tracing:?}, {build}: B #aa is accepted"
+            );
+        }
+    }
+}

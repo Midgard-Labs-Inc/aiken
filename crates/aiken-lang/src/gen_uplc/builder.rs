@@ -214,6 +214,38 @@ pub fn erase_opaque_type_operations(
         && check_replaceable_opaque_type(tipo, data_types)
     {
         *air_tree = args.pop().unwrap();
+    } else if let AirTree::RecordUpdate {
+        indices,
+        tipo,
+        record,
+        args,
+        ..
+    } = air_tree
+        && check_replaceable_opaque_type(tipo, data_types)
+    {
+        // The update of an erased record is the new value of its only field, upcast like the
+        // argument of its constructor if that field is Data; without a new value, the record.
+        // The record is evaluated either way, as in any record update: it can be an expression
+        // that fails (an `expect` in a function that returns the record, say), so it's bound to
+        // a name nothing reads.
+        const SPREAD: &str = "__erased_update_spread";
+
+        let field_type = convert_opaque_type(tipo, data_types, false);
+        let record = std::mem::replace(record.as_mut(), AirTree::Void);
+
+        *air_tree = match args.pop() {
+            Some(arg) => {
+                let new_value = if field_type.is_data() {
+                    let (_, arg_type) = indices.pop().unwrap();
+                    AirTree::cast_to_data(arg, arg_type)
+                } else {
+                    arg
+                };
+
+                AirTree::let_assignment(SPREAD, record, new_value)
+            }
+            None => record,
+        };
     }
 
     let mut held_types = air_tree.mut_held_types();
