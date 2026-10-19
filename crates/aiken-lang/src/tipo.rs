@@ -365,7 +365,9 @@ impl Type {
             Self::App {
                 module, name, args, ..
             } => {
-                ("List" == name && module.is_empty() && args.iter().any(|arg| arg.is_unbound()))
+                ("List" == name
+                    && module.is_empty()
+                    && args.iter().any(|arg| arg.is_unbound_through_links()))
                     || args.iter().any(|arg| arg.contains_unbounded_list())
             }
             Self::Var { tipo, .. } => tipo.borrow().contains_unbounded_list(),
@@ -374,6 +376,20 @@ impl Type {
                 fst.contains_unbounded_list() || snd.contains_unbounded_list()
             }
             Self::Fn { .. } => false,
+        }
+    }
+
+    /// Whether the type is an unbound variable, or a variable linked to one: two fresh variables
+    /// that were unified (through a generic function, or the branches of an `if` or a `when`)
+    /// are linked, not unbound.
+    fn is_unbound_through_links(&self) -> bool {
+        match self {
+            Self::Var { tipo, .. } => match tipo.borrow().deref() {
+                TypeVar::Unbound { .. } => true,
+                TypeVar::Link { tipo } => tipo.is_unbound_through_links(),
+                TypeVar::Generic { .. } => false,
+            },
+            _ => false,
         }
     }
 

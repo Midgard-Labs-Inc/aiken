@@ -7316,3 +7316,110 @@ fn forbid_a_fuzzer_of_miller_loop_results() {
         Err((_, Error::IllegalTypeInData { .. }))
     ));
 }
+
+#[test]
+fn forbid_upcasting_an_empty_list_whose_type_is_a_link_to_an_unknown_type() {
+    let through_a_generic_function = r#"
+        fn reverse(xs: List<a>) -> List<a> {
+          xs
+        }
+
+        fn main() -> Data {
+          let d: Data = reverse([])
+          d
+        }
+    "#;
+
+    let nested = r#"
+        fn reverse(xs: List<a>) -> List<a> {
+          xs
+        }
+
+        fn main() -> Data {
+          let d: Data = Some(reverse([]))
+          d
+        }
+    "#;
+
+    let through_if_branches = r#"
+        fn main(c: Bool) -> Data {
+          let d: Data =
+            if c {
+              []
+            } else {
+              []
+            }
+          d
+        }
+    "#;
+
+    let through_when_arms = r#"
+        fn main() -> Data {
+          let d: Data =
+            when 1 is {
+              0 -> []
+              _ -> []
+            }
+          d
+        }
+    "#;
+
+    for source_code in [
+        through_a_generic_function,
+        nested,
+        through_if_branches,
+        through_when_arms,
+    ] {
+        assert!(
+            matches!(
+                check(parse(source_code)),
+                Err((_, Error::AmbiguousEmptyList { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_coercing_an_empty_list_whose_type_is_a_link_to_an_unknown_type() {
+    let source_code = r#"
+        fn main(c: Bool) -> Bool {
+          coerce p: Pairs<Int, Int> =
+            if c {
+              []
+            } else {
+              []
+            }
+          p == []
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::AmbiguousEmptyList { .. }))
+    ));
+}
+
+#[test]
+fn allow_upcasting_a_list_through_a_generic_function_once_its_element_type_is_known() {
+    let source_code = r#"
+        fn reverse(xs: List<a>) -> List<a> {
+          xs
+        }
+
+        fn main() -> Data {
+          let known: List<Int> = reverse([])
+          let d: Data = known
+          d
+        }
+
+        fn other() -> Data {
+          let d: Data = reverse([1])
+          d
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
