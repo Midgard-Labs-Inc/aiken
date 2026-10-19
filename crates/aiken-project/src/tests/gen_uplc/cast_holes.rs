@@ -7,8 +7,9 @@ use uplc::{
     ast::NamedDeBruijn, machine::cost_model::ExBudget, optimize::interner::CodeGenInterner,
 };
 
-const TRACINGS: [Tracing; 2] = [
+const TRACINGS: [Tracing; 3] = [
     Tracing::All(TraceLevel::Silent),
+    Tracing::All(TraceLevel::Compact),
     Tracing::All(TraceLevel::Verbose),
 ];
 
@@ -111,24 +112,6 @@ fn int(n: i64) -> Data {
 /// included, like the redeemer.
 #[test]
 fn spend_datum_is_checked_like_a_redeemer() {
-    let source = r#"
-        pub type MyDatum {
-          owner: ByteArray,
-          amount: Int,
-        }
-
-        validator datum_shape {
-          spend(datum: Option<MyDatum>, _redeemer: Data, _own_ref: Data, _self: Data) {
-            expect Some(d) = datum
-            d.owner == #"00"
-          }
-
-          else(_) {
-            fail
-          }
-        }
-    "#;
-
     // ScriptContext { transaction, redeemer, info: Spending { output, datum: Some(datum) } }
     let context = |datum: Data| {
         Data::constr(
@@ -143,32 +126,60 @@ fn spend_datum_is_checked_like_a_redeemer() {
 
     let owner = Data::bytestring(vec![0]);
 
-    for tracing in TRACINGS {
-        for (build, program) in compile_validator_builds(source, tracing) {
-            assert!(
-                evaluate(
-                    &program,
-                    &[context(Data::constr(0, vec![owner.clone(), int(1)]))]
-                )
-                .is_ok(),
-                "{tracing:?}, {build}: a well-formed datum must be accepted"
-            );
+    // The type check must also run when the handler does not use the datum.
+    for (name, body) in [
+        (
+            "datum",
+            "expect Some(d) = datum\n            d.owner == #\"00\"",
+        ),
+        ("_datum", "True"),
+    ] {
+        let source = format!(
+            r#"
+            pub type MyDatum {{
+              owner: ByteArray,
+              amount: Int,
+            }}
 
-            for (what, datum) in [
-                ("a missing field", Data::constr(0, vec![owner.clone()])),
-                (
-                    "an amount that is bytes",
-                    Data::constr(0, vec![owner.clone(), Data::bytestring(vec![0xff])]),
-                ),
-                (
-                    "an extra field",
-                    Data::constr(0, vec![owner.clone(), int(1), int(2)]),
-                ),
-            ] {
+            validator datum_shape {{
+              spend({name}: Option<MyDatum>, _redeemer: Data, _own_ref: Data, _self: Data) {{
+                {body}
+              }}
+
+              else(_) {{
+                fail
+              }}
+            }}
+            "#
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_validator_builds(&source, tracing) {
                 assert!(
-                    evaluate(&program, &[context(datum)]).is_err(),
-                    "{tracing:?}, {build}: the validator accepts a datum with {what}"
+                    evaluate(
+                        &program,
+                        &[context(Data::constr(0, vec![owner.clone(), int(1)]))]
+                    )
+                    .is_ok(),
+                    "{name}, {tracing:?}, {build}: a well-formed datum must be accepted"
                 );
+
+                for (what, datum) in [
+                    ("a missing field", Data::constr(0, vec![owner.clone()])),
+                    (
+                        "an amount that is bytes",
+                        Data::constr(0, vec![owner.clone(), Data::bytestring(vec![0xff])]),
+                    ),
+                    (
+                        "an extra field",
+                        Data::constr(0, vec![owner.clone(), int(1), int(2)]),
+                    ),
+                ] {
+                    assert!(
+                        evaluate(&program, &[context(datum)]).is_err(),
+                        "{name}, {tracing:?}, {build}: the validator accepts a datum with {what}"
+                    );
+                }
             }
         }
     }

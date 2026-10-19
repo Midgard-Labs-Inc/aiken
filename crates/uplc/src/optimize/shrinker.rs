@@ -1663,9 +1663,9 @@ impl Term<Name> {
 
     // This handles the very common case of (if condition then body else error)
     // or (if condition then error else body)
-    // In this case it is fine to treat the body as if it is not delayed
-    // since the other branch is error. Any other branch is scanned with its
-    // `delay`, so an occurrence in it doesn't count as executed.
+    // Pass the outer force and arguments to the branch without an explicit error.
+    // Keep its delay so the occurrence scan consumes the force at the correct
+    // level. A nested delay, or a branch without a force, must stay deferred.
     fn carry_args_to_branch(
         &self,
         then_arg: &Rc<Term<Name>>,
@@ -1734,7 +1734,7 @@ impl Term<Name> {
 
                     let remaining = cap - lookup.occurrences;
 
-                    lookup.combine(var_occurrence_stack(then_body, arg_stack, remaining))
+                    lookup.combine(var_occurrence_stack(then_arg, arg_stack, remaining))
                 } else if matches!(then_body.as_ref(), Term::Error) {
                     // Pop 3 args of arg_stack due to branch execution
                     arg_stack.pop();
@@ -1749,7 +1749,7 @@ impl Term<Name> {
 
                     let remaining = cap - lookup.occurrences;
 
-                    lookup.combine(var_occurrence_stack(else_body, arg_stack, remaining))
+                    lookup.combine(var_occurrence_stack(else_arg, arg_stack, remaining))
                 } else {
                     let lookup = var_occurrence_stack(builtin, arg_stack, cap);
                     let lookup = combine_capped(lookup, condition);
@@ -1830,21 +1830,35 @@ impl Term<Name> {
     fn builtin_force_reducer(
         &mut self,
         _id: Option<usize>,
-        mut arg_stack: Vec<Args>,
+        arg_stack: Vec<Args>,
         _scope: &Scope,
         context: &mut Context,
     ) {
         if let Term::Builtin(func) = self {
-            arg_stack.reverse();
-            let has_forces = func.force_count() > 0;
-            while let Some(Args::Force(id)) = arg_stack.pop() {
+            let force_count = usize::try_from(func.force_count()).unwrap();
+
+            // A partial builtin can receive its remaining forces through a variable.
+            // Wrap it only when all required forces are present here.
+            if force_count == 0
+                || arg_stack.len() < force_count
+                || arg_stack
+                    .iter()
+                    .take(force_count)
+                    .any(|arg| !matches!(arg, Args::Force(_)))
+            {
+                return;
+            }
+
+            // Keep extra forces so that an invalid use still fails.
+            for arg in arg_stack.into_iter().take(force_count) {
+                let Args::Force(id) = arg else {
+                    unreachable!("required forces were checked above")
+                };
                 context.inlined_apply_ids.push(id);
             }
 
-            if has_forces {
-                context.builtins_map.insert(*func, ());
-                *self = Term::var(func.wrapped_name());
-            }
+            context.builtins_map.insert(*func, ());
+            *self = Term::var(func.wrapped_name());
         }
     }
 
