@@ -2209,28 +2209,45 @@ impl Term<Name> {
                 let id = id.unwrap();
 
                 if context.integer_list_args.contains(&id) {
-                    match Rc::make_mut(argument) {
-                        Term::Constant(constant) => {
+                    let arg = Rc::make_mut(argument);
+
+                    match arg {
+                        // Already a list of integers: nothing to convert.
+                        Term::Constant(constant)
+                            if matches!(
+                                constant.as_ref(),
+                                Constant::ProtoList(Type::Integer, _)
+                            ) => {}
+                        // A list of data whose items are all integers: convert it now.
+                        Term::Constant(constant)
+                            if matches!(
+                                constant.as_ref(),
+                                Constant::ProtoList(Type::Data, items)
+                                    if items.iter().all(|item| matches!(
+                                        item.as_ref(),
+                                        Constant::Data(Data::BigInt(_))
+                                    ))
+                            ) =>
+                        {
                             let Constant::ProtoList(tipo, items) = Rc::make_mut(constant) else {
                                 unreachable!();
                             };
 
-                            assert!(*tipo == Type::Data);
                             *tipo = Type::Integer;
 
                             *items = items
                                 .iter()
                                 .map(|item| {
                                     let Constant::Data(Data::BigInt(i)) = item.as_ref() else {
-                                        unreachable!(
-                                            "unexpected item in integer list arg: {item:#?}"
-                                        );
+                                        unreachable!();
                                     };
 
                                     Rc::new(Constant::Integer(from_pallas_bigint(i)))
                                 })
                                 .collect();
                         }
+                        // Anything else, including a constant list with an item that isn't an
+                        // integer, is converted at runtime, which fails on such an item.
                         arg => {
                             context.integer_list_convert = true;
 

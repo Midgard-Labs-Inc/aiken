@@ -475,10 +475,9 @@ fn three_slices_with_a_shared_variable_start_compile() {
 }
 
 /// The checked `unListData` of an `expect` on constant Data is folded and inlined into
-/// `writeBits`, and `typed_list_convert_arg` panics on the malformed constant list instead of
-/// leaving the `expect` to fail at runtime.
+/// `writeBits`: `typed_list_convert_arg` must leave the malformed constant list to the runtime
+/// conversion, so the program fails as the `expect` would, instead of panicking.
 #[test]
-#[ignore = "open bug: typed_list_convert_arg panics on a constant list reaching write_bits through an expect"]
 fn expect_of_a_malformed_constant_list_into_write_bits_fails_at_runtime() {
     let source = r#"
         use aiken/builtin

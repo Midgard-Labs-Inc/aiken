@@ -1192,12 +1192,10 @@ fn typed_list_convert_arg_retypes_a_constant_list() {
 }
 
 #[test]
-#[ignore = "shrinker bug: typed_list_convert_arg panics (unreachable!) on a non-integer element of a constant list argument instead of leaving a call that fails; reported, not fixed"]
 fn typed_list_convert_arg_constant_list_with_a_malformed_element_fails() {
-    // CONFIRMED by running: the optimizer panics with
-    // "internal error: entered unreachable code: unexpected item in integer
-    // list arg: Data(BoundedBytes([170]))" (shrinker.rs `typed_list_convert_arg`).
-    // The Aiken code generator cannot produce this constant.
+    // A constant list item that isn't an integer can't be retyped: the list
+    // goes through the runtime converter, whose `unIData` fails. (The
+    // optimizer used to panic with "unexpected item in integer list arg".)
     let src = program(
         "(lam d [(builtin writeBits) (con bytestring #00) (con (list data) [B #aa]) (con bool True)])",
     );
@@ -1230,13 +1228,10 @@ fn typed_list_convert_arg_checks_each_point_of_a_g1_list() {
 }
 
 #[test]
-#[ignore = "shrinker bug: typed_list_convert_arg asserts a constant list argument is `list data` and panics on a well-typed `list integer`; reported, not fixed"]
 fn typed_list_convert_arg_keeps_an_already_typed_constant_list_of_integers() {
-    // CONFIRMED by running: a well-typed program that already passes
-    // `list integer` evaluates to a bytestring, but `aiken_optimize_and_intern`
-    // panics with "assertion failed: *tipo == Type::Data"
-    // (`typed_list_convert_arg`). The Aiken code generator never emits typed
-    // constant lists for these arguments.
+    // A well-typed program that already passes `list integer`: there is
+    // nothing to convert. The Aiken code generator never emits typed constant
+    // lists for these arguments.
     let src = program(
         "(lam d [(builtin writeBits) (con bytestring #00) (con (list integer) [1]) (con bool True)])",
     );
@@ -1245,10 +1240,10 @@ fn typed_list_convert_arg_keeps_an_already_typed_constant_list_of_integers() {
 }
 
 #[test]
-#[ignore = "shrinker bug: typed_list_convert_arg asserts a constant list argument is `list data` and panics on a well-typed `list integer` / `list G1`; reported, not fixed"]
+#[ignore = "shrinker bug: typed_list_convert_arg always applies the points converter, so a well-typed `list bls12_381_G1_element` constant fails at runtime (unBData on a point); not reachable from Aiken, not fixed"]
 fn typed_list_convert_arg_keeps_already_typed_constant_lists_of_points() {
-    // CONFIRMED by running: same panic as above for
-    // `bls12_381_G1_multiScalarMul` with `list integer` and `list G1` constants.
+    // CONFIRMED by running: the `list integer` scalars are left alone, but
+    // the `list G1` points go through `__g1_elements_converter` and fail.
     let src = program(&format!(
         "(lam d [(builtin bls12_381_G1_multiScalarMul) (con (list integer) [2]) \
             (con (list bls12_381_G1_element) [0x{G1_BYTES}])])"
