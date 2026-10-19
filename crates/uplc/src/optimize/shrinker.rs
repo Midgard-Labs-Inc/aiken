@@ -534,25 +534,24 @@ impl DefaultFunction {
                 })
             }
 
-            DefaultFunction::Bls12_381_G1_Equal | DefaultFunction::Bls12_381_G1_Add => {
-                arg_stack.iter().all(|arg| {
-                    if let Term::Constant(c) = arg {
-                        matches!(c.as_ref(), Constant::Bls12_381G1Element(_))
-                    } else {
-                        false
-                    }
-                })
-            }
+            // Only comparisons: a call that produces a point (`add`, `scalarMul`, `hashToGroup`)
+            // must not fold. A point constant can't be flat encoded, and `bls381_compressor`, the
+            // pass that turns point constants into `uncompress` calls, runs before `multi_pass`.
+            DefaultFunction::Bls12_381_G1_Equal => arg_stack.iter().all(|arg| {
+                if let Term::Constant(c) = arg {
+                    matches!(c.as_ref(), Constant::Bls12_381G1Element(_))
+                } else {
+                    false
+                }
+            }),
 
-            DefaultFunction::Bls12_381_G2_Equal | DefaultFunction::Bls12_381_G2_Add => {
-                arg_stack.iter().all(|arg| {
-                    if let Term::Constant(c) = arg {
-                        matches!(c.as_ref(), Constant::Bls12_381G2Element(_))
-                    } else {
-                        false
-                    }
-                })
-            }
+            DefaultFunction::Bls12_381_G2_Equal => arg_stack.iter().all(|arg| {
+                if let Term::Constant(c) = arg {
+                    matches!(c.as_ref(), Constant::Bls12_381G2Element(_))
+                } else {
+                    false
+                }
+            }),
 
             DefaultFunction::ConstrData => {
                 if let (Term::Constant(c), Term::Constant(c2)) = (&arg_stack[0], &arg_stack[1]) {
@@ -563,24 +562,6 @@ impl DefaultFunction {
                     } else {
                         false
                     }
-                } else {
-                    false
-                }
-            }
-
-            DefaultFunction::Bls12_381_G1_HashToGroup
-            | DefaultFunction::Bls12_381_G2_HashToGroup => arg_stack.iter().all(|arg| {
-                if let Term::Constant(c) = arg {
-                    matches!(c.as_ref(), Constant::ByteString(..))
-                } else {
-                    false
-                }
-            }),
-
-            DefaultFunction::Bls12_381_G1_ScalarMul | DefaultFunction::Bls12_381_G2_ScalarMul => {
-                if let (Term::Constant(c1), Term::Constant(c2)) = (&arg_stack[0], &arg_stack[1]) {
-                    matches!(c1.as_ref(), Constant::Integer(..))
-                        && matches!(c2.as_ref(), Constant::Bls12_381G1Element(..))
                 } else {
                     false
                 }

@@ -837,12 +837,11 @@ fn convert_arithmetic_ops_turns_subtract_constant_into_add() {
 #[test]
 fn builtin_eval_reducer_folds_only_what_the_machine_accepts() {
     let huge = (num_bigint::BigInt::from(1u32) << 70000usize).to_string();
-    let long_dst = "00".repeat(256);
     let long_key = "00".repeat(33);
 
     // (label, builtin, term, folds). The `false` entries include the builtins
     // whose `is_error_safe` guard is more permissive than the machine
-    // (constrData tag, hashToGroup dst, integerToByteString size, shift/rotate,
+    // (constrData tag, integerToByteString size, shift/rotate,
     // replicateByte length, insertCoin key): the evaluation that precedes the
     // fold must keep them from folding.
     let cases: Vec<(&str, &str, String, bool)> = vec![
@@ -893,21 +892,6 @@ fn builtin_eval_reducer_folds_only_what_the_machine_accepts() {
             "constrData",
             "[(builtin constrData) (con integer 18446744073709551616) (con (list data) [])]"
                 .into(),
-            false,
-        ),
-        (
-            "hashToGroup dst 255 or less",
-            "bls12_381_G1_hashToGroup",
-            "[(builtin bls12_381_G1_hashToGroup) (con bytestring #aa) (con bytestring #00)]"
-                .into(),
-            true,
-        ),
-        (
-            "hashToGroup dst 256",
-            "bls12_381_G1_hashToGroup",
-            format!(
-                "[(builtin bls12_381_G1_hashToGroup) (con bytestring #aa) (con bytestring #{long_dst})]"
-            ),
             false,
         ),
         (
@@ -987,6 +971,57 @@ fn builtin_eval_reducer_folds_only_what_the_machine_accepts() {
             run.text().contains(&format!("(builtin {builtin})")),
             !folds,
             "{label} (delayed): {}",
+            run.text()
+        );
+    }
+}
+
+/// A builtin that produces a BLS point must not fold into a point constant: points have no flat
+/// encoding, and `bls381_compressor`, which turns point constants into `uncompress` calls, runs
+/// before the folding passes.
+#[test]
+fn builtin_eval_reducer_does_not_fold_a_call_that_produces_a_bls_point() {
+    let g1_hash = "[(builtin bls12_381_G1_hashToGroup) (con bytestring #abcd) (con bytestring #)]";
+    let g2_hash = "[(builtin bls12_381_G2_hashToGroup) (con bytestring #abcd) (con bytestring #)]";
+    let g1_compress = "(builtin bls12_381_G1_compress)";
+    let g2_compress = "(builtin bls12_381_G2_compress)";
+
+    let cases = [
+        ("g1 hashToGroup", format!("[{g1_compress} {g1_hash}]")),
+        ("g2 hashToGroup", format!("[{g2_compress} {g2_hash}]")),
+        (
+            "g1 add of two hashes",
+            format!("[{g1_compress} [(builtin bls12_381_G1_add) {g1_hash} {g1_hash}]]"),
+        ),
+        (
+            "g2 add of two hashes",
+            format!("[{g2_compress} [(builtin bls12_381_G2_add) {g2_hash} {g2_hash}]]"),
+        ),
+        (
+            "g1 scalarMul of a hash",
+            format!("[{g1_compress} [(builtin bls12_381_G1_scalarMul) (con integer 3) {g1_hash}]]"),
+        ),
+        (
+            "g1 hashToGroup in an untaken branch",
+            format!(
+                "(force [(force (builtin ifThenElse)) (con bool True) \
+                    (delay (con bytestring #)) (delay [{g1_compress} {g1_hash}])])"
+            ),
+        ),
+    ];
+
+    for (label, term) in cases {
+        let run = check(&program(&term), &[]);
+
+        run.assert_sound();
+        assert!(run.outcome.succeeded(), "{label}: {}", run.describe());
+
+        let encoded = run.optimized().clone().to_debruijn().unwrap().to_cbor();
+
+        assert!(
+            encoded.is_ok(),
+            "{label}: the optimized program can't be flat encoded: {:?}\n{}",
+            encoded.err(),
             run.text()
         );
     }
