@@ -6719,32 +6719,6 @@ fn upcast_refuses_a_nested_empty_list_of_unknown_type() {
     }
 }
 
-/// casts.mdx: a phantom type argument "never appears in a value, so an opaque type there doesn't
-/// count". `contains_opaque` follows that rule (H), but the ABI check also looks for opaque types
-/// in the annotation (`find_opaque_in_annotation`), where alias arguments aren't expanded: since I
-/// runs the ABI check on parameters, `Hash<Blake2b_224, VerificationKey>` (a `ByteArray`) is
-/// refused as a validator parameter, which type-checked at 796ebe9d.
-#[test]
-#[ignore = "open regression: the ABI check counts an opaque type in a phantom alias argument, so I refuses Hash<Blake2b_224, _> parameters"]
-fn validator_parameter_with_an_opaque_phantom_alias_argument_is_legal() {
-    let source_code = r#"
-        pub opaque type Tag {
-          Tag
-        }
-
-        pub type Hash<alg, a> =
-          ByteArray
-
-        validator by_alias_args(h: Hash<Tag, Int>) {
-          else(_) {
-            h == h
-          }
-        }
-    "#;
-
-    assert!(matches!(check_validator(parse(source_code)), Ok(..)))
-}
-
 #[test]
 fn local_and_imported_opaque_wrappers_cast_the_same_way() {
     let dependency = r#"

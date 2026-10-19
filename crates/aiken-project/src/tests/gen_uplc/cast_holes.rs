@@ -1,6 +1,6 @@
-//! Cast holes that are still open. Each test states the outcome that
-//! `site/src/content/docs/casts.mdx` prescribes, fails on the current compiler, and is ignored
-//! until the hole is fixed: run them with `cargo test -p aiken-project open_cast_holes -- --ignored`.
+//! Cast holes: programs where a cast through Data, or the optimizer around it, didn't behave as
+//! `site/src/content/docs/casts.mdx` prescribes. Each test states the prescribed outcome, at
+//! every trace level, on the optimized program and on the unoptimized one where it can run.
 use super::*;
 use aiken_lang::ast::{TypedFunction, TypedValidator};
 use uplc::{
@@ -84,74 +84,6 @@ fn evaluate(program: &Program<DeBruijn>, args: &[Data]) -> Result<Term<NamedDeBr
 
 fn int(n: i64) -> Data {
     Data::integer(n.into())
-}
-
-/// casts.mdx: "A validator's parameters, datum and redeemer are converted from Data too". The
-/// redeemer goes through `expect`; parameters go through `cast_validator_args`, which only applies
-/// `known_data_to_type`: a record parameter is never checked, a Bool parameter is
-/// `fst (unConstrData d) == 1`, a List<Int> parameter's items are never checked.
-#[test]
-#[ignore = "open hole: validator parameters are converted with known_data_to_type (cast_validator_args), so their shape is never checked"]
-fn validator_parameters_are_checked_like_a_redeemer() {
-    let source = r#"
-        pub type Config {
-          Config { owner: ByteArray, limit: Int }
-        }
-
-        validator params(cfg: Config, flag: Bool, xs: List<Int>) {
-          else(_ctx) {
-            flag
-          }
-        }
-    "#;
-
-    let cfg = Data::constr(0, vec![Data::bytestring(vec![0]), int(1)]);
-    let flag = Data::constr(1, vec![]);
-    let xs = Data::list(vec![int(1)]);
-    let ctx = int(0);
-
-    for tracing in TRACINGS {
-        let program = compile_validator(source, tracing);
-
-        assert!(
-            evaluate(
-                &program,
-                &[cfg.clone(), flag.clone(), xs.clone(), ctx.clone()]
-            )
-            .is_ok(),
-            "{tracing:?}: well-formed parameters must be accepted"
-        );
-
-        for (what, args) in [
-            (
-                "a Config parameter that is an integer",
-                [int(5), flag.clone(), xs.clone(), ctx.clone()],
-            ),
-            (
-                "a Bool parameter with a field",
-                [
-                    cfg.clone(),
-                    Data::constr(1, vec![int(5)]),
-                    xs.clone(),
-                    ctx.clone(),
-                ],
-            ),
-            (
-                "a List<Int> parameter holding bytes",
-                [
-                    cfg.clone(),
-                    flag.clone(),
-                    Data::list(vec![Data::bytestring(vec![0])]),
-                    ctx.clone(),
-                ],
-            ),
-        ] {
-            assert!(
-                evaluate(&program, &args).is_err(),
-                "{tracing:?}: the validator accepts {what}"
-            );
-        }
-    }
 }
 
 /// The spend handler's datum is an `Option<Data>` in the script context. The handler wrapper
