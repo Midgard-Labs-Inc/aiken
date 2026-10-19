@@ -1039,6 +1039,63 @@ impl<'a> Environment<'a> {
         }
     }
 
+    /// Whether unifying `lhs` with `rhs` would convert Data into an opaque type: somewhere `rhs`
+    /// is Data where `lhs` contains an opaque type. Type links are resolved on both sides first, so
+    /// a value whose type is only known through a link (e.g. `id(thing)`) isn't mistaken for a
+    /// cast.
+    fn casts_data_into_opaque(&self, lhs: &Rc<Type>, rhs: &Rc<Type>) -> bool {
+        let lhs = resolve_links(lhs.clone());
+        let rhs = resolve_links(rhs.clone());
+
+        if rhs.is_data() {
+            return self.contains_opaque(&lhs);
+        }
+
+        match (lhs.deref(), rhs.deref()) {
+            (
+                Type::App {
+                    module: m1,
+                    name: n1,
+                    args: args1,
+                    ..
+                },
+                Type::App {
+                    module: m2,
+                    name: n2,
+                    args: args2,
+                    ..
+                },
+            ) if m1 == m2 && n1 == n2 && args1.len() == args2.len() => args1
+                .iter()
+                .zip(args2)
+                .any(|(a, b)| self.casts_data_into_opaque(a, b)),
+
+            (Type::Tuple { elems: elems1, .. }, Type::Tuple { elems: elems2, .. })
+                if elems1.len() == elems2.len() =>
+            {
+                elems1
+                    .iter()
+                    .zip(elems2)
+                    .any(|(a, b)| self.casts_data_into_opaque(a, b))
+            }
+
+            (
+                Type::Pair {
+                    fst: fst1,
+                    snd: snd1,
+                    ..
+                },
+                Type::Pair {
+                    fst: fst2,
+                    snd: snd2,
+                    ..
+                },
+            ) => self.casts_data_into_opaque(fst1, fst2) || self.casts_data_into_opaque(snd1, snd2),
+
+            _ => false,
+        }
+    }
+
     // Data constructor fields are hydrated after type aliases and function
     // signatures are registered, so opaque containment is derived from the
     // fully registered type/value metadata rather than cached Type flags.
@@ -2060,7 +2117,7 @@ impl<'a> Environment<'a> {
                 }
             }
             UnifyMode::AllowDownCast | UnifyMode::AllowSoftCast => {
-                if self.contains_opaque(&lhs) {
+                if self.casts_data_into_opaque(&lhs, &rhs) {
                     return Err(Error::ExpectOnOpaqueType { location });
                 }
 
@@ -2490,6 +2547,18 @@ fn unify_unbound_type(tipo: Rc<Type>, own_id: u64, location: Span) -> Result<(),
         }
 
         Type::Var { .. } => unreachable!(),
+    }
+}
+
+/// Follow type links until reaching a type that isn't a linked variable.
+fn resolve_links(tipo: Rc<Type>) -> Rc<Type> {
+    let mut tipo = tipo;
+    loop {
+        let next = Type::collapse_links(tipo.clone());
+        if Rc::ptr_eq(&next, &tipo) {
+            return tipo;
+        }
+        tipo = next;
     }
 }
 

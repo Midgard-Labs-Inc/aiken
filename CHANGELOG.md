@@ -19,6 +19,7 @@
 - **uplc**: The shrinker no longer cancels an `unXData` that carries an `expect`'s check against the `xData` that follows it. The code generator marks those applications with the free variable `__checked_cast`; `Program::clean_up_no_inlines`, which runs at the end of `aiken_optimize_and_intern`, removes the marker. Casts of trusted data are still cancelled.
 - **aiken-lang**: `x == d`, where `d` is `Data` and `x` is an `Int`, `ByteArray`, `Bool`, `G1Element` or `G2Element`, failed at runtime: the comparison used `x`'s own equality builtin on a `Data` operand. Equality now compares both operands as `Data` whenever either one is `Data`. `d == x` already worked.
 - **aiken-lang**: `if data is s: String` crashed on bytes that aren't valid UTF-8 instead of taking the `else` branch. It's now a compile error (see above).
+- **aiken-lang**: `expect` only reports an opaque-type error when it would convert `Data` into an opaque type. `expect x: Thing = id(thing)` now type-checks, and `expect x: Thing = 1` reports a type mismatch.
 
 ## v1.3.0 - 2026-10-16
 

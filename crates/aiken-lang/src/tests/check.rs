@@ -6498,3 +6498,119 @@ fn local_and_imported_opaque_wrappers_cast_the_same_way() {
         }
     }
 }
+
+#[test]
+fn expect_into_opaque_type_through_a_type_link() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        fn id(x: a) -> a {
+          x
+        }
+
+        fn bar(t: Thing) -> Thing {
+          expect x: Thing = id(t)
+          x
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(result.is_ok(), "{result:#?}");
+}
+
+#[test]
+fn expect_into_opaque_type_from_a_non_data_type_is_a_type_mismatch() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar() -> Thing {
+          expect x: Thing = 1
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn expect_into_opaque_type_from_a_different_container_is_a_type_mismatch() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar(data: Data) -> Option<Thing> {
+          expect x: Option<Thing> = [data]
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn expect_into_opaque_type_in_a_tuple_is_an_opaque_cast_only_from_data() {
+    let from_data = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar(data: Data) -> (Thing, Int) {
+          expect x: (Thing, Int) = (data, 1)
+          x
+        }
+    "#;
+
+    let from_a_longer_tuple = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar(data: Data) -> (Thing, Int, Int) {
+          expect x: (Thing, Int, Int) = (data, 1)
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(from_data)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+
+    assert!(matches!(
+        check(parse(from_a_longer_tuple)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ));
+}
+
+#[test]
+fn expect_into_opaque_type_in_a_pair_is_an_opaque_cast_only_from_data() {
+    let from_data = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar(data: Data) -> Pair<Thing, Int> {
+          expect x: Pair<Thing, Int> = Pair(data, 1)
+          x
+        }
+    "#;
+
+    let from_an_int = r#"
+        opaque type Thing { inner: Int }
+
+        fn bar() -> Pair<Thing, Int> {
+          expect x: Pair<Thing, Int> = Pair(1, 1)
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(from_data)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+
+    assert!(matches!(
+        check(parse(from_an_int)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ));
+}
