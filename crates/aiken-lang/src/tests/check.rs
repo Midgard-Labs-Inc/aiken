@@ -7089,6 +7089,62 @@ fn expect_into_opaque_phantom_type_argument() {
     ));
 }
 
+/// `if … is` refuses a type that contains a `String` (or a `Value`, `G1Element`, `G2Element`),
+/// which it can't test without failing. A phantom argument never appears in a value, so it
+/// doesn't count, as for opaque types; the same argument used by a field still does.
+#[test]
+fn soft_cast_into_a_phantom_type_argument_that_cant_be_tested() {
+    for argument in [
+        "String",
+        "Value",
+        "G1Element",
+        "G2Element",
+        "Option<String>",
+    ] {
+        let phantom = format!(
+            r#"
+            type Tagged<a> {{
+              Tagged(Int)
+            }}
+
+            fn f(d: Data) -> Bool {{
+              if d is x: Tagged<{argument}> {{
+                x == x
+              }} else {{
+                False
+              }}
+            }}
+            "#
+        );
+
+        let used_by_a_field = format!(
+            r#"
+            type Tagged<a> {{
+              Tagged(Int)
+              Holding(a)
+            }}
+
+            fn f(d: Data) -> Bool {{
+              if d is x: Tagged<{argument}> {{
+                x == x
+              }} else {{
+                False
+              }}
+            }}
+            "#
+        );
+
+        let result = check(parse(&phantom));
+        assert!(result.is_ok(), "{argument}: {result:#?}");
+
+        let result = check(parse(&used_by_a_field));
+        assert!(
+            matches!(result, Err((_, Error::IllegalSoftCast { .. }))),
+            "{argument}: {result:#?}"
+        );
+    }
+}
+
 #[test]
 fn expect_into_imported_opaque_phantom_type_argument() {
     let dependency = r#"

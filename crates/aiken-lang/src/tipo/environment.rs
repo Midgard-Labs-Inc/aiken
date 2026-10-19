@@ -1083,8 +1083,10 @@ impl<'a> Environment<'a> {
 
                 let qualifier = (module.clone(), name.clone());
 
+                // A type argument no constructor field uses (a phantom) never appears in a value,
+                // so it doesn't count, as for opaque types (`runtime_type_args`).
                 if !active_types.insert(qualifier.clone()) {
-                    for arg in args {
+                    for arg in self.runtime_type_args(module, name, args) {
                         self.collect_data_traits(arg, ids, active_types, traits);
                     }
                     return;
@@ -1134,7 +1136,7 @@ impl<'a> Environment<'a> {
                     }
                 }
 
-                for arg in args {
+                for arg in self.runtime_type_args(module, name, args) {
                     self.collect_data_traits(arg, ids, active_types, traits);
                 }
 
