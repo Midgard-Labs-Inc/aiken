@@ -38,6 +38,7 @@
 - **aiken-lang**: A record update (`R { ..r, a: 1 }`) built constructor index 0 whatever the `@tag` on the record type or its constructor. With the datum check above, a validator that writes an updated tagged datum demanded a malformed next datum, and the outputs it produced couldn't be spent. A record update now keeps the tag. **Validators that update a tagged record compile to different code once rebuilt, and so get a new hash.**
 - **aiken-lang**: `aiken check` crashed with "index out of bounds" when it reported a failing test whose values contain a constructor with a `@tag`, on the constructor or on its type: it took the tag for the constructor's position. It now finds the constructor by its tag.
 - **aiken-lang**: `if x is C(..): T`, where `T` is an opaque type erased to its only field and `x` isn't `Data`, tested the field against the constructor index: it matched only when the field was 0, failed at runtime for a `ByteArray` or `String` field, and crashed the compiler for a `List`, `Pair`, tuple or `Data` field. An erased opaque type has no constructor at runtime, so the index is no longer tested.
+- **aiken-lang**: An opaque type erased to its only field, of type `Data`, dropped the upcast of its constructor's argument: `Payload(5)` held the integer 5 where `I 5` was expected, and using it failed at runtime. The argument is now upcast. **Validators that build such a value from a value that isn't `Data` compile to different code once rebuilt, and so get a new hash.**
 
 ## v1.3.0 - 2026-10-16
 

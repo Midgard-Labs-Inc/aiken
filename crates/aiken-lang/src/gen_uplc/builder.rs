@@ -213,12 +213,7 @@ pub fn erase_opaque_type_operations(
     if let AirTree::Constr { tipo, args, .. } = air_tree
         && check_replaceable_opaque_type(tipo, data_types)
     {
-        let arg = args.pop().unwrap();
-
-        match arg {
-            AirTree::CastToData { value, .. } => *air_tree = *value,
-            _ => *air_tree = arg,
-        }
+        *air_tree = args.pop().unwrap();
     }
 
     let mut held_types = air_tree.mut_held_types();

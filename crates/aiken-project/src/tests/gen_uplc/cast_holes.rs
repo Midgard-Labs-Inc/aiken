@@ -879,3 +879,101 @@ fn if_is_on_an_erased_opaque_value_in_a_validator() {
         }
     }
 }
+
+/// An erased opaque type over `Data` is a `Data`: the argument of its constructor is upcast to
+/// Data like any other argument of a `Data` field. The upcast was dropped with the constructor, so
+/// `Payload(5)` held a raw integer typed as Data.
+#[test]
+fn erased_opaque_type_over_data_holds_the_data_of_its_argument() {
+    let bytes = Data::bytestring(vec![0]);
+
+    for (field, input) in [
+        ("Int", int(5)),
+        ("ByteArray", bytes.clone()),
+        ("List<Int>", Data::list(vec![int(1), int(2)])),
+        ("Option<Int>", Data::constr(0, vec![int(3)])),
+        ("(Int, ByteArray)", Data::list(vec![int(1), bytes.clone()])),
+    ] {
+        let source = format!(
+            r#"
+            pub opaque type Payload {{
+              Payload(Data)
+            }}
+
+            fn unwrap(p: Payload) -> Data {{
+              let Payload(d) = p
+              d
+            }}
+
+            pub fn observe(d: Data) -> Data {{
+              expect v: {field} = d
+              let back = unwrap(Payload(v))
+              expect again: {field} = back
+              if back == as_data(again) {{
+                back
+              }} else {{
+                as_data(#"ee")
+              }}
+            }}
+            "#
+        );
+
+        for tracing in TRACINGS {
+            for (build, program) in compile_observe(&source, tracing) {
+                pretty_assertions::assert_eq!(
+                    evaluate(&program, std::slice::from_ref(&input)),
+                    Ok(Term::data(input.clone())),
+                    "Payload({field}), {tracing:?}, {build}: Payload doesn't hold {input:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The same on the validator side, on a value that crosses a function boundary.
+#[test]
+fn erased_opaque_type_over_data_in_a_validator() {
+    let source = r#"
+        pub opaque type Payload {
+          Payload(Data)
+        }
+
+        fn wrap(n: Int) -> Payload {
+          Payload(n)
+        }
+
+        fn unwrap(p: Payload) -> Data {
+          let Payload(d) = p
+          d
+        }
+
+        validator f4 {
+          mint(redeemer: Int, _policy_id: Data, _self: Data) {
+            unwrap(wrap(redeemer)) == as_data(redeemer)
+          }
+
+          else(_) {
+            fail
+          }
+        }
+    "#;
+
+    // ScriptContext { transaction, redeemer, info: Minting(policy_id) }
+    let context = Data::constr(
+        0,
+        vec![
+            int(0),
+            int(5),
+            Data::constr(0, vec![Data::bytestring(vec![0])]),
+        ],
+    );
+
+    for tracing in TRACINGS {
+        let program = compile_validator(source, tracing);
+
+        assert!(
+            evaluate(&program, std::slice::from_ref(&context)).is_ok(),
+            "{tracing:?}: Payload(5) isn't I 5"
+        );
+    }
+}
