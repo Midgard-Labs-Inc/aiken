@@ -1,0 +1,49 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    [
+      (lam
+        __debug_wrapped
+        [
+          [
+            (lam
+              expectb:ByteArray=d
+              (lam
+                __choose_data_wrapped
+                (force
+                  (case
+                    (constr
+                      0
+                    d_id_0
+                      expectb:ByteArray=d
+                      expectb:ByteArray=d
+                      expectb:ByteArray=d
+                      expectb:ByteArray=d
+                      (delay d_id_0)
+                    )
+                  __choose_data_wrapped
+                  )
+                )
+              )
+            )
+            (delay
+              (force
+                [
+                  [ __debug_wrapped (con string "expect b: ByteArray = d") ]
+                  (delay (error))
+                ]
+              )
+            )
+          ]
+          (force (builtin chooseData))
+        ]
+      )
+      (force (builtin trace))
+    ]
+  )
+)

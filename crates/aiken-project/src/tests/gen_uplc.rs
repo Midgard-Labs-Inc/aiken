@@ -22,6 +22,7 @@ enum TestType {
 
 mod cast_agreement;
 mod coerce;
+mod expect_cast;
 
 fn assert_uplc(source_code: &str, expected: Term<Name>, should_fail: bool, verbose_mode: bool) {
     let mut project = TestProject::new();

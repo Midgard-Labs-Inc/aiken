@@ -15,6 +15,8 @@
 
 ### Fixed
 
+- **aiken-lang**: An `expect` cast to `Int`, `ByteArray`, a `List` or `Pairs` lost its check when the value it produced was converted back to `Data` (for example `expect n: Int = d` followed by `as_data(n)`, or the `cardano/governance/protocol_parameters` accessors compared as `Data`): with traces off (`-t silent`, the default of `aiken build`), the optimizer cancelled the `unIData`/`unBData`/`unListData`/`unMapData` with the `iData`/`bData`/`listData`/`mapData` that followed, so the validator accepted data of any shape. This covered plain `expect`s, `Pair` patterns, list patterns and typed list items. **Validators that contain such a cast compile to different code once rebuilt, and so get a new hash.** To check whether a deployed script was affected, rebuild it with the fixed compiler and compare the hashes: an identical hash means it wasn't.
+- **uplc**: The shrinker no longer cancels an `unXData` that carries an `expect`'s check against the `xData` that follows it. The code generator marks those applications with the free variable `__checked_cast`; `Program::clean_up_no_inlines`, which runs at the end of `aiken_optimize_and_intern`, removes the marker. Casts of trusted data are still cancelled.
 - **aiken-lang**: `x == d`, where `d` is `Data` and `x` is an `Int`, `ByteArray`, `Bool`, `G1Element` or `G2Element`, failed at runtime: the comparison used `x`'s own equality builtin on a `Data` operand. Equality now compares both operands as `Data` whenever either one is `Data`. `d == x` already worked.
 - **aiken-lang**: `if data is s: String` crashed on bytes that aren't valid UTF-8 instead of taking the `else` branch. It's now a compile error (see above).
 

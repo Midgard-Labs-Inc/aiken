@@ -1,0 +1,8 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam d_id_0 [ (builtin listData) [ (builtin unListData) d_id_0 ] ])
+)

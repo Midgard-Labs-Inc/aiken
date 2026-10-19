@@ -1,0 +1,49 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    [
+      (lam
+        __debug_wrapped
+        [
+          [
+            (lam
+              expectxs:List<Data>=d
+              (lam
+                __choose_data_wrapped
+                (force
+                  (case
+                    (constr
+                      0
+                    d_id_0
+                      expectxs:List<Data>=d
+                      expectxs:List<Data>=d
+                      (delay d_id_0)
+                      expectxs:List<Data>=d
+                      expectxs:List<Data>=d
+                    )
+                  __choose_data_wrapped
+                  )
+                )
+              )
+            )
+            (delay
+              (force
+                [
+                  [ __debug_wrapped (con string "expect xs: List<Data> = d") ]
+                  (delay (error))
+                ]
+              )
+            )
+          ]
+          (force (builtin chooseData))
+        ]
+      )
+      (force (builtin trace))
+    ]
+  )
+)

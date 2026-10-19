@@ -4,6 +4,10 @@
 //! would change what a script accepts.
 use super::*;
 use aiken_lang::ast::TypedFunction;
+use proptest::{
+    prelude::*,
+    test_runner::{Config, TestRng, TestRunner},
+};
 use uplc::{
     ast::NamedDeBruijn, machine::cost_model::ExBudget, optimize::interner::CodeGenInterner,
 };
@@ -11,6 +15,129 @@ use uplc::{
 const TRACINGS: [Tracing; 2] = [
     Tracing::All(TraceLevel::Silent),
     Tracing::All(TraceLevel::Verbose),
+];
+
+/// Each source defines `observe(d: Data) -> Data`, which casts `d` and converts what it got back
+/// into `Data`.
+const SOURCES: &[(&str, &str)] = &[
+    (
+        "expect Int",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect n: Int = d
+          as_data(n)
+        }
+        "#,
+    ),
+    (
+        "expect ByteArray",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect b: ByteArray = d
+          as_data(b)
+        }
+        "#,
+    ),
+    (
+        "expect List<Int>",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect xs: List<Int> = d
+          as_data(xs)
+        }
+        "#,
+    ),
+    (
+        "expect Pairs<Int, ByteArray>",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect m: Pairs<Int, ByteArray> = d
+          as_data(m)
+        }
+        "#,
+    ),
+    (
+        "expect Pair key",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect Pair(k, _): Pair<Int, Data> = d
+          as_data(k)
+        }
+        "#,
+    ),
+    (
+        "expect list head",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect [a, ..]: List<ByteArray> = d
+          as_data(a)
+        }
+        "#,
+    ),
+    (
+        "expect record",
+        r#"
+        pub type Datum {
+          Owner { owner: ByteArray, amount: Int }
+          Nobody
+        }
+
+        pub fn observe(d: Data) -> Data {
+          expect datum: Datum = d
+          when datum is {
+            Owner { amount, .. } -> as_data(amount)
+            Nobody -> as_data(datum)
+          }
+        }
+        "#,
+    ),
+    (
+        "expect Value",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect v: Value = d
+          as_data(v)
+        }
+        "#,
+    ),
+    (
+        "expect G1Element",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          expect p: G1Element = d
+          as_data(p)
+        }
+        "#,
+    ),
+    (
+        "if is Int",
+        r#"
+        pub fn observe(d: Data) -> Data {
+          if d is n: Int {
+            as_data(n)
+          } else {
+            as_data(Void)
+          }
+        }
+        "#,
+    ),
+    (
+        "if is record",
+        r#"
+        pub type Datum {
+          Owner { owner: ByteArray, amount: Int }
+          Nobody
+        }
+
+        pub fn observe(d: Data) -> Data {
+          if d is datum: Datum {
+            as_data(datum)
+          } else {
+            as_data(Void)
+          }
+        }
+        "#,
+    ),
 ];
 
 fn observe(project: &mut TestProject, source: &str) -> (TypedFunction, String) {
@@ -61,6 +188,58 @@ fn evaluate(program: &Program<DeBruijn>, input: &Data) -> Result<Term<NamedDeBru
         .map_err(|_| ())
 }
 
+fn arbitrary_data() -> impl Strategy<Value = Data> {
+    let leaf = prop_oneof![
+        (-3i64..300).prop_map(|n| Data::integer(n.into())),
+        proptest::collection::vec(any::<u8>(), 0..4).prop_map(Data::bytestring),
+        // A compressed G1 point: the generator, and the point at infinity.
+        Just(Data::bytestring(G1_GENERATOR.to_vec())),
+        Just(Data::bytestring(G1_INFINITY.to_vec())),
+    ];
+
+    leaf.prop_recursive(3, 24, 4, |inner| {
+        prop_oneof![
+            proptest::collection::vec(inner.clone(), 0..4).prop_map(Data::list),
+            proptest::collection::vec((inner.clone(), inner.clone()), 0..3).prop_map(Data::map),
+            (0u64..3, proptest::collection::vec(inner, 0..3))
+                .prop_map(|(tag, fields)| Data::constr(tag, fields)),
+            // A well-formed value: ascending policies and assets, non-zero quantities.
+            proptest::collection::btree_map(
+                proptest::collection::vec(any::<u8>(), 0..2),
+                proptest::collection::btree_map(
+                    proptest::collection::vec(any::<u8>(), 0..2),
+                    prop_oneof![-5i64..0, 1i64..5],
+                    1..3,
+                ),
+                0..3,
+            )
+            .prop_map(|policies| {
+                Data::map(
+                    policies
+                        .into_iter()
+                        .map(|(policy, assets)| {
+                            (
+                                Data::bytestring(policy),
+                                Data::map(
+                                    assets
+                                        .into_iter()
+                                        .map(|(asset, quantity)| {
+                                            (
+                                                Data::bytestring(asset),
+                                                Data::integer(quantity.into()),
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                            )
+                        })
+                        .collect(),
+                )
+            }),
+        ]
+    })
+}
+
 const G1_GENERATOR: [u8; 48] = [
     0x97, 0xf1, 0xd3, 0xa7, 0x31, 0x97, 0xd7, 0x94, 0x26, 0x95, 0x63, 0x8c, 0x4f, 0xa9, 0xac, 0x0f,
     0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
@@ -72,6 +251,100 @@ const G1_INFINITY: [u8; 48] = {
     bytes[0] = 0xc0;
     bytes
 };
+
+/// An input each source accepts, and one it turns down (rejects, or sends to `else`).
+fn fixtures(name: &str) -> [Data; 2] {
+    let int = |n: i64| Data::integer(n.into());
+    let bytes = |b: &[u8]| Data::bytestring(b.to_vec());
+
+    match name {
+        "expect Int" | "if is Int" => [int(42), bytes(&[0])],
+        "expect ByteArray" => [bytes(&[1]), int(1)],
+        "expect List<Int>" => [Data::list(vec![int(1)]), Data::list(vec![bytes(&[1])])],
+        "expect Pairs<Int, ByteArray>" => [
+            Data::map(vec![(int(1), bytes(&[2]))]),
+            Data::map(vec![(bytes(&[2]), int(1))]),
+        ],
+        "expect Pair key" => [
+            Data::list(vec![int(1), bytes(&[2])]),
+            Data::list(vec![bytes(&[1]), bytes(&[2])]),
+        ],
+        "expect list head" => [Data::list(vec![bytes(&[1])]), Data::list(vec![int(1)])],
+        "expect record" | "if is record" => [
+            Data::constr(0, vec![bytes(&[1]), int(5)]),
+            Data::constr(2, vec![]),
+        ],
+        "expect Value" => [
+            Data::map(vec![(bytes(&[]), Data::map(vec![(bytes(&[]), int(5))]))]),
+            Data::map(vec![(bytes(&[]), Data::map(vec![(bytes(&[]), int(0))]))]),
+        ],
+        "expect G1Element" => [bytes(&G1_GENERATOR), bytes(&[0])],
+        _ => unreachable!("no fixtures for {name}"),
+    }
+}
+
+#[test]
+fn casts_accept_the_same_inputs_with_or_without_traces_and_optimizations() {
+    let void = Ok(Term::data(Data::constr(0, vec![])));
+
+    for (name, source) in SOURCES {
+        let programs = TRACINGS.map(|tracing| compile(source, tracing));
+        let [[silent, silent_unoptimized], [verbose, verbose_unoptimized]] = &programs;
+
+        let variants = [
+            ("silent", silent),
+            ("verbose", verbose),
+            ("verbose unoptimized", verbose_unoptimized),
+        ];
+
+        // Every variant accepts the first fixture and turns down the second.
+        let [accepted, turned_down] = fixtures(name);
+
+        for (variant, program) in variants
+            .iter()
+            .copied()
+            .chain([("silent unoptimized", silent_unoptimized)])
+        {
+            let result = evaluate(program, &accepted);
+            assert!(
+                result.is_ok() && result != void,
+                "{name}: {variant} doesn't accept {accepted:?}"
+            );
+
+            let result = evaluate(program, &turned_down);
+            assert!(
+                result.is_err() || result == void,
+                "{name}: {variant} doesn't turn down {turned_down:?}"
+            );
+        }
+
+        let config = Config {
+            cases: 256,
+            failure_persistence: None,
+            ..Config::default()
+        };
+        let rng = TestRng::deterministic_rng(config.rng_algorithm);
+
+        TestRunner::new_with_rng(config, rng)
+            .run(&arbitrary_data(), |input| {
+                let reference = evaluate(silent_unoptimized, &input);
+
+                for (variant, program) in variants {
+                    prop_assert_eq!(
+                        evaluate(program, &input),
+                        reference.clone(),
+                        "{}: {} disagrees with silent unoptimized on {:?}",
+                        name,
+                        variant,
+                        input
+                    );
+                }
+
+                Ok(())
+            })
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+}
 
 /// `x == d` with `d: Data` upcasts `x`, whichever side it is on: both are compared as Data.
 #[test]

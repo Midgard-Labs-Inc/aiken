@@ -83,6 +83,24 @@ impl Default for IdGen {
 
 pub const NO_INLINE: &str = "__no_inline__";
 
+/// Marker for the runtime check of an `expect`: `[(var __checked_cast) [(builtin unIData) x]]`.
+///
+/// `cast_data_reducer` cancels `iData (unIData x)` into `x` (and likewise for
+/// bytes, lists and maps). That is only sound when the `unXData` was a trusted
+/// cast: when it comes from `expect n: Int = d` it *is* the check that `d`
+/// is an integer, and cancelling it makes the program accept any `d`.
+///
+/// Wrapping the `unXData` application in an application of a free variable
+/// hides it from `cast_data_reducer` (which only looks through a directly
+/// applied builtin) and keeps every other pass treating it as what it is: an
+/// application that can fail, so it is neither dropped as dead code nor
+/// duplicated. The marker is removed by `Program::clean_up_no_inlines`, or
+/// earlier by `cast_data_reducer` once the check has been proven statically.
+/// It is never evaluated: every evaluation must go through
+/// `clean_up_no_inlines` first (a term holding the free variable cannot be
+/// converted to DeBruijn).
+pub const CHECKED_CAST: &str = "__checked_cast";
+
 #[derive(PartialEq, PartialOrd, Default, Debug, Clone)]
 pub struct VarLookup {
     found: bool,
@@ -2508,6 +2526,20 @@ impl Term<Name> {
         }
     }
 
+    fn remove_checked_casts(
+        &mut self,
+        _id: Option<usize>,
+        _arg_stack: Vec<Args>,
+        _scope: &Scope,
+        _context: &mut Context,
+    ) {
+        if let Term::Apply { function, argument } = self
+            && matches!(function.as_ref(), Term::Var(name) if name.text == CHECKED_CAST)
+        {
+            *self = std::mem::replace(Rc::make_mut(argument), Term::Error.force());
+        }
+    }
+
     // IMPORTANT: RUNS ONE TIME
     fn inline_constr_ops(
         &mut self,
@@ -2665,6 +2697,17 @@ impl Term<Name> {
             }
             Term::Constr { .. } => todo!(),
             Term::Case { .. } => todo!(),
+            // A checked cast only protects an `unXData` application that
+            // still stands: once the application was cancelled against an
+            // `xData` or folded into a constant, the check was proven at
+            // compile time and the marker has nothing left to protect.
+            Term::Apply { function, argument }
+                if matches!(function.as_ref(), Term::Var(name) if name.text == CHECKED_CAST)
+                    && !argument.is_un_data_application() =>
+            {
+                changed = true;
+                *self = std::mem::replace(Rc::make_mut(argument), Term::Error.force());
+            }
             _ => {}
         }
         changed
@@ -2808,6 +2851,29 @@ impl Term<Name> {
         }
     }
 
+    /// Marks a cast built from `UnIData`/`UnBData`/`UnListData`/`UnMapData`
+    /// whose application is the runtime check of an `expect`. See
+    /// [`CHECKED_CAST`].
+    pub fn checked_cast(self) -> Self {
+        Term::var(CHECKED_CAST).apply(self)
+    }
+
+    fn is_un_data_application(&self) -> bool {
+        matches!(
+            self,
+            Term::Apply { function, .. }
+                if matches!(
+                    function.as_ref(),
+                    Term::Builtin(
+                        DefaultFunction::UnIData
+                            | DefaultFunction::UnBData
+                            | DefaultFunction::UnListData
+                            | DefaultFunction::UnMapData
+                    )
+                )
+        )
+    }
+
     pub fn pierce_no_inlines_ref(&self) -> &Self {
         let mut term = self;
 
@@ -2832,6 +2898,13 @@ impl Term<Name> {
         let mut arg_names = vec![];
 
         let mut term = term;
+
+        // A checked cast is still a wrapper around the builtin it protects.
+        if let Term::Apply { function, argument } = term
+            && matches!(function.as_ref(), Term::Var(name) if name.text == CHECKED_CAST)
+        {
+            term = argument.as_ref();
+        }
 
         while let Term::Apply { function, argument } = term {
             match argument.as_ref() {
@@ -2935,8 +3008,11 @@ impl Program<Name> {
             context,
         )
     }
+
     // This runs the optimizations that are only done a single time
     pub fn run_once_pass(self) -> Self {
+        let mut has_checked_cast = false;
+
         // First pass is necessary to ensure fst_pair and snd_pair are inlined before
         // builtin_force_reducer is run
         let (program, context) = self
@@ -2945,6 +3021,15 @@ impl Program<Name> {
             })
             .0
             .traverse_uplc_with(false, false, &mut |id, term, arg_stack, scope, context| {
+                // The marker is free everywhere, so its unique means nothing;
+                // give every occurrence the one the binder added below has.
+                if let Term::Var(name) = term
+                    && name.text == CHECKED_CAST
+                {
+                    has_checked_cast = true;
+                    *term = Term::var(CHECKED_CAST);
+                }
+
                 term.bls381_compressor(id, vec![], scope, context);
                 term.builtin_force_reducer(id, arg_stack, scope, context);
                 term.remove_inlined_ids(id, vec![], scope, context);
@@ -2980,6 +3065,13 @@ impl Program<Name> {
             });
         }
 
+        // The marker of a checked cast is a free variable by design, but the
+        // conversion to DeBruijn below rejects free variables, so bind it
+        // for the duration of the conversion.
+        if has_checked_cast {
+            term = term.lambda(CHECKED_CAST);
+        }
+
         let mut program = Program {
             version: program.version,
             term,
@@ -2991,7 +3083,22 @@ impl Program<Name> {
 
         let program = Program::<NamedDeBruijn>::try_from(program).unwrap();
 
-        Program::<Name>::try_from(program).unwrap()
+        let program = Program::<Name>::try_from(program).unwrap();
+
+        if !has_checked_cast {
+            return program;
+        }
+
+        // Take the marker binder back off: the markers are free again until
+        // `clean_up_no_inlines` removes them.
+        let Term::Lambda { mut body, .. } = program.term else {
+            unreachable!("the checked cast binder was just added as the outermost lambda")
+        };
+
+        Program {
+            version: program.version,
+            term: std::mem::replace(Rc::make_mut(&mut body), Term::Error.force()),
+        }
     }
 
     pub fn multi_pass(self) -> (Self, Context) {
@@ -3074,6 +3181,7 @@ impl Program<Name> {
     pub fn clean_up_no_inlines(self) -> Self {
         self.traverse_uplc_with(true, false, &mut |id, term, _arg_stack, scope, context| {
             term.remove_no_inlines(id, vec![], scope, context);
+            term.remove_checked_casts(id, vec![], scope, context);
         })
         .0
     }
@@ -3354,11 +3462,12 @@ fn id_vec_function_to_var(func_name: &str, id_vec: &[usize]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::NO_INLINE;
+    use super::{CHECKED_CAST, NO_INLINE};
     use crate::{
         ast::{Constant, Data, Name, NamedDeBruijn, Program, Term},
         builder::{CONSTR_FIELDS_EXPOSER, CONSTR_INDEX_EXPOSER},
         builtins::DefaultFunction,
+        machine::cost_model::ExBudget,
         optimize::interner::CodeGenInterner,
     };
     use pallas_primitives::conway::BigInt;
@@ -4608,5 +4717,363 @@ mod tests {
             program,
             crate::optimize::aiken_optimize_and_intern,
         );
+    }
+
+    // `unXData` applications that are the check of an `expect` are marked as
+    // checked casts; the marker is a free variable that the shrinker never
+    // evaluates, so tests that run single passes bind it with an outer lambda.
+
+    const DATA_CAST_PAIRS: [(DefaultFunction, DefaultFunction); 4] = [
+        (DefaultFunction::IData, DefaultFunction::UnIData),
+        (DefaultFunction::BData, DefaultFunction::UnBData),
+        (DefaultFunction::ListData, DefaultFunction::UnListData),
+        (DefaultFunction::MapData, DefaultFunction::UnMapData),
+    ];
+
+    fn bind_checked_cast(term: Term<Name>) -> Term<Name> {
+        term.lambda(CHECKED_CAST)
+    }
+
+    fn evaluates(program: Program<Name>) -> bool {
+        let program: Program<NamedDeBruijn> = program.try_into().unwrap();
+
+        program.eval(ExBudget::default()).result().is_ok()
+    }
+
+    fn check_multi_pass_keeps_checked_cast_under_its_data_wrapper() {
+        for (wrap, unwrap) in DATA_CAST_PAIRS {
+            let program = Program {
+                version: (1, 0, 0),
+                term: bind_checked_cast(
+                    Term::Builtin(wrap)
+                        .apply(Term::Builtin(unwrap).apply(Term::var("d")).checked_cast())
+                        .lambda("d"),
+                ),
+            };
+
+            let expected = program.clone();
+
+            compare_optimization(expected, program, |program| program.multi_pass().0);
+        }
+    }
+
+    fn check_multi_pass_cancels_unchecked_cast_under_its_data_wrapper() {
+        for (wrap, unwrap) in DATA_CAST_PAIRS {
+            let program = Program {
+                version: (1, 0, 0),
+                term: Term::Builtin(wrap)
+                    .apply(Term::Builtin(unwrap).apply(Term::var("d")))
+                    .lambda("d"),
+            };
+
+            let expected = Program {
+                version: (1, 0, 0),
+                term: Term::var("d").lambda("d"),
+            };
+
+            compare_optimization(expected, program, |program| program.multi_pass().0);
+        }
+    }
+
+    fn check_multi_pass_still_cancels_data_wrapper_around_checked_cast() {
+        // `unIData (iData (checked (unIData d)))`: the outer pair cancels, the
+        // check that was inside it stays.
+        let program = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::un_i_data()
+                    .apply(
+                        Term::i_data()
+                            .apply(Term::un_i_data().apply(Term::var("d")).checked_cast()),
+                    )
+                    .lambda("d"),
+            ),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::un_i_data()
+                    .apply(Term::var("d"))
+                    .checked_cast()
+                    .lambda("d"),
+            ),
+        };
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+    }
+
+    #[test]
+    fn multi_pass_drops_checked_cast_proven_by_its_data_wrapper() {
+        // The `iData` feeding the check guarantees it succeeds, so there is
+        // nothing left for the marker to protect.
+        let program = Program {
+            version: (1, 0, 0),
+            term: Term::un_i_data()
+                .apply(Term::i_data().apply(Term::var("x")))
+                .checked_cast()
+                .lambda("x"),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: Term::var("x").lambda("x"),
+        };
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+
+        // A marked cast is only dropped once proven: under its own wrapper it stays, unmarked
+        // casts are still cancelled, and a wrapper around a marked cast still cancels.
+        check_multi_pass_keeps_checked_cast_under_its_data_wrapper();
+        check_multi_pass_cancels_unchecked_cast_under_its_data_wrapper();
+        check_multi_pass_still_cancels_data_wrapper_around_checked_cast();
+    }
+
+    #[test]
+    fn multi_pass_drops_checked_cast_folded_into_a_constant() {
+        let program = Program {
+            version: (1, 0, 0),
+            term: Term::un_i_data()
+                .apply(Term::data(Data::integer(5.into())))
+                .checked_cast(),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: Term::integer(5.into()),
+        };
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+    }
+
+    fn check_multi_pass_keeps_unused_checked_cast() {
+        // The check can fail, so binding it to a variable that is never used
+        // must not make it dead code.
+        let program = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::integer(1.into())
+                    .lambda("n")
+                    .apply(Term::un_i_data().apply(Term::var("d")).checked_cast())
+                    .lambda("d"),
+            ),
+        };
+
+        let expected = program.clone();
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+    }
+
+    fn check_multi_pass_keeps_unused_checked_cast_under_an_inlined_binding() {
+        // `n` is used once, so the checked cast is substituted into its use,
+        // marker included.
+        let program = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::i_data()
+                    .apply(Term::var("n"))
+                    .lambda("n")
+                    .apply(Term::un_i_data().apply(Term::var("d")).checked_cast())
+                    .lambda("d"),
+            ),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::i_data()
+                    .apply(Term::un_i_data().apply(Term::var("d")).checked_cast())
+                    .lambda("d"),
+            ),
+        };
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+    }
+
+    #[test]
+    fn clean_up_no_inlines_removes_checked_casts() {
+        let program = Program {
+            version: (1, 0, 0),
+            term: Term::i_data()
+                .apply(
+                    Term::un_i_data()
+                        .apply(
+                            Term::un_b_data()
+                                .apply(Term::var("d"))
+                                .checked_cast()
+                                .lambda(NO_INLINE),
+                        )
+                        .checked_cast(),
+                )
+                .lambda("d"),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: Term::i_data()
+                .apply(Term::un_i_data().apply(Term::un_b_data().apply(Term::var("d"))))
+                .lambda("d"),
+        };
+
+        compare_optimization(expected, program, |program| program.clean_up_no_inlines());
+    }
+
+    #[test]
+    fn aiken_optimize_keeps_the_check_of_a_checked_cast_and_removes_the_marker() {
+        let program = Program {
+            version: (1, 0, 0),
+            term: Term::i_data()
+                .apply(Term::un_i_data().apply(Term::var("d")).checked_cast())
+                .lambda("d"),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: Term::i_data()
+                .apply(Term::un_i_data().apply(Term::var("d")))
+                .lambda("d"),
+        };
+
+        compare_optimization(
+            expected,
+            program,
+            crate::optimize::aiken_optimize_and_intern,
+        );
+    }
+
+    #[test]
+    fn aiken_optimize_rejects_data_a_checked_cast_would_reject() {
+        let wrong_shape = Term::data(Data::bytestring(vec![0]));
+
+        for (checked, accepts) in [(true, false), (false, true)] {
+            let cast = Term::un_i_data().apply(Term::var("d"));
+
+            let cast = if checked { cast.checked_cast() } else { cast };
+
+            let program = Program {
+                version: (1, 0, 0),
+                term: Term::i_data()
+                    .apply(cast)
+                    .lambda("d")
+                    .apply(wrong_shape.clone()),
+            };
+
+            let optimized = crate::optimize::aiken_optimize_and_intern(program);
+
+            assert_eq!(
+                evaluates(optimized),
+                accepts,
+                "checked cast: {checked}, the unchecked cast is expected to be cancelled"
+            );
+        }
+    }
+
+    /// A function that only wraps a checked cast is a builtin wrapper like any other: it is
+    /// inlined at its use sites even when used several times.
+    #[test]
+    fn multi_pass_inlines_a_wrapper_around_a_checked_cast() {
+        let program = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::add_integer()
+                    .apply(Term::var("f").apply(Term::var("a")))
+                    .apply(Term::var("f").apply(Term::var("b")))
+                    .lambda("f")
+                    .apply(
+                        Term::un_i_data()
+                            .apply(Term::var("d"))
+                            .checked_cast()
+                            .lambda("d"),
+                    )
+                    .lambda("b")
+                    .lambda("a"),
+            ),
+        };
+
+        let expected = Program {
+            version: (1, 0, 0),
+            term: bind_checked_cast(
+                Term::add_integer()
+                    .apply(Term::un_i_data().apply(Term::var("a")).checked_cast())
+                    .apply(Term::un_i_data().apply(Term::var("b")).checked_cast())
+                    .lambda("b")
+                    .lambda("a"),
+            ),
+        };
+
+        compare_optimization(expected, program, |program| program.multi_pass().0);
+    }
+
+    /// The marker only changes what the cast reducer may do: wherever a cast is not wrapped in
+    /// the `xData` that undoes it, optimizing with and without it gives the same program.
+    #[test]
+    fn checked_casts_optimize_like_unchecked_casts_unless_cancelled() {
+        type Cast = fn(Term<Name>) -> Term<Name>;
+        type Shape = fn(Cast) -> Term<Name>;
+
+        let shapes: [(&str, Shape); 5] = [
+            ("wrapper function used twice", |cast| {
+                Term::add_integer()
+                    .apply(Term::var("f").apply(Term::var("a")))
+                    .apply(Term::var("f").apply(Term::var("b")))
+                    .lambda("f")
+                    .apply(cast(Term::var("d")).lambda("d"))
+                    .lambda("b")
+                    .lambda("a")
+            }),
+            ("bound and used twice", |cast| {
+                Term::add_integer()
+                    .apply(Term::var("n"))
+                    .apply(Term::var("n"))
+                    .lambda("n")
+                    .apply(cast(Term::var("a")))
+                    .lambda("a")
+            }),
+            ("used once", |cast| {
+                Term::add_integer()
+                    .apply(cast(Term::var("a")))
+                    .apply(Term::integer(1.into()))
+                    .lambda("a")
+            }),
+            ("unused", |cast| {
+                Term::integer(1.into())
+                    .lambda("n")
+                    .apply(cast(Term::var("a")))
+                    .lambda("a")
+            }),
+            ("used under a delay", |cast| {
+                Term::var("n")
+                    .delay()
+                    .lambda("n")
+                    .apply(cast(Term::var("a")))
+                    .lambda("a")
+            }),
+        ];
+
+        for (name, shape) in shapes {
+            let optimize = |cast: Cast| {
+                let program = Program {
+                    version: (1, 0, 0),
+                    term: shape(cast),
+                };
+
+                let program: Program<NamedDeBruijn> =
+                    crate::optimize::aiken_optimize_and_intern(program)
+                        .try_into()
+                        .unwrap();
+
+                program
+            };
+
+            assert_eq!(
+                optimize(|term| Term::un_i_data().apply(term).checked_cast()),
+                optimize(|term| Term::un_i_data().apply(term)),
+                "{name}"
+            );
+        }
+
+        // Dead-code removal and single-use inlining treat a marked cast as able to fail.
+        check_multi_pass_keeps_unused_checked_cast();
+        check_multi_pass_keeps_unused_checked_cast_under_an_inlined_binding();
     }
 }

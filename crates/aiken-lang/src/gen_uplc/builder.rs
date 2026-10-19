@@ -527,6 +527,13 @@ pub fn known_data_to_type(
     }
 }
 
+/// Builds the cast of untrusted `term` into `field_type`, where the `unXData`
+/// application is the check that the data has the expected shape.
+///
+/// Casts that an `xData` could later undo (integers, bytearrays, lists, maps)
+/// are marked with [`uplc::optimize::shrinker::CHECKED_CAST`] so that the
+/// shrinker keeps the check; the marker is removed at the end of
+/// optimization. For trusted data, use [`known_data_to_type`] instead.
 pub fn unknown_data_to_type(
     term: Term<Name>,
     field_type: &Type,
@@ -535,11 +542,13 @@ pub fn unknown_data_to_type(
     let uplc_type = field_type.get_uplc_type();
 
     match uplc_type {
-        Some(UplcType::Integer) => Term::un_i_data().apply(term),
-        Some(UplcType::ByteString) => Term::un_b_data().apply(term),
+        Some(UplcType::Integer) => Term::un_i_data().apply(term).checked_cast(),
+        Some(UplcType::ByteString) => Term::un_b_data().apply(term).checked_cast(),
         Some(UplcType::String) => Term::decode_utf8().apply(Term::un_b_data().apply(term)),
-        Some(UplcType::List(_)) if field_type.is_map() => Term::unmap_data().apply(term),
-        Some(UplcType::List(_)) => Term::unlist_data().apply(term),
+        Some(UplcType::List(_)) if field_type.is_map() => {
+            Term::unmap_data().apply(term).checked_cast()
+        }
+        Some(UplcType::List(_)) => Term::unlist_data().apply(term).checked_cast(),
         Some(UplcType::Bls12_381G1Element) => {
             Term::bls12_381_g1_uncompress().apply(Term::un_b_data().apply(term))
         }
@@ -574,7 +583,7 @@ pub fn unknown_data_to_type(
                 .unwrap_or(false);
 
             if list_decorator {
-                Term::unlist_data().apply(term)
+                Term::unlist_data().apply(term).checked_cast()
             } else {
                 term
             }

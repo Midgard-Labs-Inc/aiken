@@ -1,0 +1,81 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    (case
+      (constr
+        0
+      (force (builtin tailList))
+        (force (builtin headList))
+        (force (force (builtin chooseList)))
+        (force (force (builtin sndPair)))
+        (force (force (builtin fstPair)))
+      )
+    (lam
+        __tail_list_wrapped
+        (lam
+          __head_list_wrapped
+          (lam
+            __choose_list_wrapped
+            (lam
+              __snd_pair_wrapped
+              (lam
+                __fst_pair_wrapped
+                [
+                  (lam
+                    __pair_0
+                    [
+                      (lam
+                        __discard_expect___id_3
+                        [
+                          (builtin bData)
+                          [ (builtin unBData) [ __snd_pair_wrapped __pair_0 ] ]
+                        ]
+                      )
+                      [ __fst_pair_wrapped __pair_0 ]
+                    ]
+                  )
+                  [
+                    (lam
+                      __list_data
+                      (force
+                        (case
+                          (constr
+                            0
+                          [
+                              __tail_list_wrapped
+                              [ __tail_list_wrapped __list_data ]
+                            ]
+                            (delay
+                              [
+                                [
+                                  (builtin mkPairData)
+                                  [ __head_list_wrapped __list_data ]
+                                ]
+                                [
+                                  __head_list_wrapped
+                                  [ __tail_list_wrapped __list_data ]
+                                ]
+                              ]
+                            )
+                            (delay (error))
+                          )
+                        __choose_list_wrapped
+                        )
+                      )
+                    )
+                    [ (builtin unListData) d_id_0 ]
+                  ]
+                ]
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)

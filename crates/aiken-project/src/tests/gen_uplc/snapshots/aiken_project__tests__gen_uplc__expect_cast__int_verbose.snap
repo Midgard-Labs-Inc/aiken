@@ -1,0 +1,49 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    [
+      (lam
+        __debug_wrapped
+        [
+          [
+            (lam
+              expectn:Int=d
+              (lam
+                __choose_data_wrapped
+                (force
+                  (case
+                    (constr
+                      0
+                    d_id_0
+                      expectn:Int=d
+                      expectn:Int=d
+                      expectn:Int=d
+                      (delay d_id_0)
+                      expectn:Int=d
+                    )
+                  __choose_data_wrapped
+                  )
+                )
+              )
+            )
+            (delay
+              (force
+                [
+                  [ __debug_wrapped (con string "expect n: Int = d") ]
+                  (delay (error))
+                ]
+              )
+            )
+          ]
+          (force (builtin chooseData))
+        ]
+      )
+      (force (builtin trace))
+    ]
+  )
+)

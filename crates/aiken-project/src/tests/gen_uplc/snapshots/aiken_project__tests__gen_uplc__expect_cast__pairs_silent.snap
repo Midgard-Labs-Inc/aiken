@@ -1,0 +1,93 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    (case
+      (constr
+        0
+      (force (builtin tailList))
+        (force (builtin headList))
+        (force (force (builtin chooseList)))
+        (force (force (builtin sndPair)))
+        (force (force (builtin fstPair)))
+        [ (builtin unMapData) d_id_0 ]
+      )
+    (lam
+        __tail_list_wrapped
+        (lam
+          __head_list_wrapped
+          (lam
+            __choose_list_wrapped
+            (lam
+              __snd_pair_wrapped
+              (lam
+                __fst_pair_wrapped
+                (lam
+                  m_id_1
+                  [
+                    (lam
+                      __inner_expect_on_list
+                      [
+                        [ __inner_expect_on_list __inner_expect_on_list ] m_id_1
+                      ]
+                    )
+                    (lam
+                      __inner_expect_on_list
+                      (lam
+                        __list_to_check
+                        (force
+                          (case
+                            (constr
+                              0
+                            __list_to_check
+                              (delay [ (builtin mapData) m_id_1 ])
+                              (delay
+                                [
+                                  (lam
+                                    __pair_0
+                                    [
+                                      [
+                                        (lam
+                                          __pair_fst_span_76_77_id_4
+                                          (lam
+                                            __pair_snd_span_76_77_id_5
+                                            [
+                                              [
+                                                __inner_expect_on_list
+                                                __inner_expect_on_list
+                                              ]
+                                              [
+                                                __tail_list_wrapped
+                                                __list_to_check
+                                              ]
+                                            ]
+                                          )
+                                        )
+                                        [ __fst_pair_wrapped __pair_0 ]
+                                      ]
+                                      [ __snd_pair_wrapped __pair_0 ]
+                                    ]
+                                  )
+                                  [ __head_list_wrapped __list_to_check ]
+                                ]
+                              )
+                            )
+                          __choose_list_wrapped
+                          )
+                        )
+                      )
+                    )
+                  ]
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)

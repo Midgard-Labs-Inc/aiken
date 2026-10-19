@@ -1,0 +1,65 @@
+---
+source: crates/aiken-project/src/tests/gen_uplc/expect_cast.rs
+expression: program.to_pretty()
+---
+(program
+  1.1.0
+  (lam
+    d_id_0
+    (case
+      (constr
+        0
+      (force (builtin tailList))
+        (force (builtin headList))
+        (force (force (builtin chooseList)))
+        [ (builtin unListData) d_id_0 ]
+      )
+    (lam
+        __tail_list_wrapped
+        (lam
+          __head_list_wrapped
+          (lam
+            __choose_list_wrapped
+            (lam
+              tail_id_0
+              [
+                (lam
+                  tail_id_1
+                  (force
+                    (case
+                      (constr
+                        0
+                      [ __tail_list_wrapped tail_id_1 ]
+                        (delay
+                          [
+                            (lam
+                              __discard_expect___id_3
+                              [
+                                (builtin bData)
+                                [
+                                  (builtin unBData)
+                                  [ __head_list_wrapped tail_id_1 ]
+                                ]
+                              ]
+                            )
+                            [
+                              (builtin unBData)
+                              [ __head_list_wrapped tail_id_0 ]
+                            ]
+                          ]
+                        )
+                        (delay (error))
+                      )
+                    __choose_list_wrapped
+                    )
+                  )
+                )
+                [ __tail_list_wrapped tail_id_0 ]
+              ]
+            )
+          )
+        )
+      )
+    )
+  )
+)
