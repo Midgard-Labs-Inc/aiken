@@ -6614,3 +6614,70 @@ fn expect_into_opaque_type_in_a_pair_is_an_opaque_cast_only_from_data() {
         Err((_, Error::CouldNotUnify { .. }))
     ));
 }
+
+#[test]
+fn expect_into_opaque_phantom_type_argument() {
+    let phantom = r#"
+        opaque type Thing { inner: Int }
+
+        type Tagged<a> {
+          Tagged(Int)
+        }
+
+        fn bar(data: Data) -> Tagged<Thing> {
+          expect x: Tagged<Thing> = data
+          x
+        }
+    "#;
+
+    // The same argument, once a constructor field uses it.
+    let used_by_a_field = r#"
+        opaque type Thing { inner: Int }
+
+        type Tagged<a> {
+          Tagged(Int)
+          Holding(List<a>)
+        }
+
+        fn bar(data: Data) -> Tagged<Thing> {
+          expect x: Tagged<Thing> = data
+          x
+        }
+    "#;
+
+    let result = check(parse(phantom));
+    assert!(result.is_ok(), "{result:#?}");
+
+    assert!(matches!(
+        check(parse(used_by_a_field)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn expect_into_imported_opaque_phantom_type_argument() {
+    let dependency = r#"
+        pub opaque type Thing { inner: Int }
+
+        pub type Tagged<a> {
+          Tagged { amount: Int }
+          Untagged
+        }
+    "#;
+
+    let source_code = r#"
+        use thing.{Tagged, Thing}
+
+        fn bar(data: Data) -> Option<Tagged<Thing>> {
+          if data is tagged: Tagged<Thing> {
+            Some(tagged)
+          } else {
+            None
+          }
+        }
+    "#;
+
+    let result = check_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]);
+
+    assert!(result.is_ok(), "{result:#?}");
+}

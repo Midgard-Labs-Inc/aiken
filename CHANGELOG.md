@@ -12,6 +12,7 @@
 - **aiken-lang**: When an upcast, `expect`, `if ... is` or `coerce` meets a type variable whose type isn't known yet, the variable is now linked to `Data`, instead of being left free to become a function or a type that converts differently.
 - **aiken-lang**: Builtin `Value`s and BLS12-381 `G1Element`s and `G2Element`s, and types that contain them, can now be upcast to `Data` (including in `==` against `Data`) and converted from `Data` with `expect` and `coerce`.
 - **aiken-lang**: `if ... is` refuses a type that contains a `String`, `Value`, `G1Element` or `G2Element`, with a new `illegal::soft_cast` error: no builtin can tell valid UTF-8, a valid compressed point or a well-formed value from malformed bytes without failing, so the cast would crash instead of taking the `else` branch. Use `expect`, or test for `ByteArray` and convert explicitly.
+- **aiken-lang**: A type argument that no constructor field uses no longer counts when checking for opaque types, so `expect x: Tagged<Thing> = data` is allowed for `type Tagged<a> { Tagged(Int) }` and an opaque `Thing`.
 
 ### Fixed
 

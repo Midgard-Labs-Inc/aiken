@@ -1020,7 +1020,10 @@ impl<'a> Environment<'a> {
                 module, name, args, ..
             } => {
                 self.is_known_opaque(&(module.clone(), name.clone()))
-                    || args.iter().any(|arg| self.contains_opaque(arg))
+                    || self
+                        .runtime_type_args(module, name, args)
+                        .iter()
+                        .any(|arg| self.contains_opaque(arg))
             }
 
             Type::Var { tipo, .. } => {
@@ -1094,6 +1097,82 @@ impl<'a> Environment<'a> {
 
             _ => false,
         }
+    }
+
+    /// The type arguments of `module.name<args>` that some constructor field uses. An argument no
+    /// field uses (a phantom) never appears in a value of the type. Types whose constructors
+    /// aren't visible (builtins without constructors, imported opaque types) keep all arguments.
+    fn runtime_type_args<'t>(
+        &self,
+        module: &str,
+        name: &str,
+        args: &'t [Rc<Type>],
+    ) -> Vec<&'t Rc<Type>> {
+        let all = || args.iter().collect();
+
+        let constructors = if module.is_empty() || module == self.current_module {
+            self.module_types_constructors
+                .get(name)
+                .map(|constructors| {
+                    constructors
+                        .iter()
+                        .map(|constructor| self.scope.get(constructor).map(|c| c.tipo.clone()))
+                        .collect::<Option<Vec<_>>>()
+                })
+        } else {
+            self.importable_modules.get(module).and_then(|interface| {
+                interface.types_constructors.get(name).map(|constructors| {
+                    constructors
+                        .iter()
+                        .map(|constructor| {
+                            interface.values.get(constructor).map(|c| c.tipo.clone())
+                        })
+                        .collect::<Option<Vec<_>>>()
+                })
+            })
+        };
+
+        let Some(Some(constructors)) = constructors else {
+            return all();
+        };
+
+        if constructors.is_empty() {
+            return all();
+        }
+
+        let mut used = vec![false; args.len()];
+
+        for constructor in constructors {
+            let (fields, ret) = match constructor.as_ref() {
+                Type::Fn { args, ret, .. } => (args.as_slice(), ret.clone()),
+                _ => (&[][..], constructor.clone()),
+            };
+
+            let Type::App { args: params, .. } = resolve_links(ret).deref().clone() else {
+                return all();
+            };
+
+            if params.len() != args.len() {
+                return all();
+            }
+
+            let mut field_ids = HashSet::new();
+            for field in fields {
+                collect_generic_ids(field, &mut field_ids);
+            }
+
+            for (index, param) in params.iter().enumerate() {
+                match param.get_generic_id() {
+                    Some(id) => used[index] |= field_ids.contains(&id),
+                    None => used[index] = true,
+                }
+            }
+        }
+
+        args.iter()
+            .zip(used)
+            .filter_map(|(arg, used)| used.then_some(arg))
+            .collect()
     }
 
     // Data constructor fields are hydrated after type aliases and function
@@ -2587,6 +2666,28 @@ fn link_unbound_vars_to_data(tipo: &Type) {
             link_unbound_vars_to_data(snd);
         }
         Type::Fn { .. } => {}
+    }
+}
+
+fn collect_generic_ids(tipo: &Type, ids: &mut HashSet<u64>) {
+    match tipo {
+        Type::Var { tipo, .. } => match tipo.borrow().deref() {
+            TypeVar::Link { tipo } => collect_generic_ids(tipo, ids),
+            TypeVar::Generic { id } => {
+                ids.insert(*id);
+            }
+            TypeVar::Unbound { .. } => {}
+        },
+        Type::App { args, .. } => args.iter().for_each(|arg| collect_generic_ids(arg, ids)),
+        Type::Fn { args, ret, .. } => {
+            args.iter().for_each(|arg| collect_generic_ids(arg, ids));
+            collect_generic_ids(ret, ids);
+        }
+        Type::Tuple { elems, .. } => elems.iter().for_each(|elem| collect_generic_ids(elem, ids)),
+        Type::Pair { fst, snd, .. } => {
+            collect_generic_ids(fst, ids);
+            collect_generic_ids(snd, ids);
+        }
     }
 }
 
