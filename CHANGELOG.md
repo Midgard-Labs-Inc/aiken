@@ -5,6 +5,7 @@
 ### Added
 
 - **aiken-lang**: `coerce name: Type = value` converts a value to the annotated type like `expect` does, but without generating any check: the caller is responsible for the value's validity. Unlike `expect`, it also converts into opaque types. Coercing between an opaque type and the type it wraps compiles to nothing. Like `expect`, it refuses functions and Miller-loop results, which have no `Data` form. Coercing to a builtin `Value` or a BLS12-381 element goes through `un_value_data` or the element's uncompression, which still fail on malformed input. `coerce` is now a keyword. @rvcas, @colll78
+- **aiken-project**: Add a fixed code-generation cost corpus that checks results, Flat and CBOR sizes, and CPU and memory units at all trace levels.
 - **aiken-project**: Test cast results at all trace levels and validate unused typed spend datums.
 
 ### Changed
