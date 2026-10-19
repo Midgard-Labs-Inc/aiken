@@ -756,8 +756,11 @@ impl<'a> Environment<'a> {
                 .any(|module| module.opaque_types.contains(qualifier))
     }
 
+    /// Whether a value of this type can be converted to and from Data, which `expect`, `coerce`
+    /// and upcasts rely on. A type variable whose type isn't known yet is linked to Data, so that
+    /// it can't later be bound to a type that converts differently (or not at all).
     pub(crate) fn is_data_like(&mut self, tipo: &Type) -> bool {
-        self.assert_known_data_type(
+        let is_data_like = self.assert_known_data_type(
             tipo,
             &mut HashMap::new(),
             &mut HashSet::new(),
@@ -768,7 +771,13 @@ impl<'a> Environment<'a> {
                 well_known::G2_ELEMENT,
                 well_known::MILLER_LOOP_RESULT,
             ],
-        )
+        );
+
+        if is_data_like {
+            link_unbound_vars_to_data(tipo);
+        }
+
+        is_data_like
     }
 
     pub fn ensure_serialisable(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
@@ -2027,8 +2036,12 @@ impl<'a> Environment<'a> {
         match unify_mode {
             UnifyMode::Strict => {}
             UnifyMode::AllowUpCast => {
-                if lhs.is_data() && self.is_data_like(&rhs) {
-                    return assert_no_unbounded_empty_list(&rhs, location);
+                if lhs.is_data() {
+                    assert_no_unbounded_empty_list(&rhs, location)?;
+
+                    if self.is_data_like(&rhs) {
+                        return Ok(());
+                    }
                 }
             }
             UnifyMode::AllowDownCast => {
@@ -2036,10 +2049,16 @@ impl<'a> Environment<'a> {
                     return Err(Error::ExpectOnOpaqueType { location });
                 }
 
-                if (lhs.is_data() && self.is_data_like(&rhs))
-                    || (self.is_data_like(&lhs) && rhs.is_data())
-                {
-                    return assert_no_unbounded_empty_list(&rhs, location);
+                // Check which side is Data before asking whether the other side is Data-like:
+                // `is_data_like` links the type variables it meets to Data.
+                if lhs.is_data() {
+                    assert_no_unbounded_empty_list(&rhs, location)?;
+
+                    if self.is_data_like(&rhs) {
+                        return Ok(());
+                    }
+                } else if rhs.is_data() && self.is_data_like(&lhs) {
+                    return Ok(());
                 }
             }
         };
@@ -2444,6 +2463,34 @@ fn unify_unbound_type(tipo: Rc<Type>, own_id: u64, location: Span) -> Result<(),
         }
 
         Type::Var { .. } => unreachable!(),
+    }
+}
+
+/// Link every type variable in `tipo` whose type isn't known yet to Data. Generic (rigid) type
+/// variables are left alone.
+fn link_unbound_vars_to_data(tipo: &Type) {
+    match tipo {
+        Type::Var { tipo, .. } => {
+            let linked = match tipo.borrow().deref() {
+                TypeVar::Link { tipo } => Some(tipo.clone()),
+                TypeVar::Unbound { .. } => None,
+                TypeVar::Generic { .. } => return,
+            };
+
+            match linked {
+                Some(linked) => link_unbound_vars_to_data(&linked),
+                None => *tipo.borrow_mut() = TypeVar::Link { tipo: Type::data() },
+            }
+        }
+        Type::App { args, .. } => args.iter().for_each(|arg| link_unbound_vars_to_data(arg)),
+        Type::Tuple { elems, .. } => elems
+            .iter()
+            .for_each(|elem| link_unbound_vars_to_data(elem)),
+        Type::Pair { fst, snd, .. } => {
+            link_unbound_vars_to_data(fst);
+            link_unbound_vars_to_data(snd);
+        }
+        Type::Fn { .. } => {}
     }
 }
 

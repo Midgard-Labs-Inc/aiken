@@ -9,6 +9,7 @@
 ### Changed
 
 - **aiken-lang**: Function types now match exactly, in both argument and return positions: a `fn(Int) -> Bool` is no longer accepted where a `fn(Data) -> Bool` is expected, as an argument or through `expect`, since the function would receive `Data` it can't read as an `Int`. `a |> f` is now typed like `f(a)`: `f` must be a function of one argument, and `a` is upcast to that argument's type. Wrap a function that takes a typed argument in one that takes `Data` and `expect`s it; the `aiken/fuzz/scenario` docs show how for validator handlers.
+- **aiken-lang**: When an upcast, `expect`, `if ... is` or `coerce` meets a type variable whose type isn't known yet, the variable is now linked to `Data`, instead of being left free to become a function or a type that converts differently.
 
 ## v1.3.0 - 2026-10-16
 

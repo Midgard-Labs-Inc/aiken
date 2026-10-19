@@ -6274,3 +6274,76 @@ fn pipe_does_not_cast_function_arguments() {
         ))
     ))
 }
+
+#[test]
+fn upcast_links_an_unknown_type_to_data() {
+    let source_code = r#"
+        fn main() -> Data {
+          let to_data = fn(x) {
+            let data: Data = x
+            data
+          }
+
+          to_data(fn(n: Int) { n + 1 })
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn expect_links_an_unknown_type_to_data() {
+    let source_code = r#"
+        fn main() -> Data {
+          let to_data = fn(x) {
+            expect data: Data = x
+            data
+          }
+
+          to_data(fn(n: Int) { n + 1 })
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn coerce_links_an_unknown_type_to_data() {
+    let source_code = r#"
+        fn main() -> Int {
+          let to_int = fn(x) {
+            coerce n: Int = x
+            n
+          }
+
+          to_int(fn(n: Int) { n + 1 })
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn expect_links_an_unknown_type_argument_to_data() {
+    let source_code = r#"
+        fn main(data: Data) -> List<Int> {
+          expect xs: List<_> = data
+          let ys: List<Int> = xs
+          ys
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
