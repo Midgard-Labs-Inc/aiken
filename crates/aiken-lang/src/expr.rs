@@ -379,6 +379,152 @@ impl TypedExpr {
         }
     }
 
+    /// Replaces every type the expression holds with `f` of it. The types themselves are
+    /// never mutated, so a type variable shared with other definitions is left as it is.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Self::UInt { tipo, .. }
+            | Self::String { tipo, .. }
+            | Self::Value { tipo, .. }
+            | Self::ByteArray { tipo, .. }
+            | Self::CurvePoint { tipo, .. }
+            | Self::ErrorTerm { tipo, .. } => *tipo = f(tipo),
+            Self::Sequence { expressions, .. } | Self::Pipeline { expressions, .. } => {
+                for expression in expressions {
+                    expression.map_types(f);
+                }
+            }
+            Self::Var { constructor, .. } => constructor.tipo = f(&constructor.tipo),
+            Self::Fn {
+                tipo, args, body, ..
+            } => {
+                *tipo = f(tipo);
+                for arg in args {
+                    arg.tipo = f(&arg.tipo);
+                }
+                body.map_types(f);
+            }
+            Self::List {
+                tipo,
+                elements,
+                tail,
+                ..
+            } => {
+                *tipo = f(tipo);
+                for element in elements {
+                    element.map_types(f);
+                }
+                if let Some(tail) = tail {
+                    tail.map_types(f);
+                }
+            }
+            Self::Call {
+                tipo, fun, args, ..
+            } => {
+                *tipo = f(tipo);
+                fun.map_types(f);
+                for arg in args {
+                    arg.value.map_types(f);
+                }
+            }
+            Self::BinOp {
+                tipo, left, right, ..
+            } => {
+                *tipo = f(tipo);
+                left.map_types(f);
+                right.map_types(f);
+            }
+            Self::Assignment {
+                tipo,
+                value,
+                pattern,
+                ..
+            } => {
+                *tipo = f(tipo);
+                value.map_types(f);
+                pattern.map_types(f);
+            }
+            Self::Trace {
+                tipo, then, text, ..
+            } => {
+                *tipo = f(tipo);
+                then.map_types(f);
+                text.map_types(f);
+            }
+            Self::When {
+                tipo,
+                subject,
+                clauses,
+                ..
+            } => {
+                *tipo = f(tipo);
+                subject.map_types(f);
+                for clause in clauses {
+                    clause.pattern.map_types(f);
+                    clause.then.map_types(f);
+                }
+            }
+            Self::If {
+                branches,
+                final_else,
+                tipo,
+                ..
+            } => {
+                *tipo = f(tipo);
+                for branch in branches.iter_mut() {
+                    branch.condition.map_types(f);
+                    branch.body.map_types(f);
+                    if let Some((pattern, tipo)) = &mut branch.is {
+                        pattern.map_types(f);
+                        *tipo = f(tipo);
+                    }
+                }
+                final_else.map_types(f);
+            }
+            Self::RecordAccess { tipo, record, .. } => {
+                *tipo = f(tipo);
+                record.map_types(f);
+            }
+            Self::ModuleSelect {
+                tipo, constructor, ..
+            } => {
+                *tipo = f(tipo);
+                if let ModuleValueConstructor::Record { tipo, .. } = constructor {
+                    *tipo = f(tipo);
+                }
+            }
+            Self::Tuple { tipo, elems, .. } => {
+                *tipo = f(tipo);
+                for elem in elems {
+                    elem.map_types(f);
+                }
+            }
+            Self::Pair { tipo, fst, snd, .. } => {
+                *tipo = f(tipo);
+                fst.map_types(f);
+                snd.map_types(f);
+            }
+            Self::TupleIndex { tipo, tuple, .. } => {
+                *tipo = f(tipo);
+                tuple.map_types(f);
+            }
+            Self::RecordUpdate {
+                tipo, spread, args, ..
+            } => {
+                *tipo = f(tipo);
+                spread.map_types(f);
+                for arg in args {
+                    arg.value.map_types(f);
+                }
+            }
+            Self::UnOp { tipo, value, .. } => {
+                *tipo = f(tipo);
+                value.map_types(f);
+            }
+            Self::Upcast { value, .. } => value.map_types(f),
+        }
+    }
+
     pub fn is_literal(&self) -> bool {
         matches!(
             self,

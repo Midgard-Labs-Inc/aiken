@@ -28,15 +28,15 @@ use crate::{
         air::ExpectLevel,
         builder::{
             CodeGenFunction, erase_opaque_types, get_generic_variant_name, get_src_code_by_span,
-            known_data_to_type, monomorphize, wrap_validator_condition,
+            known_data_to_type, wrap_validator_condition,
         },
     },
     line_numbers::LineNumbers,
     plutus_version::PlutusVersion,
     tipo::{
         DataLayout, ModuleValueConstructor, PatternConstructor, Type, TypeInfo, TypeVar,
-        ValueConstructor, ValueConstructorVariant, convert_opaque_type, get_generic_id_and_type,
-        layout::lookup_layout,
+        ValueConstructor, ValueConstructorVariant, convert_opaque_type, find_and_replace_generics,
+        get_generic_id_and_type, layout::lookup_layout,
     },
 };
 use builder::{
@@ -3858,103 +3858,69 @@ impl<'a> CodeGenerator<'a> {
                         dependency_functions.push((generic_function_key.clone(), variant.clone()));
                     }
 
-                    if let Some(func_variants) = function_usage.get_mut(&generic_function_key) {
-                        if let Some((path, _)) = func_variants.get_mut(&variant) {
-                            *path = path.common_ancestor(tree_path);
-                        } else {
-                            let args = function_def.arguments.clone();
+                    let already_built = function_usage
+                        .get_mut(&generic_function_key)
+                        .and_then(|variants| variants.get_mut(&variant));
 
-                            let params = args
-                                .iter()
-                                .map(|arg| {
-                                    arg.arg_name
-                                        .get_variable_name()
-                                        .map(|arg| {
-                                            introduce_name(&mut self.interner, &arg.to_string())
-                                        })
-                                        .unwrap_or_else(|| DISCARDED.to_string())
-                                })
-                                .collect_vec();
-
-                            let mut function_air_tree_body = AirTree::no_op(self.build(
-                                &function_def.body,
-                                &generic_function_key.module_name,
-                                &[],
-                            ));
-
-                            function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                                erase_opaque_types(air_tree, &self.module_types);
-                                monomorphize(air_tree, &mono_types);
-                            });
-
-                            args.iter().for_each(|arg| {
-                                arg.arg_name.get_variable_name().iter().for_each(|arg| {
-                                    self.interner.pop_text(arg.to_string());
-                                })
-                            });
-
-                            func_variants.insert(
-                                variant,
-                                (
-                                    tree_path.clone(),
-                                    HoistableFunction::Function {
-                                        body: function_air_tree_body,
-                                        deps: vec![],
-                                        params,
-                                    },
-                                ),
-                            );
-                        }
-                    } else {
-                        let args = function_def.arguments.clone();
-
-                        let params = args
-                            .iter()
-                            .map(|arg| {
-                                arg.arg_name
-                                    .get_variable_name()
-                                    .map(|arg| introduce_name(&mut self.interner, &arg.to_string()))
-                                    .unwrap_or_else(|| DISCARDED.to_string())
-                            })
-                            .collect_vec();
-
-                        let mut function_air_tree_body = AirTree::no_op(self.build(
-                            &function_def.body,
-                            &generic_function_key.module_name,
-                            &[],
-                        ));
-
-                        function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                            erase_opaque_types(air_tree, &self.module_types);
-                            monomorphize(air_tree, &mono_types);
-                        });
-
-                        let mut function_variant_path = IndexMap::new();
-
-                        args.iter().for_each(|arg| {
-                            arg.arg_name
-                                .get_variable_name()
-                                .iter()
-                                .for_each(|arg| self.interner.pop_text(arg.to_string()))
-                        });
-
-                        function_variant_path.insert(
-                            variant,
-                            (
-                                tree_path.clone(),
-                                HoistableFunction::Function {
-                                    body: function_air_tree_body,
-                                    deps: vec![],
-                                    params,
-                                },
-                            ),
-                        );
-
-                        function_usage.insert(generic_function_key, function_variant_path);
+                    if let Some((path, _)) = already_built {
+                        *path = path.common_ancestor(tree_path);
+                        return;
                     }
+
+                    let function = self.build_function_variant(
+                        function_def,
+                        &generic_function_key.module_name,
+                        &mono_types,
+                    );
+
+                    function_usage
+                        .entry(generic_function_key)
+                        .or_default()
+                        .insert(variant, (tree_path.clone(), function));
                 }
             },
         );
+    }
+
+    /// Compiles the variant of a function for the concrete types in `mono_types`, from a copy of
+    /// its typed body where those types replace the function's generics.
+    fn build_function_variant(
+        &mut self,
+        function_def: &TypedFunction,
+        module_name: &str,
+        mono_types: &IndexMap<u64, Rc<Type>>,
+    ) -> HoistableFunction {
+        let params = function_def
+            .arguments
+            .iter()
+            .map(|arg| {
+                arg.arg_name
+                    .get_variable_name()
+                    .map(|arg| introduce_name(&mut self.interner, &arg.to_string()))
+                    .unwrap_or_else(|| DISCARDED.to_string())
+            })
+            .collect_vec();
+
+        let mut typed_body = function_def.body.clone();
+        typed_body.map_types(&mut |tipo| find_and_replace_generics(tipo, mono_types));
+
+        let mut body = AirTree::no_op(self.build(&typed_body, module_name, &[]));
+
+        body.traverse_tree_with(&mut |air_tree, _| {
+            erase_opaque_types(air_tree, &self.module_types);
+        });
+
+        for arg in &function_def.arguments {
+            if let Some(name) = arg.arg_name.get_variable_name() {
+                self.interner.pop_text(name.to_string());
+            }
+        }
+
+        HoistableFunction::Function {
+            body,
+            deps: vec![],
+            params,
+        }
     }
 
     fn uplc_code_gen(&mut self, mut ir_stack: Vec<Air>) -> Result<Term<Name>, Error> {

@@ -10,7 +10,7 @@ use crate::{
     line_numbers::{LineColumn, LineNumbers},
     tipo::{
         DataLayout, Type, TypeInfo, ValueConstructor, ValueConstructorVariant, convert_opaque_type,
-        find_and_replace_generics, layout::lookup_layout,
+        layout::lookup_layout,
     },
 };
 use indexmap::IndexMap;
@@ -195,14 +195,6 @@ pub fn get_generic_variant_name(t: &Rc<Type>, module_types: &IndexMap<&str, &Typ
         }
         None if is_list_record(t, module_types) => "_list".to_string(),
         None | Some(UplcType::Data) => "_data".to_string(),
-    }
-}
-
-pub fn monomorphize(air_tree: &mut AirTree, mono_types: &IndexMap<u64, Rc<Type>>) {
-    let mut held_types = air_tree.mut_held_types();
-
-    while let Some(tipo) = held_types.pop() {
-        *tipo = find_and_replace_generics(tipo, mono_types);
     }
 }
 
