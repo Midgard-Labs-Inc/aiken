@@ -538,3 +538,91 @@ test keys_a_constrained_phantom_type() {
         assert_eq!(holds_bytes.run(&int), super::Outcome::Failed);
     }
 }
+
+/// An unannotated function is generalised, so each caller uses it at its own type, even when it
+/// is inferred late (a constant calls `id` before `id` is inferred) or its parameter ends up
+/// stored as `Data`.
+#[test]
+fn unannotated_functions_compile_at_each_callers_type() {
+    assert_tests_pass(
+        &[
+            (
+                "lib/unannotated.ak",
+                r#"
+use aiken/collection/pairs
+use cardano/transaction.{Transaction}
+
+pub type PoolRedeemer {
+  Foo
+}
+
+pub type ManageRedeemer {
+  Bar
+}
+
+pub fn insert_redeemer(tx: Transaction, key, value, cmp) -> Transaction {
+  Transaction {
+    ..tx,
+    redeemers: tx.redeemers
+      |> pairs.repsert_by_ascending_key(key: key, value: value, compare: cmp),
+  }
+}
+
+pub fn go(tx: Transaction, cmp) -> Transaction {
+  tx
+    |> insert_redeemer(todo, Foo, cmp)
+    |> insert_redeemer(todo, Bar, cmp)
+}
+"#,
+            ),
+            (
+                "lib/late.ak",
+                r#"
+const one = id(1)
+
+fn pair_with_one(x) {
+  (x, id(1))
+}
+
+fn id(x) {
+  x
+}
+
+test at_bool() {
+  pair_with_one(True) == (True, one)
+}
+
+test at_bytearray() {
+  pair_with_one(#"ab") == (#"ab", 1)
+}
+
+// `ignore` is generalised with `decode`, but no call picks the type it discards.
+fn decode(d: Data, n: Int) {
+  if n <= 0 {
+    expect x: _ = d
+    x
+  } else {
+    let _ = ignore(d, n - 1)
+    decode(d, n - 1)
+  }
+}
+
+fn ignore(d: Data, n: Int) -> Bool {
+  let _ = decode(d, n)
+  True
+}
+
+test decodes_at_the_callers_type() {
+  let x: Int = decode(as_data(1), 2)
+  x == 1
+}
+
+test discards_what_nothing_picks() {
+  ignore(as_data(#"aa"), 1)
+}
+"#,
+            ),
+        ],
+        "late",
+    );
+}

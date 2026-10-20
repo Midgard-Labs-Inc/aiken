@@ -1,8 +1,6 @@
 use super::{
     RecordAccessor, Type, ValueConstructor, ValueConstructorVariant,
-    environment::{
-        EntityKind, Environment, ScopeResetData, assert_no_labeled_arguments, generalise,
-    },
+    environment::{EntityKind, Environment, ScopeResetData, assert_no_labeled_arguments},
     error::{Error, Warning},
     hydrator::Hydrator,
     pattern::PatternTyper,
@@ -35,7 +33,6 @@ use vec1::Vec1;
 #[allow(clippy::result_large_err)]
 pub(crate) fn infer_function(
     fun: &UntypedFunction,
-    module_name: &str,
     hydrators: &mut HashMap<String, Hydrator>,
     environment: &mut Environment<'_>,
     tracing: Tracing,
@@ -95,8 +92,6 @@ pub(crate) fn infer_function(
         .get_variable(name)
         .unwrap_or_else(|| panic!("Could not find preregistered type for function: {name}"));
 
-    let field_map = preregistered_fn.field_map().cloned();
-
     let preregistered_type = preregistered_fn.tipo.clone();
 
     let (args_types, return_type) = preregistered_type
@@ -150,34 +145,20 @@ pub(crate) fn infer_function(
         // Backtrack and infer callee first.
         let temp_scope = environment.open_new_scope();
         environment.close_scope(top_level_scope.clone());
-        infer_function(
-            &function,
-            environment.current_module,
-            hydrators,
-            environment,
-            tracing,
-            top_level_scope,
-        )?;
+        infer_function(&function, hydrators, environment, tracing, top_level_scope)?;
 
         environment.open_new_scope();
         environment.close_scope(temp_scope);
 
         // Then, try again the entire function definition.
-        return infer_function(
-            fun,
-            module_name,
-            hydrators,
-            environment,
-            tracing,
-            top_level_scope,
-        );
+        return infer_function(fun, hydrators, environment, tracing, top_level_scope);
     }
 
     let (arguments, body, return_type) = inferred?;
 
     let args_types = arguments.iter().map(|a| a.tipo.clone()).collect();
 
-    let tipo = Type::function(args_types, return_type);
+    let tipo = Type::function(args_types, return_type.clone());
 
     expr_typer.environment.note_unreachable_variables(
         name,
@@ -185,35 +166,13 @@ pub(crate) fn infer_function(
         expr_typer.hydrator.all_rigid_names(),
     );
 
-    let safe_to_generalise = !expr_typer.ungeneralised_function_used;
+    let used = std::mem::take(&mut expr_typer.ungeneralised_functions_used);
 
     environment.close_scope(initial_scope);
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
     // Assert that the inferred type matches the type of any recursive call
-    environment.unify(preregistered_type, tipo.clone(), *location)?;
-
-    // Generalise the function if safe to do so
-    let tipo = if safe_to_generalise {
-        environment.ungeneralised_functions.remove(name);
-
-        let tipo = generalise(tipo, 0);
-
-        let module_fn = ValueConstructorVariant::ModuleFn {
-            name: name.clone(),
-            field_map,
-            module: module_name.to_owned(),
-            arity: arguments.len(),
-            location: *location,
-            builtin: None,
-        };
-
-        environment.insert_variable(name.clone(), module_fn, tipo.clone());
-
-        tipo
-    } else {
-        tipo
-    };
+    environment.unify(preregistered_type, tipo, *location)?;
 
     let inferred_fn = Function {
         doc: doc.clone(),
@@ -222,9 +181,7 @@ pub(crate) fn infer_function(
         public: *public,
         arguments,
         return_annotation: return_annotation.clone(),
-        return_type: tipo
-            .return_type()
-            .expect("Could not find return type for fn"),
+        return_type,
         body,
         on_test_failure: on_test_failure.clone(),
         end_position: *end_position,
@@ -232,9 +189,15 @@ pub(crate) fn infer_function(
 
     environment
         .inferred_functions
-        .insert(name.to_string(), inferred_fn.clone());
+        .insert(name.to_string(), inferred_fn);
 
-    Ok(inferred_fn)
+    // Validator handlers and tests aren't called by other code: their unknown types become
+    // `Data` at the boundary.
+    if environment.function_names.contains(name) {
+        environment.generalise_inferred_groups(name, used);
+    }
+
+    Ok(environment.inferred_functions[name].clone())
 }
 
 #[derive(Debug)]
@@ -251,10 +214,9 @@ pub(crate) struct ExprTyper<'a, 'b> {
     // A static set of remaining function names that are known but not yet inferred
     pub(crate) not_yet_inferred: BTreeSet<String>,
 
-    // We keep track of whether any ungeneralised functions have been used
-    // to determine whether it is safe to generalise this expression after
-    // it has been inferred.
-    pub(crate) ungeneralised_function_used: bool,
+    // The functions used that weren't generalised yet: this function is generalised along with
+    // them, once all of them are inferred.
+    pub(crate) ungeneralised_functions_used: BTreeSet<String>,
 }
 
 impl<'a, 'b> ExprTyper<'a, 'b> {
@@ -264,7 +226,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             not_yet_inferred: BTreeSet::new(),
             environment,
             tracing,
-            ungeneralised_function_used: false,
+            ungeneralised_functions_used: BTreeSet::new(),
         }
     }
 
@@ -2752,13 +2714,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 if let ValueConstructorVariant::ModuleFn { name: fn_name, .. } =
                     &constructor.variant
                 {
-                    // Note whether we are using an ungeneralised function so that we can
-                    // tell if it is safe to generalise this function after inference has
-                    // completed.
-                    let is_ungeneralised = self.environment.ungeneralised_functions.contains(name);
-
-                    self.ungeneralised_function_used =
-                        self.ungeneralised_function_used || is_ungeneralised;
+                    // This function is generalised along with the ungeneralised functions it
+                    // uses, once all of them are inferred.
+                    if self.environment.ungeneralised_functions.contains(name) {
+                        self.ungeneralised_functions_used.insert(name.to_string());
+                    }
 
                     // In case we use another function, infer it first before going further.
                     // This ensures we have as much information possible about the function

@@ -7239,20 +7239,263 @@ fn an_erased_opaque_wrapper_cannot_hold_a_function() {
     ));
 }
 
+/// An inferred function type is generalised: callers in the module and in other modules pick
+/// their own types, whether the function is called before it's inferred, recursive, or part of
+/// a recursive group.
 #[test]
-fn a_type_that_nothing_fixes_is_linked_to_data_once_every_module_type_checks() {
-    let source_code = r#"
+fn inferred_function_types_are_generalised_for_every_caller() {
+    // A hole that nothing fixes, in an unannotated function's signature, becomes one of its type
+    // variables, which each call fixes; the `expect` is recorded on it.
+    let (_, module) = check(parse(
+        r#"
         pub fn main(data: Data) {
           expect xs: List<_> = data
           xs
         }
-    "#;
+        "#,
+    ))
+    .expect("should type-check");
 
-    let (_, module) = check(parse(source_code)).expect("should type-check");
+    assert_eq!(
+        module.type_info.values["main"].tipo.to_pretty(0),
+        "fn(Data) -> List<a>"
+    );
 
-    let tipo = &module.type_info.values["main"].tipo;
+    accepted(
+        "a function of the same module",
+        r#"
+        type Foo { Foo }
+        type Bar { Bar }
 
-    assert_eq!(tipo.to_pretty(0), "fn(Data) -> List<Data>");
+        fn ident(x) {
+          x
+        }
+
+        fn main() -> (Foo, Bar) {
+          (ident(Foo), ident(Bar))
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "an imported function",
+        r#"
+        use dep
+
+        type Foo { Foo }
+        type Bar { Bar }
+
+        fn main() -> (Foo, Bar) {
+          (dep.ident(Foo), dep.ident(Bar))
+        }
+        "#,
+        vec![parse_as(
+            r#"
+            pub fn ident(x) {
+              x
+            }
+            "#,
+            "dep",
+        )],
+    );
+
+    accepted(
+        "a function called before it's inferred",
+        r#"
+        type Foo { Foo }
+        type Bar { Bar }
+
+        fn main() -> (Foo, Bar) {
+          (ident(Foo), ident(Bar))
+        }
+
+        fn ident(x) {
+          x
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "an imported recursive function",
+        r#"
+        use dep
+
+        type Foo { Foo }
+        type Bar { Bar }
+
+        fn main() -> (Foo, Bar) {
+          (dep.last(Foo, []), dep.last(Bar, []))
+        }
+        "#,
+        vec![parse_as(
+            r#"
+            pub fn last(x, xs) {
+              when xs is {
+                [] -> x
+                [y, ..ys] -> last(y, ys)
+              }
+            }
+            "#,
+            "dep",
+        )],
+    );
+
+    accepted(
+        "recursive functions of the same module",
+        r#"
+        type Foo { Foo }
+        type Bar { Bar }
+
+        fn last(x, xs) {
+          when xs is {
+            [] -> x
+            [y, ..ys] -> last(y, ys)
+          }
+        }
+
+        fn ping(x, n) {
+          if n <= 0 {
+            x
+          } else {
+            pong(x, n - 1)
+          }
+        }
+
+        fn pong(x, n) {
+          ping(x, n)
+        }
+
+        fn main() -> (Foo, Bar, Foo, Bar) {
+          (last(Foo, []), last(Bar, []), ping(Foo, 2), pong(Bar, 3))
+        }
+        "#,
+        vec![],
+    );
+}
+
+/// A documented signature prints each type variable under one name, the annotation's when
+/// there's one, whether its arguments are annotated or inferred.
+#[test]
+fn docs_signatures_name_each_type_variable_once() {
+    let (_, module) = check(parse(
+        r#"
+        pub fn pair_up(x, y) {
+          (x, y)
+        }
+
+        pub fn konst(_x, y) {
+          y
+        }
+
+        pub fn pick(x: a, y) {
+          if True {
+            x
+          } else {
+            y
+          }
+        }
+
+        pub fn beside(x: a, y) {
+          (x, y)
+        }
+
+        pub fn first_key(xs: Pairs<k, v>, default) {
+          when xs is {
+            [] -> default
+            [Pair(key, _), ..] -> key
+          }
+        }
+
+        type Identity<t> =
+          t
+
+        pub fn pick_identity(x: Identity<item>, y) {
+          if True {
+            x
+          } else {
+            y
+          }
+        }
+        "#,
+    ))
+    .expect("should type-check");
+
+    let signatures: Vec<String> = module
+        .definitions
+        .iter()
+        .filter_map(|definition| match definition {
+            Definition::Fn(f) => Some(
+                crate::format::Formatter::new()
+                    .docs_fn_signature(
+                        &f.name,
+                        &f.arguments,
+                        &f.return_annotation,
+                        f.return_type.clone(),
+                    )
+                    .to_pretty_string(80),
+            ),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        signatures,
+        [
+            "pair_up(x: a, y: b) -> (a, b)",
+            "konst(a, y: b) -> b",
+            "pick(x: a, y: a) -> a",
+            "beside(x: a, y: b) -> (a, b)",
+            "first_key(xs: Pairs<k, v>, default: k) -> k",
+            "pick_identity(x: Identity<item>, y: item) -> Identity<item>",
+        ]
+    );
+}
+
+/// A type variable that a constant's type comes to mention, through a link made after the
+/// constant was inferred, stays shared: the function isn't generalised over it. This holds for
+/// an imported constant too.
+#[test]
+fn a_variable_tied_to_a_constant_is_not_generalised() {
+    let source_code = |constant: &str, argument: &str| {
+        format!(
+            r#"
+            {constant}
+
+            fn tied(x) {{
+              let _ = [k, [[x]]]
+              x
+            }}
+
+            fn use_k() -> List<List<Int>> {{
+              k
+            }}
+
+            fn main() {{
+              tied({argument})
+            }}
+            "#
+        )
+    };
+
+    for constant in ["const k = []", "use dep.{k}"] {
+        for (argument, accepted) in [("1", true), ("#\"aa\"", false)] {
+            let result = check_with_deps(
+                parse(&source_code(constant, argument)),
+                vec![parse_as("pub const k = []", "dep")],
+            );
+
+            if accepted {
+                assert!(result.is_ok(), "{constant}: {result:#?}");
+            } else {
+                assert!(
+                    matches!(result, Err((_, Error::CouldNotUnify { .. }))),
+                    "{constant}: {result:#?}"
+                );
+            }
+        }
+    }
 }
 
 /// Modules that share a type variable each record the casts it meets; the strongest one

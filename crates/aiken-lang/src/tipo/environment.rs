@@ -3,6 +3,7 @@ use super::{
     ValueConstructor, ValueConstructorVariant,
     error::{Error, UnifyErrorSituation, Warning},
     exhaustive::{Matrix, PatternStack, simplify},
+    generalise,
     hydrator::Hydrator,
     layout,
     requirement::{self, Cast, Level, Requirement},
@@ -10,10 +11,10 @@ use super::{
 use crate::{
     IdGenerator,
     ast::{
-        self, Annotation, CallArg, DataType, Definition, Function, ModuleConstant, ModuleKind,
-        Namespace, PIPE_VARIABLE, RecordConstructor, RecordConstructorArg, Span, TypeAlias,
-        TypedDefinition, TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport,
-        UntypedArg, UntypedDefinition, UntypedFunction, Use, Validator,
+        self, Annotation, CallArg, DataType, Definition, ModuleConstant, ModuleKind, Namespace,
+        PIPE_VARIABLE, RecordConstructor, RecordConstructorArg, Span, TypeAlias, TypedDefinition,
+        TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport, UntypedArg,
+        UntypedDefinition, UntypedFunction, Use, Validator,
     },
     tipo::{TypeAliasAnnotation, fields::FieldMap},
 };
@@ -83,8 +84,12 @@ pub struct Environment<'a> {
     /// Values defined in the current module (or the prelude)
     pub module_values: HashMap<String, ValueConstructor>,
 
-    /// Top-level function definitions from the module
+    /// Top-level function definitions from the module, removed once a reference to them is
+    /// inferred
     pub module_functions: HashMap<String, &'a UntypedFunction>,
+
+    /// Names of the module's top-level functions, the only definitions generalised
+    pub function_names: HashSet<String>,
 
     /// Top-level validator definitions from the module
     pub module_validators: HashMap<String, (Span, Vec<String>)>,
@@ -101,6 +106,19 @@ pub struct Environment<'a> {
     /// We use this to determine whether functions that call this one
     /// can safely be generalised.
     pub ungeneralised_functions: HashSet<String>,
+
+    /// The module's functions generalised so far, with the variable each is bound to, which
+    /// survives restoring a scope saved before.
+    generalised_functions: HashMap<String, (ValueConstructorVariant, Rc<Type>)>,
+
+    /// The module's functions inferred but not generalised yet, with the functions not
+    /// generalised yet that each uses: a recursive group is generalised once complete.
+    waiting_functions: HashMap<String, BTreeSet<String>>,
+
+    /// Types whose unknown type variables other definitions share, so that no function
+    /// generalises them: the module's constants, and the values of other modules that still
+    /// mention unknown types.
+    pub shared_types: Vec<Rc<Type>>,
 
     /// Names of types or values that have been imported an unqualified fashion
     /// from other modules. Used to prevent multiple imports using the same name.
@@ -173,6 +191,104 @@ impl<'a> Environment<'a> {
         self.handle_unused(unused);
 
         self.scope = data.local_values;
+
+        // A function generalised while the scope was open keeps its generalised type.
+        for (name, (variant, tipo)) in &self.generalised_functions {
+            if let Some(value) = self.scope.get_mut(name)
+                && &value.variant == variant
+            {
+                value.tipo = tipo.clone();
+            }
+        }
+    }
+
+    /// Generalises inferred functions that form a recursive group: the type variables still
+    /// unknown in their signatures, apart from those other definitions share, become generic
+    /// variables, in copies of their signatures and bodies. Binds each function to its
+    /// generalised type.
+    fn generalise_functions(&mut self, functions: Vec<TypedFunction>) -> Vec<TypedFunction> {
+        let mut variables = HashSet::new();
+        for function in &functions {
+            for argument in &function.arguments {
+                argument.tipo.collect_unbound(&mut variables);
+            }
+            function.return_type.collect_unbound(&mut variables);
+        }
+
+        // The shared types' variables now, including through links made since.
+        let mut shared = HashSet::new();
+        for tipo in &self.shared_types {
+            tipo.collect_unbound(&mut shared);
+        }
+        variables.retain(|id| !shared.contains(id));
+
+        functions
+            .into_iter()
+            .map(|mut function| {
+                function.map_types(&mut |tipo| generalise(tipo, &variables));
+
+                let tipo = Type::function(
+                    function
+                        .arguments
+                        .iter()
+                        .map(|arg| arg.tipo.clone())
+                        .collect(),
+                    function.return_type.clone(),
+                );
+
+                if let Some(value) = self.scope.get_mut(&function.name) {
+                    value.tipo = tipo.clone();
+                    self.generalised_functions
+                        .insert(function.name.clone(), (value.variant.clone(), tipo));
+                }
+
+                function
+            })
+            .collect()
+    }
+
+    /// Records that the module function `name` is inferred, and calls the functions `used`,
+    /// which weren't generalised then. Then generalises every recursive group that is now
+    /// inferred: the waiting functions that call no function still waiting outside them.
+    pub fn generalise_inferred_groups(&mut self, name: &str, used: BTreeSet<String>) {
+        self.waiting_functions.insert(name.to_string(), used);
+
+        let mut group: BTreeSet<String> = self.waiting_functions.keys().cloned().collect();
+        loop {
+            let blocked: Vec<String> = group
+                .iter()
+                .filter(|function| {
+                    self.waiting_functions[*function].iter().any(|callee| {
+                        !group.contains(callee) && self.ungeneralised_functions.contains(callee)
+                    })
+                })
+                .cloned()
+                .collect();
+
+            if blocked.is_empty() {
+                break;
+            }
+
+            for function in &blocked {
+                group.remove(function);
+            }
+        }
+
+        let functions = group
+            .iter()
+            .map(|function| {
+                self.waiting_functions.remove(function);
+                self.ungeneralised_functions.remove(function);
+                self.inferred_functions
+                    .remove(function)
+                    .expect("a waiting function is inferred")
+            })
+            .collect();
+
+        for function in self.generalise_functions(functions) {
+            self.inferred_functions
+                .insert(function.name.clone(), function);
+        }
     }
 
     pub fn annotate(&mut self, return_type: Rc<Type>, annotation: &Annotation) -> Rc<Type> {
@@ -285,69 +401,51 @@ impl<'a> Environment<'a> {
         Ok(Some(fields))
     }
 
-    pub fn generalise_definition(
+    /// Puts a definition in its final form once the whole module is inferred, and adds it to the
+    /// module's interface.
+    pub fn finish_definition(
         &mut self,
         s: TypedDefinition,
         module_name: &String,
     ) -> TypedDefinition {
         match s {
-            Definition::Fn(Function {
-                doc,
-                location,
-                name,
-                public,
-                arguments: args,
-                body,
-                return_annotation,
-                return_type,
-                end_position,
-                on_test_failure,
-            }) => {
-                // Lookup the inferred function information
-                let function = self
-                    .get_variable(&name)
+            Definition::Fn(function) => {
+                // A module function's recursive group can be generalised after the function was
+                // inferred: take the generalised copy. A validator's handlers keep the types they
+                // were registered with.
+                let function = if self.function_names.contains(&function.name) {
+                    self.inferred_functions
+                        .remove(&function.name)
+                        .expect("a module function is inferred")
+                } else {
+                    function
+                };
+
+                let variable = self
+                    .get_variable(&function.name)
                     .expect("Could not find preregistered type for function");
 
-                let field_map = function.field_map().cloned();
-
-                let tipo = function.tipo.clone();
-
-                // Generalise the function if not already done so
-                let tipo = if self.ungeneralised_functions.remove(&name) {
-                    generalise(tipo, 0)
-                } else {
-                    tipo
-                };
+                let field_map = variable.field_map().cloned();
+                let tipo = variable.tipo.clone();
 
                 // Insert the function into the module's interface
                 self.insert_module_value(
-                    &name,
+                    &function.name,
                     ValueConstructor {
-                        public,
+                        public: function.public,
                         tipo,
                         variant: ValueConstructorVariant::ModuleFn {
-                            name: name.clone(),
+                            name: function.name.clone(),
                             field_map,
                             module: module_name.to_owned(),
-                            arity: args.len(),
-                            location,
+                            arity: function.arguments.len(),
+                            location: function.location,
                             builtin: None,
                         },
                     },
                 );
 
-                Definition::Fn(Function {
-                    doc,
-                    location,
-                    name,
-                    public,
-                    arguments: args,
-                    return_annotation,
-                    return_type,
-                    body,
-                    end_position,
-                    on_test_failure,
-                })
+                Definition::Fn(function)
             }
             Definition::Validator(Validator {
                 doc,
@@ -367,7 +465,7 @@ impl<'a> Environment<'a> {
                         fun.name = handler_name;
 
                         let Definition::Fn(mut fun) =
-                            self.generalise_definition(Definition::Fn(fun), module_name)
+                            self.finish_definition(Definition::Fn(fun), module_name)
                         else {
                             unreachable!()
                         };
@@ -384,7 +482,7 @@ impl<'a> Environment<'a> {
                 fallback.name = fallback_name;
 
                 let Definition::Fn(mut fallback) =
-                    self.generalise_definition(Definition::Fn(fallback), module_name)
+                    self.finish_definition(Definition::Fn(fallback), module_name)
                 else {
                     unreachable!()
                 };
@@ -1165,6 +1263,14 @@ impl<'a> Environment<'a> {
             previous_id: id_gen.next(),
             id_gen,
             ungeneralised_functions: HashSet::new(),
+            generalised_functions: HashMap::new(),
+            waiting_functions: HashMap::new(),
+            shared_types: importable_modules
+                .values()
+                .flat_map(|module| module.values.values())
+                .map(|value| value.tipo.clone())
+                .filter(|tipo| tipo.contains_unbound())
+                .collect(),
             inferred_functions: HashMap::new(),
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
@@ -1174,6 +1280,7 @@ impl<'a> Environment<'a> {
             unreachable_variables: Vec::new(),
             module_values: HashMap::new(),
             module_functions: HashMap::new(),
+            function_names: HashSet::new(),
             module_validators: HashMap::new(),
             imported_modules: HashMap::new(),
             unused_modules: HashMap::new(),
@@ -1660,6 +1767,7 @@ impl<'a> Environment<'a> {
                 )?;
 
                 self.module_functions.insert(fun.name.clone(), fun);
+                self.function_names.insert(fun.name.clone());
 
                 if !fun.public {
                     self.init_usage(fun.name.clone(), EntityKind::PrivateFunction, fun.location);
@@ -2430,71 +2538,4 @@ fn get_compatible_record_fields<A>(
     }
 
     compatible
-}
-
-/// Takes a level and a type and turns all type variables within the type that have
-/// level higher than the input level into generalized (polymorphic) type variables.
-#[allow(clippy::only_used_in_recursion)]
-pub(crate) fn generalise(t: Rc<Type>, ctx_level: usize) -> Rc<Type> {
-    match t.deref() {
-        Type::Var { tipo, alias } => Type::with_alias(
-            match tipo.borrow().deref() {
-                TypeVar::Unbound { id } => Type::generic_var(*id),
-                TypeVar::Link { tipo } => generalise(tipo.clone(), ctx_level),
-                TypeVar::Generic { .. } => Rc::new(Type::Var {
-                    tipo: tipo.clone(),
-                    alias: None,
-                }),
-            },
-            alias.clone(),
-        ),
-
-        Type::App {
-            public,
-            module,
-            name,
-            args,
-            alias,
-        } => {
-            let args: Vec<Rc<Type>> = args
-                .iter()
-                .map(|t| generalise(t.clone(), ctx_level))
-                .collect();
-
-            Rc::new(Type::App {
-                public: *public,
-                module: module.clone(),
-                name: name.clone(),
-                args,
-                alias: alias.clone(),
-            })
-        }
-
-        Type::Fn { args, ret, alias } => Type::with_alias(
-            Type::function(
-                args.iter()
-                    .map(|t| generalise(t.clone(), ctx_level))
-                    .collect(),
-                generalise(ret.clone(), ctx_level),
-            ),
-            alias.clone(),
-        ),
-
-        Type::Tuple { elems, alias } => Type::with_alias(
-            Type::tuple(
-                elems
-                    .iter()
-                    .map(|t| generalise(t.clone(), ctx_level))
-                    .collect(),
-            ),
-            alias.clone(),
-        ),
-        Type::Pair { fst, snd, alias } => Type::with_alias(
-            Type::pair(
-                generalise(fst.clone(), ctx_level),
-                generalise(snd.clone(), ctx_level),
-            ),
-            alias.clone(),
-        ),
-    }
 }
