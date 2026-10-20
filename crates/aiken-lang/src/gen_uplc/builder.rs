@@ -199,8 +199,21 @@ pub fn get_generic_variant_name(t: &Rc<Type>, module_types: &IndexMap<&str, &Typ
 
 /// Replaces the erased opaque types the tree holds by their fields' types, which are their
 /// runtime types. Constructing, matching and updating erased values is lowered when the tree is
-/// built.
+/// built. The types of module function variables are left for the hoisting to erase, once it has
+/// paired the function's generics with them.
 pub fn erase_opaque_types(air_tree: &mut AirTree, module_types: &IndexMap<&str, &TypeInfo>) {
+    if let AirTree::Var {
+        constructor:
+            ValueConstructor {
+                variant: ValueConstructorVariant::ModuleFn { builtin: None, .. },
+                ..
+            },
+        ..
+    } = air_tree
+    {
+        return;
+    }
+
     let mut held_types = air_tree.mut_held_types();
 
     while let Some(tipo) = held_types.pop() {

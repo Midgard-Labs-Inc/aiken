@@ -447,3 +447,94 @@ pub fn total(data: Data) -> Int {
         assert_eq!(total.run(&bad_tail), super::Outcome::Failed);
     }
 }
+
+/// An erased opaque type can be the only place a function's type parameter appears in its
+/// signature: the call still tells which type the function's generics are.
+#[test]
+fn a_type_parameter_only_in_an_erased_opaque_type_is_resolved() {
+    let compiled = assert_tests_pass(
+        &[(
+            "lib/erased_tag.ak",
+            r#"
+use aiken/collection/list
+
+pub opaque type Tag<a> {
+  Tag(Int)
+}
+
+pub fn holds(_tag: Tag<a>, d: Data) -> Bool {
+  expect _x: a = d
+  True
+}
+
+pub fn through(tag: Tag<a>, d: Data) -> Bool {
+  holds(tag, d)
+}
+
+pub fn holds_int(d: Data) -> Bool {
+  let tag: Tag<Int> = Tag(0)
+  through(tag, d)
+}
+
+pub fn holds_bytes(d: Data) -> Bool {
+  let tag: Tag<ByteArray> = Tag(0)
+  holds(tag, d)
+}
+
+pub fn count(_tag: Tag<a>) -> Int {
+  let xs: List<a> = []
+  list.length(xs)
+}
+
+pub fn roundtrips(_tag: Tag<a>, d: Data) -> Bool {
+  expect x: a = d
+  as_data(x) == d
+}
+
+pub fn compares(_tag: Tag<a>) -> Bool {
+  let xs: List<a> = []
+  xs == []
+}
+
+pub fn roundtrips_both() -> Bool {
+  let int_tag: Tag<Int> = Tag(0)
+  let bytes_tag: Tag<ByteArray> = Tag(0)
+  roundtrips(int_tag, as_data(1)) && roundtrips(bytes_tag, as_data(#"aa"))
+}
+
+pub fn compares_both() -> Bool {
+  let int_tag: Tag<Int> = Tag(0)
+  let bytes_tag: Tag<ByteArray> = Tag(0)
+  compares(int_tag) && compares(bytes_tag)
+}
+
+test decodes_at_the_phantom_type() {
+  holds_int(as_data(1)) && holds_bytes(as_data(#"aa"))
+}
+
+test counts_a_list_of_the_phantom_type() {
+  let tag: Tag<Int> = Tag(0)
+  count(tag) == 0
+}
+
+test keys_a_constrained_phantom_type() {
+  roundtrips_both() && compares_both()
+}
+"#,
+        )],
+        "erased_tag",
+    );
+
+    let int = [PlutusData::from(&Data::integer(1.into()))];
+    let bytes = [PlutusData::from(&Data::bytestring(vec![0xaa]))];
+
+    for project in &compiled {
+        let holds_int = project.function("erased_tag", "holds_int");
+        assert_ne!(holds_int.run(&int), super::Outcome::Failed);
+        assert_eq!(holds_int.run(&bytes), super::Outcome::Failed);
+
+        let holds_bytes = project.function("erased_tag", "holds_bytes");
+        assert_ne!(holds_bytes.run(&bytes), super::Outcome::Failed);
+        assert_eq!(holds_bytes.run(&int), super::Outcome::Failed);
+    }
+}
