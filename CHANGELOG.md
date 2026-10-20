@@ -49,6 +49,7 @@
 - **aiken-project**: `aiken export` refuses a function whose argument or return type can hold a value of an opaque type in a type argument, as `Option<Thing>` or `List<Thing>` for an opaque `Thing`, with `illegal::opaque_type_in_abi`, as it refuses `Thing` itself. It used to export it, with a schema that exposed `Thing`'s fields. A phantom argument, as in `Tagged<Thing>`, holds no value and is accepted.
 - **aiken-lang**: A `@list` record validator parameter is converted from its `Data` to a list. It used to be read as the `Data` itself, so the validator failed on any value.
 - **uplc**: The optimizer's `split_body_lambda` no longer hoists an unapplied lambda above a binding whose argument can fail. It used to, so a check written before a closure, as in `let f = { expect n: Int = d  fn(x) { x + n } }`, ran only when the closure was called, and not at all when it wasn't.
+- **uplc**: The optimizer no longer panics with `FreeUnique(… "__slice_bytearray_N_curried" …)` on a three-argument builtin called several times with the same arguments after a first one that isn't a constant, as in `builtin.slice_bytearray(i, 2, #"aabbcc")`, `integer_to_bytearray(e, 4, n)`, `and_bytearray(e, a, b)` or `or_bytearray(e, a, b)`: only prefixes of constant arguments are hoisted. Programs that compiled before compile to the same code.
 
 ## v1.4.0 - 2026-10-18
 
