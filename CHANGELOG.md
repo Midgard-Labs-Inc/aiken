@@ -6,6 +6,7 @@
 
 - **uplc**: `Program::lower` applies only the lowering every program Aiken generates needs (BLS constants, `__no_inline__` wrappers, typed-list adapters), without the optimizer's rewrites. It is the baseline the optimized program must agree with.
 - **aiken-lang**: `CodeGenerator::generate_unoptimized` compiles a validator without running the optimizer, like `generate_raw_unoptimized` does for other definitions.
+- **uplc**: `uplc::data::arbitrary::arb_plutus_data` generates arbitrary `PlutusData` for property tests, behind the new `proptest` feature.
 
 ## v1.4.0 - 2026-10-18
 

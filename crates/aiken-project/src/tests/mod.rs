@@ -26,6 +26,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod casts;
 mod gen_uplc;
 
 // TODO: Possible refactor this out of the module and have it used by `Project`. The idea would
