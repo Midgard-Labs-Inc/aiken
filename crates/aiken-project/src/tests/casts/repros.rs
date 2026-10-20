@@ -262,3 +262,120 @@ fn erased_opaque_types_are_newtypes() {
         );
     }
 }
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn equality_with_data_compares_as_data() {
+    assert_tests_pass(
+        &[(
+            "lib/equality.ak",
+            r#"
+use aiken/builtin
+
+test int_eq() {
+  let d: Data = builtin.i_data(1)
+  1 == d
+}
+
+test int_neq() {
+  let d: Data = builtin.i_data(2)
+  1 != d
+}
+
+test bool_neq() {
+  let d: Data = builtin.constr_data(1, [])
+  False != d
+}
+
+test data_neq_constant() {
+  let d: Data = builtin.constr_data(0, [])
+  d != True
+}
+
+test bool_eq() {
+  let d: Data = builtin.constr_data(1, [])
+  True == d
+}
+
+test bytes_eq() {
+  let d: Data = builtin.b_data(#"aa")
+  #"aa" == d
+}
+
+test data_eq_int() {
+  let d: Data = builtin.i_data(1)
+  d == 1 && !(d != 1) && d != 2
+}
+"#,
+        )],
+        "equality",
+    );
+}
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn upcasts_convert_at_every_position() {
+    assert_tests_pass(
+        &[(
+            "lib/up.ak",
+            r#"
+use aiken/builtin
+
+type Box {
+  d: Data,
+  n: Int,
+}
+
+fn eq_data(d: Data, n: Int) -> Bool {
+  d == builtin.i_data(n)
+}
+
+fn all(xs: List<a>, f: fn(a) -> Bool) -> Bool {
+  when xs is {
+    [] -> True
+    [x, ..rest] -> f(x) && all(rest, f)
+  }
+}
+
+test call_argument() {
+  eq_data(1, 1)
+}
+
+test record_field() {
+  Box { d: 1, n: 0 }.d == builtin.i_data(1)
+}
+
+test record_update() {
+  let b = Box { d: 1, n: 0 }
+  Box { ..b, d: 2 }.d == builtin.i_data(2)
+}
+
+test let_annotation() {
+  let d: Data = 1
+  d == builtin.i_data(1)
+}
+
+test pipe() {
+  1 |> eq_data(1)
+}
+
+test capture() {
+  all([1, 1], eq_data(_, 1)) && !all([1, 2], eq_data(_, 1))
+}
+
+// The annotation makes `one` a `Data`, not an `Int`.
+const one: Data = 1
+
+test constant_annotation() {
+  one == builtin.i_data(1)
+}
+
+test trace_argument() {
+  trace @"label": 1
+  True
+}
+"#,
+        )],
+        "up",
+    );
+}

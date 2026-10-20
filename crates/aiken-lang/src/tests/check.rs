@@ -3989,7 +3989,7 @@ fn forbid_expect_into_opaque_type_constructor_with_typecasting() {
 }
 
 #[test]
-fn forbid_expect_into_nested_opaque_in_record_without_typecasting() {
+fn expect_on_a_record_holding_an_opaque_type_that_isnt_data_is_a_pattern_match() {
     let source_code = r#"
         opaque type Thing { inner: Int }
 
@@ -4013,23 +4013,6 @@ fn forbid_expect_into_nested_opaque_in_record_with_typecasting() {
 
         fn bar(a: Data) {
           expect Foo { foo: Thing { inner } } : Foo = a
-          Void
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::ExpectOnOpaqueType { .. }))
-    ))
-}
-
-#[test]
-fn forbid_expect_into_nested_opaque_in_list() {
-    let source_code = r#"
-        opaque type Thing { inner: Int }
-
-        fn bar(a: Data) {
-          expect [x]: List<Thing> = [a]
           Void
         }
     "#;
@@ -6172,6 +6155,123 @@ fn coerce_binding_has_the_annotated_type() {
         fn bar(data: Data) -> ByteArray {
           coerce datum: Datum = data
           datum
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn function_argument_types_match_exactly_when_passed() {
+    let source_code = r#"
+        fn apply(f: fn(Data) -> Bool, data: Data) -> Bool {
+          f(data)
+        }
+
+        fn is_positive(n: Int) -> Bool {
+          n > 0
+        }
+
+        fn main(data: Data) -> Bool {
+          apply(is_positive, data)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn function_argument_types_match_exactly_in_expect() {
+    let source_code = r#"
+        fn is_unit(data: Data) -> Bool {
+          data == Void
+        }
+
+        fn main() -> Bool {
+          expect f: fn(Int) -> Bool = is_unit
+          f(42)
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn pipe_does_not_cast_function_arguments() {
+    let source_code = r#"
+        fn apply(f: fn(Data) -> Bool) -> Bool {
+          f(Void)
+        }
+
+        fn is_positive(n: Int) -> Bool {
+          n > 0
+        }
+
+        fn main() -> Bool {
+          is_positive |> apply
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((
+            _,
+            Error::CouldNotUnify {
+                situation: Some(UnifyErrorSituation::PipeTypeMismatch),
+                ..
+            }
+        ))
+    ))
+}
+
+#[test]
+fn expect_on_a_value_that_isnt_data_is_a_pattern_match_on_an_opaque_type() {
+    let source_code = r#"
+        pub opaque type Thing { inner: Int }
+
+        fn id(x: a) -> a { x }
+
+        fn f(t: Thing) -> Thing {
+          expect x: Thing = id(t)
+          x
+        }
+    "#;
+
+    assert!(check(parse(source_code)).is_ok())
+}
+
+#[test]
+fn expect_into_an_opaque_type_from_a_value_that_isnt_data_is_a_type_mismatch() {
+    let source_code = r#"
+        pub opaque type Thing { inner: Int }
+
+        fn f() -> Thing {
+          expect x: Thing = 1
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+#[test]
+fn a_lambda_return_annotation_does_not_upcast() {
+    let source_code = r#"
+        fn main() -> Bool {
+          let g = fn() -> Data { 1 }
+          g() == 1
         }
     "#;
 

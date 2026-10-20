@@ -538,6 +538,7 @@ impl<'comments> Formatter<'comments> {
                 UnOp::Not => docvec!["!", self.const_expr(value)],
                 UnOp::Negate => docvec!["-", self.const_expr(value)],
             },
+            TypedExpr::Upcast { value, .. } => self.const_expr(value),
             _ => Document::Str(""),
         }
     }

@@ -710,21 +710,11 @@ impl<'a> CodeGenerator<'a> {
 
                         let constr_args = args
                             .iter()
-                            .zip(constr_tipo.arg_types().unwrap())
-                            .map(|(arg, tipo)| {
-                                if tipo.is_data() {
-                                    AirTree::cast_to_data(
-                                        self.build(&arg.value, module_build_name, &[]),
-                                        arg.value.tipo(),
-                                    )
-                                } else {
-                                    self.build(&arg.value, module_build_name, &[])
-                                }
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         if layout.is_erased() {
-                            // A newtype: the value is its field, upcast if the field is `Data`.
+                            // A newtype: the value is its field.
                             return constr_args.into_iter().next().unwrap();
                         }
 
@@ -745,23 +735,9 @@ impl<'a> CodeGenerator<'a> {
                             },
                         ..
                     } => {
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         if let Some(func) = builtin {
@@ -788,24 +764,9 @@ impl<'a> CodeGenerator<'a> {
                             unreachable!("Missing module function definition")
                         };
 
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         if let Some(func) = builtin {
@@ -819,23 +780,9 @@ impl<'a> CodeGenerator<'a> {
                         }
                     }
                     _ => {
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         AirTree::call(
@@ -986,7 +933,8 @@ impl<'a> CodeGenerator<'a> {
                                                 value_type: branch.condition.tipo(),
                                                 kind: AssignmentKind::Expect { backpassing: () },
                                                 remove_unused: false,
-                                                full_check: true,
+                                                full_check: branch.condition.tipo().is_data()
+                                                    && !tipo.is_data(),
                                                 otherwise: Some(AirTree::local_var(
                                                     &acc_var,
                                                     tipo.clone(),
@@ -1235,15 +1183,7 @@ impl<'a> CodeGenerator<'a> {
                             return spread;
                         };
 
-                        let field_type = layout
-                            .field_types(&layout.constructors[0], &tipo.arg_types().unwrap())
-                            .remove(0);
-
-                        let mut value = self.build(&arg.value, module_build_name, &[]);
-
-                        if field_type.is_data() && !arg.value.tipo().is_data() {
-                            value = AirTree::cast_to_data(value, arg.value.tipo());
-                        }
+                        let value = self.build(&arg.value, module_build_name, &[]);
 
                         // The spread is still evaluated: it may be a check that fails.
                         let spread_name = "__erased_spread".to_string();
@@ -1284,6 +1224,9 @@ impl<'a> CodeGenerator<'a> {
                     AirTree::unop(*op, self.build(value, module_build_name, &[]))
                 }
                 TypedExpr::CurvePoint { point, .. } => AirTree::curve(*point.as_ref()),
+                TypedExpr::Upcast { value, .. } => {
+                    AirTree::cast_to_data(self.build(value, module_build_name, &[]), value.tipo())
+                }
             }
         }
     }
@@ -1347,12 +1290,6 @@ impl<'a> CodeGenerator<'a> {
                         then,
                     )
                 }
-            } else if !props.value_type.is_data() && tipo.is_data() {
-                AirTree::let_assignment(
-                    name,
-                    AirTree::cast_to_data(value, props.value_type.clone()),
-                    then,
-                )
             } else {
                 AirTree::let_assignment(name, value, then)
             }
@@ -4632,7 +4569,7 @@ impl<'a> CodeGenerator<'a> {
                             }
                         };
 
-                        let binop_eq = match uplc_type {
+                        let binop_eq = match &uplc_type {
                             Some(UplcType::Unit) => {
                                 left.choose_unit(right.choose_unit(Term::bool(true)))
                             }
@@ -4666,7 +4603,8 @@ impl<'a> CodeGenerator<'a> {
                             Some(_) | None => builtin.apply(left).apply(right),
                         };
 
-                        if !left_tipo.is_bool() && matches!(op, BinOp::NotEq) {
+                        if !matches!(uplc_type, Some(UplcType::Bool)) && matches!(op, BinOp::NotEq)
+                        {
                             binop_eq.if_then_else(Term::bool(false), Term::bool(true))
                         } else {
                             binop_eq

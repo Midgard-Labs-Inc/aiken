@@ -14,7 +14,6 @@ use crate::{
         UntypedArg, UntypedDefinition, UntypedFunction, Use, Validator,
     },
     builtins::PRELUDE,
-    expr::AssignmentKind,
     tipo::{TypeAliasAnnotation, fields::FieldMap, well_known},
 };
 use std::{
@@ -2017,10 +2016,26 @@ impl<'a> Environment<'a> {
         Ok(())
     }
 
-    #[allow(clippy::only_used_in_recursion)]
+    /// Whether a value of type `tipo` can be upcast to `Data`.
     #[allow(clippy::result_large_err)]
-    pub fn unify(&mut self, lhs: Rc<Type>, rhs: Rc<Type>, location: Span) -> Result<(), Error> {
-        self.unify_with(lhs, rhs, location, UnifyMode::Strict)
+    pub fn check_upcast(&mut self, tipo: &Type, location: Span) -> Result<bool, Error> {
+        if !self.is_data_like(tipo) {
+            return Ok(false);
+        }
+
+        assert_no_unbounded_empty_list(tipo, location)?;
+
+        Ok(true)
+    }
+
+    /// Whether `expect` and `if … is` can convert `Data` to `tipo`.
+    #[allow(clippy::result_large_err)]
+    pub fn check_downcast(&mut self, tipo: &Type, location: Span) -> Result<bool, Error> {
+        if self.contains_opaque(tipo) {
+            return Err(Error::ExpectOnOpaqueType { location });
+        }
+
+        Ok(self.is_data_like(tipo))
     }
 
     /// Unify two types that should be the same.
@@ -2029,47 +2044,17 @@ impl<'a> Environment<'a> {
     /// It two types are found to not be the same an error is returned.
     #[allow(clippy::only_used_in_recursion)]
     #[allow(clippy::result_large_err)]
-    pub fn unify_with(
-        &mut self,
-        lhs: Rc<Type>,
-        rhs: Rc<Type>,
-        location: Span,
-        unify_mode: UnifyMode,
-    ) -> Result<(), Error> {
+    pub fn unify(&mut self, lhs: Rc<Type>, rhs: Rc<Type>, location: Span) -> Result<(), Error> {
         if lhs == rhs {
             return Ok(());
         }
 
-        match unify_mode {
-            UnifyMode::Strict => {}
-            UnifyMode::AllowUpCast => {
-                if lhs.is_data() && self.is_data_like(&rhs) {
-                    return assert_no_unbounded_empty_list(&rhs, location);
-                }
-            }
-            UnifyMode::AllowDownCast => {
-                if self.contains_opaque(&lhs) {
-                    return Err(Error::ExpectOnOpaqueType { location });
-                }
-
-                if (lhs.is_data() && self.is_data_like(&rhs))
-                    || (self.is_data_like(&lhs) && rhs.is_data())
-                {
-                    return assert_no_unbounded_empty_list(&rhs, location);
-                }
-            }
-        };
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
             // Collapse right hand side type links. Left hand side will be collapsed in the next block.
             if let Type::Var { tipo, alias } = rhs.deref()
                 && let TypeVar::Link { tipo } = tipo.borrow().deref()
             {
-                return self.unify_with(
-                    lhs,
-                    Type::with_alias(tipo.clone(), alias.clone()),
-                    location,
-                    unify_mode,
-                );
+                return self.unify(lhs, Type::with_alias(tipo.clone(), alias.clone()), location);
             }
 
             let could_not_unify = || Error::CouldNotUnify {
@@ -2113,7 +2098,7 @@ impl<'a> Environment<'a> {
                         *tipo.borrow_mut() = TypeVar::Link { tipo: rhs };
                         Ok(())
                     }
-                    Action::Unify(t) => self.unify_with(t, rhs, location, unify_mode),
+                    Action::Unify(t) => self.unify(t, rhs, location),
                     Action::CouldNotUnify => Err(could_not_unify()),
                 };
             }
@@ -2204,7 +2189,7 @@ impl<'a> Environment<'a> {
                     },
                 ) if args1.len() == args2.len() => {
                     for (a, b) in args1.iter().zip(args2) {
-                        self.unify_with(a.clone(), b.clone(), location, unify_mode)
+                        self.unify(a.clone(), b.clone(), location)
                             .map_err(|_| could_not_unify())?;
                     }
                     self.unify(retrn1.clone(), retrn2.clone(), location)
@@ -2337,29 +2322,6 @@ impl<'a> Environment<'a> {
                     })
                 })
                 .collect()
-        }
-    }
-}
-
-/// Captures unification policy rules, influenced by let/expect/if-is
-#[derive(Debug, Clone, Copy)]
-pub enum UnifyMode {
-    // A strict unification, no casting allowed whatsoever.
-    Strict,
-    // Direct assignations or function calls, allow implicit upcast to `Data`
-    AllowUpCast,
-    // Via `if/is` or `expect`, only allow non-opaque Data-like types on the left-hand side
-    AllowDownCast,
-}
-
-impl<T> From<AssignmentKind<T>> for UnifyMode {
-    fn from(kind: AssignmentKind<T>) -> Self {
-        match kind {
-            AssignmentKind::Let { .. } => Self::AllowUpCast,
-            AssignmentKind::Is => Self::AllowDownCast,
-            AssignmentKind::Expect { .. } => Self::AllowDownCast,
-            // A coerce never unifies its value with its annotation; see `infer_coerce`.
-            AssignmentKind::Coerce => Self::Strict,
         }
     }
 }

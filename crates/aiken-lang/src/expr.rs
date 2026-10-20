@@ -197,6 +197,13 @@ pub enum TypedExpr {
         tipo: Rc<Type>,
         op: UnOp,
     },
+
+    /// A value converted to `Data`, where `Data` is expected: a call argument, a `let` or
+    /// `expect` annotation, an operand of `==` or `!=`, a trace argument or a record update.
+    Upcast {
+        location: Span,
+        value: Box<Self>,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -307,6 +314,7 @@ impl TypedExpr {
     pub fn tipo(&self) -> Rc<Type> {
         match self {
             Self::Var { constructor, .. } => constructor.tipo.clone(),
+            Self::Upcast { .. } => Type::data(),
             Self::Trace { then, .. } => then.tipo(),
             Self::Fn { tipo, .. }
             | Self::UInt { tipo, .. }
@@ -341,6 +349,7 @@ impl TypedExpr {
                 constructor.tipo = new_type;
             }
             Self::Trace { then, .. } => then.replace_type(new_type),
+            Self::Upcast { .. } => unreachable!("an upcast is always Data"),
             Self::Fn { tipo, .. }
             | Self::UInt { tipo, .. }
             | Self::ErrorTerm { tipo, .. }
@@ -431,6 +440,8 @@ impl TypedExpr {
 
             // TODO: test
             TypedExpr::Var { constructor, .. } => Some(constructor.definition_location()),
+
+            TypedExpr::Upcast { value, .. } => value.definition_location(),
         }
     }
 
@@ -460,6 +471,8 @@ impl TypedExpr {
             | Self::CurvePoint { location, .. } => *location,
 
             Self::If { branches, .. } => branches.first().body.type_defining_location(),
+
+            Self::Upcast { value, .. } => value.type_defining_location(),
 
             Self::Sequence {
                 expressions,
@@ -497,6 +510,7 @@ impl TypedExpr {
             | Self::ModuleSelect { location, .. }
             | Self::RecordAccess { location, .. }
             | Self::RecordUpdate { location, .. }
+            | Self::Upcast { location, .. }
             | Self::CurvePoint { location, .. } => *location,
         }
     }
@@ -517,6 +531,8 @@ impl TypedExpr {
             | TypedExpr::Value { .. }
             | TypedExpr::ModuleSelect { .. }
             | TypedExpr::CurvePoint { .. } => Some(Located::Expression(self)),
+
+            TypedExpr::Upcast { value, .. } => value.find_node(byte_index),
 
             TypedExpr::Trace { text, then, .. } => text
                 .find_node(byte_index)
