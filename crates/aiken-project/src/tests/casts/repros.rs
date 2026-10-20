@@ -2,7 +2,8 @@
 //! and as the baseline, at both trace levels. They are ignored by default: run them with
 //! `cargo test -- --ignored`.
 
-use super::{Outcome, assert_tests_pass};
+use super::{Outcome, assert_tests_pass, compile_ok};
+use aiken_lang::gen_uplc::Error as CodeGenError;
 use uplc::{
     PlutusData,
     ast::{Data, Term},
@@ -508,4 +509,175 @@ test hole() {
         );
         assert_eq!(first.run(&[data(Data::constr(0, vec![]))]), Outcome::Failed);
     }
+}
+
+const GENERIC_DECODER: &str = r#"
+use aiken/builtin
+
+pub type A {
+  A(Int)
+}
+
+pub type B {
+  B(ByteArray)
+}
+
+pub fn decode(d: Data) -> a {
+  expect x: a = d
+  x
+}
+
+pub fn wrap(d: Data) -> a {
+  decode(d)
+}
+
+pub fn decode_a(d: Data) -> A {
+  decode(d)
+}
+
+pub fn wrap_b(d: Data) -> B {
+  wrap(d)
+}
+
+test two_records() {
+  let a: A = decode(builtin.constr_data(0, [builtin.i_data(1)]))
+  let b: B = decode(builtin.constr_data(0, [builtin.b_data(#"aa")]))
+  a == A(1) && b == B(#"aa")
+}
+
+test two_records_through_a_wrapper() {
+  let a: A = wrap(builtin.constr_data(0, [builtin.i_data(1)]))
+  let b: B = wrap(builtin.constr_data(0, [builtin.b_data(#"aa")]))
+  a == A(1) && b == B(#"aa")
+}
+"#;
+
+/// A decode at a type parameter converts to the type each call picks, so two record types of
+/// the same runtime shape need two variants.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn a_generic_decoder_has_a_variant_per_type() {
+    let compiled = assert_tests_pass(&[("lib/decoder.ak", GENERIC_DECODER)], "decoder");
+
+    let int_field = [data(Data::constr(0, vec![Data::integer(1.into())]))];
+    let bytes_field = [data(Data::constr(0, vec![Data::bytestring(vec![0xaa])]))];
+
+    for project in &compiled {
+        let decode_a = project.function("decoder", "decode_a");
+        assert_ne!(decode_a.run(&int_field), Outcome::Failed);
+        assert_eq!(decode_a.run(&bytes_field), Outcome::Failed);
+
+        let wrap_b = project.function("decoder", "wrap_b");
+        assert_ne!(wrap_b.run(&bytes_field), Outcome::Failed);
+        assert_eq!(wrap_b.run(&int_field), Outcome::Failed);
+    }
+}
+
+const POLYMORPHIC_RECURSION: &str = r#"
+pub type Tagged<a> {
+  Tagged(Int)
+}
+
+pub fn f(x: a, n: Int) -> Int {
+  if n <= 0 {
+    0
+  } else {
+    g(Some(x), n - 1)
+  }
+}
+
+pub fn g(x: b, n: Int) -> Int {
+  f(x, n - 1)
+}
+
+test recurses() {
+  f(1, 4) == 0
+}
+"#;
+
+/// Polymorphic recursion reaches `f` at `Option<Option<…>>`. Without a decode, its variants
+/// are keyed by shape, so there are finitely many.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn polymorphic_recursion_without_a_decode_compiles() {
+    assert_tests_pass(&[("lib/recursion.ak", POLYMORPHIC_RECURSION)], "recursion");
+}
+
+/// Compiles `source`'s test and checks that it's refused with `InfiniteVariants` on `f` or `g`.
+fn assert_infinite_variants(source: &str) {
+    for project in compile_ok(&[("lib/recursion.ak", source)]) {
+        let (_, program) = project.test_programs("recursion").remove(0);
+        let error = program.unwrap_err();
+
+        assert!(
+            matches!(&error, CodeGenError::InfiniteVariants { function, .. } if function == "recursion.f" || function == "recursion.g"),
+            "{error:#?}"
+        );
+    }
+}
+
+const DECODE_X: (&str, &str) = (
+    "  if n <= 0 {\n    0\n",
+    "  if n <= 0 {\n    let d: Data = x\n    expect _y: a = d\n    0\n",
+);
+
+/// With a decode of `x`, every type `f` is reached at needs its own variant, and there is no end
+/// to them.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn polymorphic_recursion_with_a_decode_is_refused() {
+    assert_infinite_variants(&POLYMORPHIC_RECURSION.replace(DECODE_X.0, DECODE_X.1));
+}
+
+/// Through `(x, x)`, the type doubles at each step: it's refused before its key or its decoder
+/// grows with it.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn polymorphic_recursion_with_a_decode_of_a_doubling_type_is_refused() {
+    assert_infinite_variants(
+        &POLYMORPHIC_RECURSION
+            .replace(DECODE_X.0, DECODE_X.1)
+            .replace("g(Some(x), n - 1)", "g((x, x), n - 1)"),
+    );
+}
+
+/// Only `x` is decoded, but each variant keyed by `x`'s full type rebuilds `y`, keyed by its
+/// shape, at twice the size: the type-size bound refuses the recursion long before the depth
+/// bound would.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn polymorphic_recursion_with_a_decode_and_a_doubling_argument_is_refused() {
+    assert_infinite_variants(
+        r#"
+pub fn f(x: a, y: b, n: Int) -> Int {
+  if n <= 0 {
+    let d: Data = x
+    expect _x: a = d
+    0
+  } else {
+    g(Some(x), (y, y), n - 1)
+  }
+}
+
+pub fn g(x: a, y: b, n: Int) -> Int {
+  f(x, y, n - 1)
+}
+
+test recurses() {
+  f(1, 2, 4) == 0
+}
+"#,
+    );
+}
+
+/// A decode that mentions the parameter only in a phantom position needs no variant per type.
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn polymorphic_recursion_with_a_phantom_decode_compiles() {
+    let source = POLYMORPHIC_RECURSION.replace(
+        "  if n <= 0 {\n    0\n",
+        "  if n <= 0 {\n    let d: Data = Tagged(1)\n    expect _t: Tagged<a> = d\n    0\n",
+    );
+
+    assert_tests_pass(&[("lib/recursion.ak", &source)], "recursion");
 }

@@ -36,7 +36,7 @@ use crate::{
     tipo::{
         DataLayout, ModuleValueConstructor, PatternConstructor, Type, TypeInfo, TypeVar,
         ValueConstructor, ValueConstructorVariant, convert_opaque_type, find_and_replace_generics,
-        get_generic_id_and_type, layout::lookup_layout,
+        get_generic_id_and_type, layout::lookup_layout, requirement::Level,
     },
 };
 use builder::{
@@ -50,7 +50,7 @@ use itertools::Itertools;
 use miette::{Diagnostic, NamedSource};
 use petgraph::{Graph, algo};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
 };
 use stick_break_set::{Builtins, TreeSet};
@@ -82,6 +82,71 @@ pub enum Error {
         #[source_code]
         source_code: NamedSource<String>,
     },
+
+    #[error("I can't compile {function}: it keeps reaching itself at new types.")]
+    #[diagnostic(
+        code("aiken::codegen::infinite_variants"),
+        help(
+            "{function} decodes or tests a value of one of its type parameters, so it needs a compiled variant for each type it's used at. Through polymorphic recursion, it reaches itself at ever larger types, here {types}, so there would be no end to its variants. Annotate the decoded value with a concrete type, or decode it outside the recursion."
+        )
+    )]
+    InfiniteVariants { function: String, types: String },
+}
+
+/// How many times a function can appear on the chain of variants that reached one of its
+/// variants, as rustc's recursion limit.
+const MAX_VARIANT_DEPTH: usize = 128;
+
+/// The largest type argument, counted in type constructors, that a variant may be built for, as
+/// rustc's type length limit. Polymorphic recursion through a decode reaches a function at a new
+/// type at each step, and can double a type each time, as from `a` to `(a, a)`. The variant's
+/// key, its decoder and every walk over its types grow with it, so the bound is checked before
+/// any of them.
+const MAX_VARIANT_TYPE_SIZE: usize = 256;
+
+/// Whether `tipo` has more than `limit` type constructors, counting each occurrence of a shared
+/// type. Stops counting past `limit`.
+fn type_size_exceeds(tipo: &Type, limit: usize) -> bool {
+    fn spend(budget: &mut usize) -> bool {
+        match budget.checked_sub(1) {
+            Some(rest) => {
+                *budget = rest;
+                false
+            }
+            None => true,
+        }
+    }
+
+    fn exceeds(tipo: &Type, budget: &mut usize) -> bool {
+        match tipo {
+            Type::Var { tipo, .. } => match &*tipo.borrow() {
+                TypeVar::Link { tipo } => exceeds(tipo, budget),
+                TypeVar::Unbound { .. } | TypeVar::Generic { .. } => false,
+            },
+            Type::App { args, .. } => spend(budget) || args.iter().any(|arg| exceeds(arg, budget)),
+            Type::Fn { args, ret, .. } => {
+                spend(budget) || args.iter().any(|arg| exceeds(arg, budget)) || exceeds(ret, budget)
+            }
+            Type::Tuple { elems, .. } => {
+                spend(budget) || elems.iter().any(|elem| exceeds(elem, budget))
+            }
+            Type::Pair { fst, snd, .. } => {
+                spend(budget) || exceeds(fst, budget) || exceeds(snd, budget)
+            }
+        }
+    }
+
+    let mut budget = limit;
+    exceeds(tipo, &mut budget)
+}
+
+/// The error for `function` reaching itself at ever larger types, here `mono_types`.
+/// `MAX_VARIANT_TYPE_SIZE` keeps those types small enough to print.
+fn infinite_variants(function: &FunctionAccessKey, mono_types: &IndexMap<u64, Rc<Type>>) -> Error {
+    Error::InfiniteVariants {
+        function: format!("{}.{}", function.module_name, function.function_name),
+        types: mono_types.values().map(|tipo| tipo.to_pretty(0)).join(", "),
+    }
 }
 
 const DELAY_ERROR: fn() -> AirTree =
@@ -213,6 +278,11 @@ pub struct CodeGenerator<'a> {
     constants: IndexMap<&'a FunctionAccessKey, &'a TypedExpr>,
     module_types: IndexMap<&'a str, &'a TypeInfo>,
     module_src: IndexMap<&'a str, &'a (String, LineNumbers)>,
+    /// The generic variables whose values some function decodes or tests: their variants are
+    /// keyed by full type.
+    decoded_generics: HashSet<u64>,
+    /// The generic variables some cast constrains, whatever its level.
+    constrained_generics: HashSet<u64>,
     /// immutable option
     tracing: TraceLevel,
     /// mutable index maps that are reset
@@ -221,6 +291,10 @@ pub struct CodeGenerator<'a> {
     code_gen_functions: IndexMap<String, CodeGenFunction>,
     cyclic_functions:
         IndexMap<(FunctionAccessKey, Variant), (CycleFunctionNames, usize, FunctionAccessKey)>,
+    /// The function variant whose dependencies are being found, and the one that first
+    /// reached each variant: the chains `check_variant_depth` bounds.
+    hoisting_variant: Option<(FunctionAccessKey, Variant)>,
+    variant_parents: IndexMap<(FunctionAccessKey, Variant), (FunctionAccessKey, Variant)>,
     /// mutable and reset as well
     interner: AirInterner,
     id_gen: IdGenerator,
@@ -298,17 +372,33 @@ impl<'a> CodeGenerator<'a> {
         module_src: IndexMap<&'a str, &'a (String, LineNumbers)>,
         tracing: Tracing,
     ) -> Self {
+        let decoded_generics = module_types
+            .values()
+            .flat_map(|info| &info.requirements)
+            .filter(|(_, requirement)| requirement.cast.level() >= Level::Decodable)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let constrained_generics = module_types
+            .values()
+            .flat_map(|info| info.requirements.keys().copied())
+            .collect();
+
         CodeGenerator {
             plutus_version,
             functions,
             constants,
             module_types,
             module_src,
+            decoded_generics,
+            constrained_generics,
             tracing: tracing.trace_level(true),
             defined_functions: IndexMap::new(),
             special_functions: CodeGenSpecialFuncs::new(),
             code_gen_functions: IndexMap::new(),
             cyclic_functions: IndexMap::new(),
+            hoisting_variant: None,
+            variant_parents: IndexMap::new(),
             interner: AirInterner::new(),
             id_gen: IdGenerator::new(),
             cached_constants: HashMap::new(),
@@ -367,13 +457,10 @@ impl<'a> CodeGenerator<'a> {
 
         let validator_args_tree = AirTree::no_op(air_tree_fun);
 
-        let full_tree = self.hoist_functions_to_validator(validator_args_tree);
-
-        // optimizations on air tree
-
-        let full_vec = full_tree.to_vec();
-
-        let term = match self.uplc_code_gen(full_vec) {
+        let term = match self
+            .hoist_functions_to_validator(validator_args_tree)
+            .and_then(|full_tree| self.uplc_code_gen(full_tree.to_vec()))
+        {
             Ok(term) => term,
             Err(error) => {
                 self.reset(true);
@@ -431,12 +518,10 @@ impl<'a> CodeGenerator<'a> {
 
         air_tree = AirTree::no_op(air_tree);
 
-        let full_tree = self.hoist_functions_to_validator(air_tree);
-
-        // optimizations on air tree
-        let full_vec = full_tree.to_vec();
-
-        let mut term = match self.uplc_code_gen(full_vec) {
+        let mut term = match self
+            .hoist_functions_to_validator(air_tree)
+            .and_then(|full_tree| self.uplc_code_gen(full_tree.to_vec()))
+        {
             Ok(term) => term,
             Err(error) => {
                 self.reset(true);
@@ -3027,12 +3112,18 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    fn hoist_functions_to_validator(&mut self, mut air_tree: AirTree) -> AirTree {
+    /// Hoists the functions `air_tree` uses, and their variants, into it. Fails when a function
+    /// would need variants without end (see `check_variant_depth`).
+    fn hoist_functions_to_validator(&mut self, mut air_tree: AirTree) -> Result<AirTree, Error> {
         let mut functions_to_hoist = IndexMap::new();
         let mut used_functions = vec![];
         let mut defined_functions = vec![];
         let mut hoisted_functions = vec![];
         let mut validator_hoistable;
+
+        // Each program has its own chains: a constant is hoisted as a program of its own.
+        self.hoisting_variant = None;
+        self.variant_parents.clear();
 
         // TODO change subsequent tree traversals to be more like a stream.
         air_tree.traverse_tree_with(&mut |air_tree: &mut AirTree, _| {
@@ -3046,7 +3137,7 @@ impl<'a> CodeGenerator<'a> {
             &mut TreePath::new(),
             0,
             Fields::FirstField,
-        );
+        )?;
 
         validator_hoistable = used_functions.clone();
 
@@ -3068,6 +3159,8 @@ impl<'a> CodeGenerator<'a> {
                     let params = params.clone();
                     let tree_path = tree_path.clone();
 
+                    self.hoisting_variant = Some((key.clone(), variant_name.clone()));
+
                     self.define_dependent_functions(
                         &mut hoist_body,
                         &mut functions_to_hoist,
@@ -3075,7 +3168,7 @@ impl<'a> CodeGenerator<'a> {
                         &defined_functions,
                         &mut hoist_deps,
                         tree_path,
-                    );
+                    )?;
 
                     let function_variants = functions_to_hoist
                         .get_mut(&key)
@@ -3405,7 +3498,7 @@ impl<'a> CodeGenerator<'a> {
             );
         }
 
-        air_tree
+        Ok(air_tree)
     }
 
     fn hoist_function(
@@ -3687,9 +3780,9 @@ impl<'a> CodeGenerator<'a> {
         defined_functions: &[(FunctionAccessKey, String)],
         current_function_deps: &mut Vec<(FunctionAccessKey, String)>,
         mut function_tree_path: TreePath,
-    ) {
+    ) -> Result<(), Error> {
         let Some((depth, index)) = function_tree_path.pop() else {
-            return;
+            return Ok(());
         };
 
         function_tree_path.push(depth, index);
@@ -3701,7 +3794,7 @@ impl<'a> CodeGenerator<'a> {
             &mut function_tree_path,
             depth + 1,
             Fields::FirstField,
-        );
+        )?;
 
         for (generic_function_key, variant_name) in current_function_deps.iter() {
             if !used_functions
@@ -3714,6 +3807,8 @@ impl<'a> CodeGenerator<'a> {
                 used_functions.push((generic_function_key.clone(), variant_name.clone()));
             }
         }
+
+        Ok(())
     }
 
     fn find_function_vars_and_depth(
@@ -3727,12 +3822,19 @@ impl<'a> CodeGenerator<'a> {
         path: &mut TreePath,
         current_depth: usize,
         depth_index: Fields,
-    ) {
+    ) -> Result<(), Error> {
+        let mut result = Ok(());
+
         air_tree.traverse_tree_with_path(
             path,
             current_depth,
             depth_index,
             &mut |air_tree, tree_path| {
+                // The traversal can't stop early: skip the rest of the tree after an error.
+                if result.is_err() {
+                    return;
+                }
+
                 if let AirTree::Var {
                     constructor,
                     variant_name,
@@ -3749,14 +3851,19 @@ impl<'a> CodeGenerator<'a> {
                         return;
                     };
 
-                    let function_var_tipo = &constructor.tipo;
+                    // Erasing opaque types drops generics that only appear as their phantom
+                    // arguments, so the function's generics are paired with the call's types
+                    // before the type is erased.
+                    let function_var_tipo = constructor.tipo.clone();
+                    constructor.tipo =
+                        convert_opaque_type(&function_var_tipo, &self.module_types, true);
 
                     let generic_function_key = FunctionAccessKey {
                         module_name: module.clone(),
                         function_name: func_name.clone(),
                     };
 
-                    let function_def = self.functions.get(&generic_function_key);
+                    let function_def = self.functions.get(&generic_function_key).copied();
 
                     let Some(function_def) = function_def else {
                         let code_gen_func = self
@@ -3826,34 +3933,80 @@ impl<'a> CodeGenerator<'a> {
                     let mut function_def_types = function_def
                         .arguments
                         .iter()
-                        .map(|arg| convert_opaque_type(&arg.tipo, &self.module_types, true))
+                        .map(|arg| arg.tipo.clone())
                         .collect_vec();
 
-                    function_def_types.push(convert_opaque_type(
-                        &function_def.return_type,
-                        &self.module_types,
-                        true,
-                    ));
+                    function_def_types.push(function_def.return_type.clone());
 
-                    let mono_types: IndexMap<u64, Rc<Type>> = if !function_def_types.is_empty() {
+                    let mut mono_types: IndexMap<u64, Rc<Type>> = if !function_def_types.is_empty()
+                    {
                         function_def_types
                             .iter()
                             .zip(function_var_types.iter())
                             .flat_map(|(func_tipo, var_tipo)| {
                                 get_generic_id_and_type(func_tipo, var_tipo)
+                                    .into_iter()
+                                    .map(|(id, tipo)| {
+                                        (id, convert_opaque_type(&tipo, &self.module_types, true))
+                                    })
                             })
                             .collect()
                     } else {
                         IndexMap::new()
                     };
 
+                    // A generic that erasure drops from the signature, and that no cast constrains,
+                    // can't change the code: it stands for `Data`, and isn't part of the variant.
+                    let erased_generics: HashSet<u64> = function_def_types
+                        .iter()
+                        .flat_map(|tipo| {
+                            convert_opaque_type(tipo, &self.module_types, true).collect_generics()
+                        })
+                        .filter_map(|generic| generic.get_generic_id())
+                        .collect();
+
+                    let unconstrained = mono_types
+                        .keys()
+                        .copied()
+                        .filter(|id| {
+                            !erased_generics.contains(id) && !self.constrained_generics.contains(id)
+                        })
+                        .collect_vec();
+
+                    for id in &unconstrained {
+                        mono_types.insert(*id, Type::data());
+                    }
+
+                    // Polymorphic recursion without a decode never gets past this: its variants
+                    // are keyed by shape, so it soon reaches a variant that's already built.
+                    if mono_types
+                        .values()
+                        .any(|tipo| type_size_exceeds(tipo, MAX_VARIANT_TYPE_SIZE))
+                    {
+                        result = Err(infinite_variants(&generic_function_key, &mono_types));
+                        return;
+                    }
+
                     // Don't sort here. Mono types map is already in argument order.
                     let variant = mono_types
                         .iter()
-                        .map(|(_, tipo)| get_generic_variant_name(tipo, &self.module_types))
+                        .filter(|(id, _)| !unconstrained.contains(id))
+                        .map(|(id, tipo)| self.variant_key(*id, tipo))
                         .join("");
 
                     variant_name.clone_from(&variant);
+
+                    let built = function_usage
+                        .get(&generic_function_key)
+                        .is_some_and(|variants| variants.contains_key(&variant));
+
+                    if !built
+                        && let Err(error) =
+                            self.check_variant_depth(&generic_function_key, &mono_types)
+                    {
+                        result = Err(error);
+                        return;
+                    }
 
                     if !dependency_functions
                         .iter()
@@ -3862,13 +4015,20 @@ impl<'a> CodeGenerator<'a> {
                         dependency_functions.push((generic_function_key.clone(), variant.clone()));
                     }
 
-                    let already_built = function_usage
-                        .get_mut(&generic_function_key)
-                        .and_then(|variants| variants.get_mut(&variant));
-
-                    if let Some((path, _)) = already_built {
+                    if built {
+                        let (path, _) = function_usage
+                            .get_mut(&generic_function_key)
+                            .and_then(|variants| variants.get_mut(&variant))
+                            .expect("a built variant");
                         *path = path.common_ancestor(tree_path);
                         return;
+                    }
+
+                    if let Some(parent) = &self.hoisting_variant {
+                        self.variant_parents.insert(
+                            (generic_function_key.clone(), variant.clone()),
+                            parent.clone(),
+                        );
                     }
 
                     let function = self.build_function_variant(
@@ -3884,6 +4044,46 @@ impl<'a> CodeGenerator<'a> {
                 }
             },
         );
+
+        result
+    }
+
+    /// A type argument's part of a variant key: its runtime shape, or its full type when the
+    /// function decodes or tests values of it, since the conversion then depends on the type.
+    fn variant_key(&self, generic: u64, tipo: &Rc<Type>) -> String {
+        if self.decoded_generics.contains(&generic) {
+            let mut key = "_type".to_string();
+            push_type_identity(&mut key, tipo);
+            key
+        } else {
+            get_generic_variant_name(tipo, &self.module_types)
+        }
+    }
+
+    /// Checks that `function` may get one more variant, reached from the variant being hoisted.
+    /// Polymorphic recursion through a decode needs a variant per type, without end: like
+    /// rustc's recursion limit, this bounds how many times a function can appear on the chain
+    /// of variants that reached it.
+    fn check_variant_depth(
+        &self,
+        function: &FunctionAccessKey,
+        mono_types: &IndexMap<u64, Rc<Type>>,
+    ) -> Result<(), Error> {
+        let mut depth = 1;
+        let mut ancestor = self.hoisting_variant.as_ref();
+
+        while let Some(variant) = ancestor {
+            if &variant.0 == function {
+                depth += 1;
+            }
+            ancestor = self.variant_parents.get(variant);
+        }
+
+        if depth > MAX_VARIANT_DEPTH {
+            return Err(infinite_variants(function, mono_types));
+        }
+
+        Ok(())
     }
 
     /// Compiles the variant of a function for the concrete types in `mono_types`, from a copy of
@@ -4017,9 +4217,9 @@ impl<'a> CodeGenerator<'a> {
                     // constant's dependency graph cannot overwrite the enclosing graph.
                     let outer_cyclic_functions = std::mem::take(&mut self.cyclic_functions);
 
-                    value = self.hoist_functions_to_validator(value);
-
-                    let term = self.uplc_code_gen(value.to_vec());
+                    let term = self
+                        .hoist_functions_to_validator(value)
+                        .and_then(|value| self.uplc_code_gen(value.to_vec()));
 
                     self.cyclic_functions = outer_cyclic_functions;
 
