@@ -7,6 +7,7 @@
 - **uplc**: `Program::lower` applies only the lowering every program Aiken generates needs (BLS constants, `__no_inline__` wrappers, typed-list adapters), without the optimizer's rewrites. It is the baseline the optimized program must agree with.
 - **aiken-lang**: `CodeGenerator::generate_unoptimized` compiles a validator without running the optimizer, like `generate_raw_unoptimized` does for other definitions.
 - **uplc**: `uplc::data::arbitrary::arb_plutus_data` generates arbitrary `PlutusData` for property tests, behind the new `proptest` feature.
+- **aiken-lang**: `TypeInfo::layouts` holds a `DataLayout` for every data type a module defines, private and opaque ones included: each constructor's index (its `@tag`, else the type's `@tag`, else its position) and field types, the runtime representation (erased, `Constr`, or `@list`), and a summary of which type parameters a value stores and whether it contains an opaque type, a type with no `Data` form, or a type `if … is` can't test. A parameter used only as a phantom argument of a field's type counts as phantom.
 
 ## v1.4.0 - 2026-10-18
 

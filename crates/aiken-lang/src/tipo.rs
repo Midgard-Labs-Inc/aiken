@@ -22,9 +22,12 @@ pub(crate) mod expr;
 pub mod fields;
 mod hydrator;
 mod infer;
+pub mod layout;
 mod pattern;
 mod pipe;
 pub mod pretty;
+
+pub use layout::DataLayout;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TypeAliasAnnotation {
@@ -1333,6 +1336,8 @@ pub struct TypeInfo {
     pub types: HashMap<String, TypeConstructor>,
     pub types_constructors: HashMap<String, Vec<String>>,
     pub opaque_types: HashSet<(String, String)>,
+    /// The layout of every data type the module defines, private ones included.
+    pub layouts: HashMap<String, DataLayout>,
     pub values: HashMap<String, ValueConstructor>,
     pub accessors: HashMap<String, AccessorsMap>,
     pub annotations: HashMap<Annotation, Rc<Type>>,

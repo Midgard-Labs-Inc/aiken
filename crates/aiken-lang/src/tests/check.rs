@@ -14,11 +14,11 @@ use std::collections::HashMap;
 const DEFAULT_MODULE_NAME: &str = "my_module";
 const DEFAULT_PACKAGE: &str = "test/project";
 
-fn parse(source_code: &str) -> UntypedModule {
+pub(super) fn parse(source_code: &str) -> UntypedModule {
     parse_as(source_code, DEFAULT_MODULE_NAME)
 }
 
-fn parse_as(source_code: &str, name: &str) -> UntypedModule {
+pub(super) fn parse_as(source_code: &str, name: &str) -> UntypedModule {
     let kind = ModuleKind::Lib;
     let (mut ast, _) = parser::module(source_code, kind).expect("Failed to parse module");
     ast.name = name.to_string();
@@ -95,7 +95,7 @@ fn check_with_verbosity(
 }
 
 #[allow(clippy::result_large_err)]
-fn check_with_deps(
+pub(super) fn check_with_deps(
     ast: UntypedModule,
     extra: Vec<UntypedModule>,
 ) -> Result<(Vec<Warning>, TypedModule), (Vec<Warning>, Error)> {

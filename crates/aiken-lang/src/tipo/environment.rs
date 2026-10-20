@@ -1,6 +1,6 @@
 use super::{
-    AccessorsMap, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar, ValueConstructor,
-    ValueConstructorVariant,
+    AccessorsMap, DataLayout, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar,
+    ValueConstructor, ValueConstructorVariant,
     error::{Error, Warning},
     exhaustive::{Matrix, PatternStack, simplify},
     hydrator::Hydrator,
@@ -13,6 +13,7 @@ use crate::{
         TypedDefinition, TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport,
         UntypedArg, UntypedDefinition, UntypedFunction, Use, Validator,
     },
+    builtins::PRELUDE,
     expr::AssignmentKind,
     tipo::{TypeAliasAnnotation, fields::FieldMap, well_known},
 };
@@ -55,6 +56,9 @@ pub struct Environment<'a> {
 
     /// Nominal types whose values may contain opaque data.
     pub opaque_types: HashSet<(String, String)>,
+
+    /// Layouts of the data types defined in the current module.
+    pub layouts: HashMap<String, DataLayout>,
 
     /// Values defined in the current module (or the prelude)
     pub module_values: HashMap<String, ValueConstructor>,
@@ -756,6 +760,17 @@ impl<'a> Environment<'a> {
                 .any(|module| module.opaque_types.contains(qualifier))
     }
 
+    /// The layout of the data type `module.name`, where the prelude's module is `""`.
+    pub fn layout(&self, module: &str, name: &str) -> Option<&DataLayout> {
+        if module == self.current_module.as_str() {
+            self.layouts.get(name)
+        } else {
+            let module = if module.is_empty() { PRELUDE } else { module };
+
+            self.importable_modules.get(module)?.layouts.get(name)
+        }
+    }
+
     pub(crate) fn is_data_like(&mut self, tipo: &Type) -> bool {
         self.assert_known_data_type(
             tipo,
@@ -1245,6 +1260,7 @@ impl<'a> Environment<'a> {
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
             opaque_types: HashSet::new(),
+            layouts: HashMap::new(),
             module_values: HashMap::new(),
             module_functions: HashMap::new(),
             module_validators: HashMap::new(),

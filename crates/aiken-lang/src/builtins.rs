@@ -8,7 +8,7 @@ use crate::{
     expr::TypedExpr,
     tipo::{
         Type, TypeConstructor, TypeInfo, ValueConstructor, ValueConstructorVariant,
-        fields::FieldMap,
+        fields::FieldMap, layout,
     },
 };
 use std::{collections::BTreeSet, sync::LazyLock};
@@ -50,6 +50,7 @@ pub fn prelude(id_gen: &IdGenerator) -> TypeInfo {
         types: HashMap::new(),
         types_constructors: HashMap::new(),
         opaque_types: HashSet::new(),
+        layouts: HashMap::new(),
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),
@@ -574,6 +575,17 @@ pub fn prelude(id_gen: &IdGenerator) -> TypeInfo {
         },
     );
 
+    // The layouts only need to be consistent with themselves, so their type variables come
+    // from a generator of their own and don't shift the ids the rest of the prelude uses.
+    let data_types = prelude_data_types(&IdGenerator::new());
+    let data_types: Vec<&TypedDataType> = data_types
+        .values()
+        .filter(|data_type| {
+            ![well_known::DATA, well_known::PAIR].contains(&data_type.name.as_str())
+        })
+        .collect();
+    prelude.layouts = layout::compute_layouts("", &data_types, |_, _| None);
+
     prelude
 }
 
@@ -585,6 +597,7 @@ pub fn plutus(id_gen: &IdGenerator) -> TypeInfo {
         types: HashMap::new(),
         types_constructors: HashMap::new(),
         opaque_types: HashSet::new(),
+        layouts: HashMap::new(),
         values: HashMap::new(),
         accessors: HashMap::new(),
         annotations: HashMap::new(),

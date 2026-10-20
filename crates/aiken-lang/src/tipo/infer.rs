@@ -14,9 +14,10 @@ use crate::{
         TypedValidator, UntypedArg, UntypedDefinition, UntypedModule, UntypedPattern,
         UntypedValidator, Use, Validator,
     },
+    builtins::PRELUDE,
     expr::{TypedExpr, UntypedAssignmentKind, UntypedExpr},
     parser::token::Token,
-    tipo::{Span, Type, TypeVar, expr::infer_function},
+    tipo::{Span, Type, TypeVar, expr::infer_function, layout},
 };
 use std::{
     borrow::Borrow,
@@ -97,6 +98,28 @@ impl UntypedModule {
         // source order.
         environment.collect_opaque_types();
 
+        // Data types come first: their layouts tell the rest of the module what their values
+        // contain.
+        let mut data_types = HashMap::new();
+
+        for def in self.definitions() {
+            if let Definition::DataType(data_type) = def {
+                data_types.insert(
+                    data_type.name.clone(),
+                    infer_data_type(data_type.clone(), &mut environment)?,
+                );
+            }
+        }
+
+        environment.layouts = layout::compute_layouts(
+            &module_name,
+            &data_types.values().collect::<Vec<_>>(),
+            |module, name| {
+                let module = if module.is_empty() { PRELUDE } else { module };
+                modules.get(module)?.layouts.get(name)
+            },
+        );
+
         // Infer the types of each definition in the module
         // We first infer all the constants so they can be used in functions defined
         // anywhere in the module.
@@ -119,8 +142,14 @@ impl UntypedModule {
         }
 
         for def in consts.into_iter().chain(not_consts) {
-            let definition =
-                infer_definition(def, &module_name, &mut hydrators, &mut environment, tracing)?;
+            let definition = match def {
+                Definition::DataType(data_type) => {
+                    Definition::DataType(data_types.remove(&data_type.name).unwrap())
+                }
+                def => {
+                    infer_definition(def, &module_name, &mut hydrators, &mut environment, tracing)?
+                }
+            };
 
             definitions.push(definition);
         }
@@ -177,6 +206,7 @@ impl UntypedModule {
             module_types: types,
             module_types_constructors: types_constructors,
             opaque_types,
+            layouts,
             module_values: values,
             accessors,
             annotations,
@@ -194,6 +224,7 @@ impl UntypedModule {
                 types,
                 types_constructors,
                 opaque_types,
+                layouts,
                 values,
                 accessors,
                 annotations,
@@ -202,6 +233,97 @@ impl UntypedModule {
             },
         })
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn infer_data_type(
+    DataType {
+        doc,
+        location,
+        public,
+        opaque,
+        name,
+        parameters,
+        decorators,
+        constructors: untyped_constructors,
+        typed_parameters: _,
+    }: DataType<()>,
+    environment: &mut Environment<'_>,
+) -> Result<TypedDataType, Error> {
+    let constructors = untyped_constructors
+        .into_iter()
+        .map(|constructor| {
+            let preregistered_fn = environment
+                .get_variable(&constructor.name)
+                .expect("Could not find preregistered type for function");
+
+            let preregistered_type = preregistered_fn.tipo.clone();
+
+            let args = preregistered_type.function_types().map_or(
+                Ok(vec![]),
+                |(args_types, _return_type)| {
+                    constructor
+                        .arguments
+                        .into_iter()
+                        .zip(&args_types)
+                        .map(|(arg, t)| {
+                            if t.is_function() {
+                                return Err(Error::FunctionTypeInData {
+                                    location: arg.location,
+                                });
+                            }
+
+                            if t.is_ml_result() {
+                                return Err(Error::IllegalTypeInData {
+                                    location: arg.location,
+                                    tipo: t.clone(),
+                                });
+                            }
+
+                            Ok(RecordConstructorArg {
+                                label: arg.label,
+                                annotation: arg.annotation,
+                                location: arg.location,
+                                doc: arg.doc,
+                                tipo: t.clone(),
+                            })
+                        })
+                        .collect()
+                },
+            )?;
+
+            Ok(RecordConstructor {
+                location: constructor.location,
+                name: constructor.name,
+                arguments: args,
+                decorators: constructor.decorators,
+                doc: constructor.doc,
+                sugar: constructor.sugar,
+            })
+        })
+        .collect::<Result<_, Error>>()?;
+
+    let typed_parameters = environment
+        .get_type_constructor(&None, &name, location)
+        .expect("Could not find preregistered type constructor ")
+        .parameters
+        .clone();
+
+    let typed_data = DataType {
+        doc,
+        location,
+        public,
+        opaque,
+        name,
+        parameters,
+        constructors,
+        decorators,
+        typed_parameters,
+    };
+
+    typed_data.check_decorators()?;
+
+    Ok(typed_data)
 }
 
 #[allow(clippy::result_large_err)]
@@ -569,115 +691,8 @@ fn infer_definition(
             Ok(Definition::TypeAlias(typed_type_alias))
         }
 
-        Definition::DataType(DataType {
-            doc,
-            location,
-            public,
-            opaque,
-            name,
-            parameters,
-            decorators,
-            constructors: untyped_constructors,
-            typed_parameters: _,
-        }) => {
-            let constructors = untyped_constructors
-                .into_iter()
-                .map(|constructor| {
-                    let preregistered_fn = environment
-                        .get_variable(&constructor.name)
-                        .expect("Could not find preregistered type for function");
-
-                    let preregistered_type = preregistered_fn.tipo.clone();
-
-                    let args = preregistered_type.function_types().map_or(
-                        Ok(vec![]),
-                        |(args_types, _return_type)| {
-                            constructor
-                                .arguments
-                                .into_iter()
-                                .zip(&args_types)
-                                .map(|(arg, t)| {
-                                    if t.is_function() {
-                                        return Err(Error::FunctionTypeInData {
-                                            location: arg.location,
-                                        });
-                                    }
-
-                                    if t.is_ml_result() {
-                                        return Err(Error::IllegalTypeInData {
-                                            location: arg.location,
-                                            tipo: t.clone(),
-                                        });
-                                    }
-
-                                    Ok(RecordConstructorArg {
-                                        label: arg.label,
-                                        annotation: arg.annotation,
-                                        location: arg.location,
-                                        doc: arg.doc,
-                                        tipo: t.clone(),
-                                    })
-                                })
-                                .collect()
-                        },
-                    )?;
-
-                    Ok(RecordConstructor {
-                        location: constructor.location,
-                        name: constructor.name,
-                        arguments: args,
-                        decorators: constructor.decorators,
-                        doc: constructor.doc,
-                        sugar: constructor.sugar,
-                    })
-                })
-                .collect::<Result<_, Error>>()?;
-
-            let typed_parameters = environment
-                .get_type_constructor(&None, &name, location)
-                .expect("Could not find preregistered type constructor ")
-                .parameters
-                .clone();
-
-            let typed_data = DataType {
-                doc,
-                location,
-                public,
-                opaque,
-                name,
-                parameters,
-                constructors,
-                decorators,
-                typed_parameters,
-            };
-
-            for constr in &typed_data.constructors {
-                for RecordConstructorArg {
-                    tipo,
-                    location,
-                    doc: _,
-                    label: _,
-                    annotation: _,
-                } in &constr.arguments
-                {
-                    if tipo.is_function() {
-                        return Err(Error::FunctionTypeInData {
-                            location: *location,
-                        });
-                    }
-
-                    if tipo.is_ml_result() {
-                        return Err(Error::IllegalTypeInData {
-                            location: *location,
-                            tipo: tipo.clone(),
-                        });
-                    }
-                }
-            }
-
-            typed_data.check_decorators()?;
-
-            Ok(Definition::DataType(typed_data))
+        Definition::DataType(_) => {
+            unreachable!("data types are inferred before the other definitions")
         }
 
         Definition::Use(Use {
