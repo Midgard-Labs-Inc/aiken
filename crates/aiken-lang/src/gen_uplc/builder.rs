@@ -9,9 +9,8 @@ use crate::{
     },
     line_numbers::{LineColumn, LineNumbers},
     tipo::{
-        DataLayout, Type, TypeInfo, ValueConstructor, ValueConstructorVariant,
-        check_replaceable_opaque_type, convert_opaque_type, find_and_replace_generics,
-        layout::lookup_layout,
+        DataLayout, Type, TypeInfo, ValueConstructor, ValueConstructorVariant, convert_opaque_type,
+        find_and_replace_generics, layout::lookup_layout,
     },
 };
 use indexmap::IndexMap;
@@ -207,21 +206,10 @@ pub fn monomorphize(air_tree: &mut AirTree, mono_types: &IndexMap<u64, Rc<Type>>
     }
 }
 
-pub fn erase_opaque_type_operations(
-    air_tree: &mut AirTree,
-    module_types: &IndexMap<&str, &TypeInfo>,
-) {
-    if let AirTree::Constr { tipo, args, .. } = air_tree
-        && check_replaceable_opaque_type(tipo, module_types)
-    {
-        let arg = args.pop().unwrap();
-
-        match arg {
-            AirTree::CastToData { value, .. } => *air_tree = *value,
-            _ => *air_tree = arg,
-        }
-    }
-
+/// Replaces the erased opaque types the tree holds by their fields' types, which are their
+/// runtime types. Constructing, matching and updating erased values is lowered when the tree is
+/// built.
+pub fn erase_opaque_types(air_tree: &mut AirTree, module_types: &IndexMap<&str, &TypeInfo>) {
     let mut held_types = air_tree.mut_held_types();
 
     while let Some(tipo) = held_types.pop() {

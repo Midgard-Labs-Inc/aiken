@@ -184,7 +184,6 @@ impl Builtins {
 
                             (builtins, rebuilt_path)
                         }
-                        Path::OpaqueConstr(_) => (builtins, rebuilt_path),
                     }
                 })
                 .0,

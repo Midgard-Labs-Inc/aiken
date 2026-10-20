@@ -27,8 +27,8 @@ use crate::{
     gen_uplc::{
         air::ExpectLevel,
         builder::{
-            CodeGenFunction, erase_opaque_type_operations, get_generic_variant_name,
-            get_src_code_by_span, known_data_to_type, monomorphize, wrap_validator_condition,
+            CodeGenFunction, erase_opaque_types, get_generic_variant_name, get_src_code_by_span,
+            known_data_to_type, monomorphize, wrap_validator_condition,
         },
     },
     line_numbers::LineNumbers,
@@ -267,6 +267,27 @@ impl<'a> CodeGenerator<'a> {
 
     fn layout(&self, tipo: &Type) -> Option<&'a DataLayout> {
         lookup_layout(&self.module_types, tipo)
+    }
+
+    /// An erased constructor used as a function value is the identity: a value of the type is
+    /// its field.
+    fn erased_constructor_function(&mut self, constructor_tipo: &Rc<Type>) -> Option<AirTree> {
+        let (args, _) = constructor_tipo.function_types()?;
+
+        if !self.layout(constructor_tipo)?.is_erased() {
+            return None;
+        }
+
+        let field = "__erased_field".to_string();
+        let field_interned = introduce_name(&mut self.interner, &field);
+        let function = AirTree::anon_func(
+            vec![field_interned.clone()],
+            AirTree::local_var(&field_interned, args[0].clone()),
+            false,
+        );
+        self.interner.pop_text(field);
+
+        Some(function)
     }
 
     pub fn new(
@@ -608,6 +629,9 @@ impl<'a> CodeGenerator<'a> {
                             AirTree::var(constructor.clone(), name, "")
                         }
                     }
+                    ValueConstructorVariant::Record { .. } => self
+                        .erased_constructor_function(&constructor.tipo)
+                        .unwrap_or_else(|| AirTree::var(constructor.clone(), name, "")),
                     _ => AirTree::var(constructor.clone(), name, ""),
                 },
 
@@ -698,6 +722,11 @@ impl<'a> CodeGenerator<'a> {
                                 }
                             })
                             .collect_vec();
+
+                        if layout.is_erased() {
+                            // A newtype: the value is its field, upcast if the field is `Data`.
+                            return constr_args.into_iter().next().unwrap();
+                        }
 
                         let index = if layout.is_list() {
                             None
@@ -893,16 +922,20 @@ impl<'a> CodeGenerator<'a> {
                             location: Span::empty(),
                         };
 
+                        // The tree's paths walk runtime types: an erased type's value is its field.
+                        let subject_tipo =
+                            convert_opaque_type(&subject.tipo(), &self.module_types, true);
+
                         let tree_gen =
                             TreeGen::new(&mut self.interner, &self.module_types, &wild_card);
 
-                        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+                        let tree = tree_gen.build_tree(clauses);
 
                         let stick_set = TreeSet::new();
 
                         let clauses = self.handle_decision_tree(
                             &subject_name_interned,
-                            subject.tipo(),
+                            subject_tipo,
                             tipo.clone(),
                             module_build_name,
                             tree,
@@ -1051,6 +1084,10 @@ impl<'a> CodeGenerator<'a> {
                         field_map,
                         ..
                     } => {
+                        if let Some(function) = self.erased_constructor_function(tipo) {
+                            return function;
+                        }
+
                         let val_constructor = {
                             let layout = self
                                 .layout(tipo)
@@ -1189,6 +1226,33 @@ impl<'a> CodeGenerator<'a> {
                 TypedExpr::RecordUpdate {
                     tipo, spread, args, ..
                 } => {
+                    if let Some(layout) = self.layout(tipo)
+                        && layout.is_erased()
+                    {
+                        let spread = self.build(spread, module_build_name, &[]);
+
+                        let Some(arg) = args.first() else {
+                            return spread;
+                        };
+
+                        let field_type = layout
+                            .field_types(&layout.constructors[0], &tipo.arg_types().unwrap())
+                            .remove(0);
+
+                        let mut value = self.build(&arg.value, module_build_name, &[]);
+
+                        if field_type.is_data() && !arg.value.tipo().is_data() {
+                            value = AirTree::cast_to_data(value, arg.value.tipo());
+                        }
+
+                        // The spread is still evaluated: it may be a check that fails.
+                        let spread_name = "__erased_spread".to_string();
+                        let spread_interned = introduce_name(&mut self.interner, &spread_name);
+                        self.interner.pop_text(spread_name);
+
+                        return AirTree::let_assignment(spread_interned, spread, value);
+                    }
+
                     let mut index_types = vec![];
                     let mut update_args = vec![];
 
@@ -1945,6 +2009,7 @@ impl<'a> CodeGenerator<'a> {
 
                 let then = if props.kind.is_expect()
                     && !layout.is_list()
+                    && !layout.is_erased()
                     && (layout.constructors.len() > 1 || props.full_check || is_never)
                 {
                     let index = layout
@@ -3030,7 +3095,7 @@ impl<'a> CodeGenerator<'a> {
 
         // TODO change subsequent tree traversals to be more like a stream.
         air_tree.traverse_tree_with(&mut |air_tree: &mut AirTree, _| {
-            erase_opaque_type_operations(air_tree, &self.module_types);
+            erase_opaque_types(air_tree, &self.module_types);
         });
 
         self.find_function_vars_and_depth(
@@ -3787,7 +3852,7 @@ impl<'a> CodeGenerator<'a> {
                             let mut body = AirTree::no_op(body.clone());
 
                             body.traverse_tree_with(&mut |air_tree, _| {
-                                erase_opaque_type_operations(air_tree, &self.module_types);
+                                erase_opaque_types(air_tree, &self.module_types);
                             });
 
                             function_variant_path.insert(
@@ -3881,7 +3946,7 @@ impl<'a> CodeGenerator<'a> {
                             ));
 
                             function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                                erase_opaque_type_operations(air_tree, &self.module_types);
+                                erase_opaque_types(air_tree, &self.module_types);
                                 monomorphize(air_tree, &mono_types);
                             });
 
@@ -3923,7 +3988,7 @@ impl<'a> CodeGenerator<'a> {
                         ));
 
                         function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                            erase_opaque_type_operations(air_tree, &self.module_types);
+                            erase_opaque_types(air_tree, &self.module_types);
                             monomorphize(air_tree, &mono_types);
                         });
 
@@ -4037,7 +4102,7 @@ impl<'a> CodeGenerator<'a> {
                         AirTree::no_op(self.build(definition, &access_key.module_name, &[]));
 
                     value.traverse_tree_with(&mut |air_tree, _| {
-                        erase_opaque_type_operations(air_tree, &self.module_types);
+                        erase_opaque_types(air_tree, &self.module_types);
                     });
 
                     // Constant compilation is re-entrant: it happens while the enclosing

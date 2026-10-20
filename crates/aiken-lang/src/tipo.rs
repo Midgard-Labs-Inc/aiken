@@ -770,11 +770,6 @@ pub fn convert_opaque_type(
     }
 }
 
-/// Whether `t` is an erased opaque type, whose values are the values of its one field.
-pub fn check_replaceable_opaque_type(t: &Type, module_types: &IndexMap<&str, &TypeInfo>) -> bool {
-    lookup_layout(module_types, t).is_some_and(DataLayout::is_erased)
-}
-
 pub fn find_and_replace_generics(
     tipo: &Rc<Type>,
     mono_types: &IndexMap<u64, Rc<Type>>,

@@ -11,7 +11,7 @@
 
 ### Changed
 
-- **aiken-lang**: Code generation reads each data type's constructor indices, field types and representation from its `DataLayout`, looked up by module and name. `CodeGenerator::new` and `TypedModule::register_definitions` no longer take the data type definitions, and `UntypedExpr::reify_data`, `UntypedExpr::reify_constant` and `TestResult::reify` take the module types instead.
+- **aiken-lang**: Code generation reads each data type's constructor indices, field types and representation from its `DataLayout`, looked up by module and name. `CodeGenerator::new` and `TypedModule::register_definitions` no longer take the data type definitions, and `UntypedExpr::reify_data`, `UntypedExpr::reify_constant` and `TestResult::reify` take the module types instead. `tipo::lookup_data_type_by_tipo` and `tipo::check_replaceable_opaque_type` are removed.
 - **aiken-lang**: An opaque type whose constructor has a decorator (such as `@tag`) is no longer erased to its field: it keeps its constructor, as the documentation says. This changes the scripts of programs that use such types.
 
 ### Fixed
@@ -20,6 +20,8 @@
 - **aiken-lang**: A record update keeps the record's `@tag`, on the type or on the constructor. It used to build constructor 0.
 - **aiken-lang**: A generic function called with a `@list` record no longer shares its compiled variant with other records, which converted the record as a `Constr`.
 - **aiken-lang**: Reporting a failing test or a counterexample no longer panics on a constructor with `@tag`, a generic argument nested in a field's type, or a `@list` record. A map is printed as a `Value` literal only when its type is `Value`, so an empty `Pairs` inside an opaque wrapper prints as `W([])`.
+- **aiken-lang**: An opaque type with one constructor, one field and no decorator is compiled as a newtype: its constructor is the identity, also when used as a function value (`list.map(xs, W)` used to panic); a pattern `W(p)` matches `p` against the same value, so literal and nested patterns inside it work (they used to panic), and `if x is W(n): W` always matches (it used to test a constructor index of the field); a record update evaluates the spread, then converts the new value to the field's type (it used to panic); module constants holding such values compile.
+- **aiken-lang**: An opaque type wrapping `Data` keeps the upcast of its constructor's argument: `Payload(5)` holds `I 5`, not the integer 5.
 
 ## v1.4.0 - 2026-10-18
 

@@ -8,7 +8,7 @@ use itertools::{Either, Itertools, Position};
 use crate::{
     ast::{Pattern, TypedClause, TypedPattern},
     expr::{Type, TypeVar, TypedExpr},
-    tipo::{PatternConstructor, TypeInfo, layout::lookup_layout},
+    tipo::{PatternConstructor, TypeInfo, convert_opaque_type, layout::lookup_layout},
 };
 
 use super::{interner::AirInterner, tree::AirTree};
@@ -24,7 +24,6 @@ pub enum Path {
     Pair(usize),
     Tuple(usize),
     Constr(Rc<Type>, usize, bool),
-    OpaqueConstr(Rc<Type>),
     List(usize),
     ListTail(usize),
 }
@@ -41,7 +40,6 @@ impl Display for Path {
             Path::Constr(_, i, b) => {
                 write!(f, "constr_{i}_{b}")
             }
-            Path::OpaqueConstr(_) => write!(f, "opaqueconstr"),
             Path::List(i) => {
                 write!(f, "list_{i}")
             }
@@ -60,7 +58,6 @@ impl PartialEq for Path {
             | (Path::Constr(_, a, _), Path::Constr(_, b, _))
             | (Path::List(a), Path::List(b))
             | (Path::ListTail(a), Path::ListTail(b)) => a == b,
-            (Path::OpaqueConstr(_), Path::OpaqueConstr(_)) => true,
             _ => false,
         }
     }
@@ -82,7 +79,6 @@ impl Ord for Path {
             | (Path::List(a), Path::List(b))
             | (Path::ListTail(a), Path::ListTail(b))
             | (Path::Constr(_, a, _), Path::Constr(_, b, _)) => a.cmp(b),
-            (Path::OpaqueConstr(_), Path::OpaqueConstr(_)) => Ordering::Equal,
             _ => Ordering::Equal,
         }
     }
@@ -622,11 +618,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
         }
     }
 
-    pub fn build_tree(
-        mut self,
-        subject_tipo: &Rc<Type>,
-        clauses: &'a [TypedClause],
-    ) -> DecisionTree<'a> {
+    pub fn build_tree(mut self, clauses: &'a [TypedClause]) -> DecisionTree<'a> {
         let mut hoistables = IndexMap::new();
 
         let mut columns_added = vec![];
@@ -638,8 +630,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                 .map(|(index, clause)| {
                     // Assigns are split out from patterns so they can be handled
                     // outside of the tree algorithm
-                    let (assign, row_items) =
-                        self.map_pattern_to_row(&clause.pattern, subject_tipo, vec![]);
+                    let (assign, row_items) = self.map_pattern_to_row(&clause.pattern, vec![]);
 
                     self.interner.intern(format!("__clause_then_{index}"));
                     let clause_then_name = self
@@ -683,12 +674,6 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                     a.first().cmp(&b.first())
                 })
-                .map(|col| {
-                    // remove opaqueconstr paths since they are just type information
-                    col.into_iter()
-                        .filter(|a| !matches!(a, Path::OpaqueConstr(_)))
-                        .collect_vec()
-                })
                 .collect_vec();
 
             rows_initial
@@ -710,7 +695,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                 .collect_vec()
         };
 
-        let mut tree = self.do_build_tree(subject_tipo, PatternMatrix { rows }, &mut hoistables);
+        let mut tree = self.do_build_tree(PatternMatrix { rows }, &mut hoistables);
 
         let scope_map = tree.get_hoist_paths(hoistables.keys().collect_vec());
 
@@ -728,7 +713,6 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
     fn do_build_tree(
         &mut self,
-        subject_tipo: &Rc<Type>,
         matrix: PatternMatrix<'a>,
         then_map: &mut IndexMap<String, (Vec<Assigned>, &'a TypedExpr)>,
     ) -> DecisionTree<'a> {
@@ -815,7 +799,6 @@ impl<'a, 'b> TreeGen<'a, 'b> {
             .map(|col| col.path.clone())
             .unwrap();
 
-        let specialized_tipo = get_tipo_by_path(subject_tipo.clone(), &path);
         let mut relevant_columns: Vec<(CaseTest, Vec<Vec<Path>>)> = vec![];
 
         // Time to split on the matrices based on case to test for or lack of
@@ -856,7 +839,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                                     item_path.push(Path::List(index));
 
-                                    self.map_pattern_to_row(element, subject_tipo, item_path)
+                                    self.map_pattern_to_row(element, item_path)
                                 }
 
                                 Position::Last((index, element)) => {
@@ -865,13 +848,13 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                                         item_path.push(Path::List(index));
 
-                                        self.map_pattern_to_row(element, subject_tipo, item_path)
+                                        self.map_pattern_to_row(element, item_path)
                                     } else {
                                         let mut item_path = col.path.clone();
 
                                         item_path.push(Path::ListTail(index));
 
-                                        self.map_pattern_to_row(element, subject_tipo, item_path)
+                                        self.map_pattern_to_row(element, item_path)
                                     }
                                 }
                             })
@@ -884,10 +867,13 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                         tipo,
                         ..
                     } => {
-                        let constr_index = lookup_layout(self.module_types, &specialized_tipo)
+                        let constr_index = lookup_layout(self.module_types, tipo)
                             .and_then(|layout| layout.constructor(name))
                             .unwrap_or_else(|| panic!("no layout for constructor {name}"))
                             .index;
+
+                        // Paths hold runtime types, so that a field of an erased type is its field.
+                        let tipo = convert_opaque_type(tipo, self.module_types, true);
 
                         (
                             CaseTest::Constr(constr_index),
@@ -899,7 +885,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                                     item_path.push(Path::Constr(tipo.clone(), index, false));
 
-                                    self.map_pattern_to_row(&arg.value, subject_tipo, item_path)
+                                    self.map_pattern_to_row(&arg.value, item_path)
                                 })
                                 .collect_vec(),
                         )
@@ -1049,12 +1035,6 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                             a.first().cmp(&b.first())
                         })
-                        .map(|col| {
-                            // remove opaqueconstr paths since they are just type information
-                            col.into_iter()
-                                .filter(|a| !matches!(a, Path::OpaqueConstr(_)))
-                                .collect_vec()
-                        })
                         .collect_vec(),
                 )
             })
@@ -1120,10 +1100,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
         let fallback_option = if default_matrix.rows.is_empty() {
             None
         } else {
-            Some(
-                self.do_build_tree(subject_tipo, default_matrix, then_map)
-                    .into(),
-            )
+            Some(self.do_build_tree(default_matrix, then_map).into())
         };
 
         if has_list_pattern {
@@ -1138,7 +1115,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                     .map(|x| {
                         (
                             x.0,
-                            self.do_build_tree(subject_tipo, PatternMatrix { rows: x.1 }, then_map),
+                            self.do_build_tree(PatternMatrix { rows: x.1 }, then_map),
                         )
                     })
                     .collect_vec(),
@@ -1147,7 +1124,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                     .map(|x| {
                         (
                             x.0,
-                            self.do_build_tree(subject_tipo, PatternMatrix { rows: x.1 }, then_map),
+                            self.do_build_tree(PatternMatrix { rows: x.1 }, then_map),
                         )
                     })
                     .collect_vec(),
@@ -1161,7 +1138,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                     .map(|x| {
                         (
                             x.0,
-                            self.do_build_tree(subject_tipo, PatternMatrix { rows: x.1 }, then_map),
+                            self.do_build_tree(PatternMatrix { rows: x.1 }, then_map),
                         )
                     })
                     .collect_vec(),
@@ -1173,11 +1150,8 @@ impl<'a, 'b> TreeGen<'a, 'b> {
     fn map_pattern_to_row(
         &self,
         pattern: &'a TypedPattern,
-        subject_tipo: &Rc<Type>,
         path: Vec<Path>,
     ) -> (Vec<Assigned>, Vec<RowItem<'a>>) {
-        let current_tipo = get_tipo_by_path(subject_tipo.clone(), &path);
-
         match pattern {
             Pattern::Var { name, .. } => (
                 vec![Assigned {
@@ -1188,8 +1162,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
             ),
 
             Pattern::Assign { name, pattern, .. } => {
-                let (mut assigns, patts) =
-                    self.map_pattern_to_row(pattern, subject_tipo, path.clone());
+                let (mut assigns, patts) = self.map_pattern_to_row(pattern, path.clone());
 
                 assigns.insert(
                     0,
@@ -1213,9 +1186,18 @@ impl<'a, 'b> TreeGen<'a, 'b> {
             Pattern::Constructor {
                 arguments, tipo, ..
             } => {
-                let layout = lookup_layout(self.module_types, &current_tipo).unwrap();
+                let layout = lookup_layout(self.module_types, tipo).unwrap();
+
+                if layout.is_erased() {
+                    // A value of an erased type is its field: match the field's pattern against
+                    // the same value.
+                    return self.map_pattern_to_row(&arguments[0].value, path);
+                }
 
                 if layout.constructors.len() == 1 {
+                    // Paths hold runtime types, so that a field of an erased type is its field.
+                    let tipo = convert_opaque_type(tipo, self.module_types, true);
+
                     arguments
                         .iter()
                         .enumerate()
@@ -1223,15 +1205,9 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                             let arg_value = &arg.value;
 
                             let mut item_path = path.clone();
+                            item_path.push(Path::Constr(tipo.clone(), index, layout.is_list()));
 
-                            if layout.is_erased() {
-                                item_path.push(Path::OpaqueConstr(tipo.clone()));
-                            } else {
-                                item_path.push(Path::Constr(tipo.clone(), index, layout.is_list()));
-                            }
-
-                            let (assigns, patts) =
-                                self.map_pattern_to_row(arg_value, subject_tipo, item_path);
+                            let (assigns, patts) = self.map_pattern_to_row(arg_value, item_path);
 
                             acc.0.extend(assigns);
                             acc.1.extend(patts);
@@ -1255,9 +1231,9 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                 let mut snd_path = path;
                 snd_path.push(Path::Pair(1));
 
-                let (mut assigns, mut patts) = self.map_pattern_to_row(fst, subject_tipo, fst_path);
+                let (mut assigns, mut patts) = self.map_pattern_to_row(fst, fst_path);
 
-                let (assign_snd, patt_snd) = self.map_pattern_to_row(snd, subject_tipo, snd_path);
+                let (assign_snd, patt_snd) = self.map_pattern_to_row(snd, snd_path);
 
                 assigns.extend(assign_snd);
 
@@ -1275,8 +1251,7 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                         item_path.push(Path::Tuple(index));
 
-                        let (assigns, patts) =
-                            self.map_pattern_to_row(item, subject_tipo, item_path);
+                        let (assigns, patts) = self.map_pattern_to_row(item, item_path);
 
                         acc.0.extend(assigns);
                         acc.1.extend(patts);
@@ -1297,7 +1272,6 @@ pub fn get_tipo_by_path(mut subject_tipo: Rc<Type>, mut path: &[Path]) -> Rc<Typ
             Path::List(_) => subject_tipo.get_inner_types().swap_remove(0),
             Path::ListTail(_) => subject_tipo,
             Path::Constr(tipo, index, _) => tipo.arg_types().unwrap().swap_remove(*index),
-            Path::OpaqueConstr(tipo) => tipo.arg_types().unwrap().swap_remove(0),
         };
 
         path = rest
@@ -1460,10 +1434,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
         let mut air_interner = AirInterner::new();
@@ -1477,7 +1448,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
@@ -1501,10 +1472,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
         let mut air_interner = AirInterner::new();
@@ -1518,7 +1486,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
@@ -1543,10 +1511,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
 
@@ -1561,7 +1526,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
@@ -1587,10 +1552,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
 
@@ -1605,7 +1567,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
@@ -1631,10 +1593,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
 
@@ -1652,7 +1611,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &module_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
@@ -1676,10 +1635,7 @@ mod tester {
             panic!()
         };
 
-        let TypedExpr::When {
-            clauses, subject, ..
-        } = &function.body
-        else {
+        let TypedExpr::When { clauses, .. } = &function.body else {
             panic!()
         };
 
@@ -1694,7 +1650,7 @@ mod tester {
 
         let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
 
-        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+        let tree = tree_gen.build_tree(clauses);
 
         println!("{tree}");
     }
