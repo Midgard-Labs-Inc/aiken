@@ -1535,6 +1535,42 @@ impl TypedPattern {
         }
     }
 
+    /// Replaces every type the pattern holds with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Pattern::Int { .. }
+            | Pattern::ByteArray { .. }
+            | Pattern::Var { .. }
+            | Pattern::Discard { .. } => {}
+            Pattern::Assign { pattern, .. } => pattern.map_types(f),
+            Pattern::List { elements, tail, .. } => {
+                for element in elements {
+                    element.map_types(f);
+                }
+                if let Some(tail) = tail {
+                    tail.map_types(f);
+                }
+            }
+            Pattern::Constructor {
+                arguments, tipo, ..
+            } => {
+                *tipo = f(tipo);
+                for argument in arguments {
+                    argument.value.map_types(f);
+                }
+            }
+            Pattern::Pair { fst, snd, .. } => {
+                fst.map_types(f);
+                snd.map_types(f);
+            }
+            Pattern::Tuple { elems, .. } => {
+                for elem in elems {
+                    elem.map_types(f);
+                }
+            }
+        }
+    }
+
     pub fn constructor(
         name: &str,
         arguments: &[CallArg<TypedPattern>],

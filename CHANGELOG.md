@@ -18,6 +18,7 @@
 - **aiken-lang**: A lambda's return annotation is checked like a named function's, and gives the lambda its annotated type: `fn() -> Data { 1 }` is refused (write `as_data(1)`), where it used to be a `fn() -> Int`.
 - **aiken-lang**: `a |> f(b)` is typed as `f(a, b)`, and a capture such as `f(x, _)` gets the argument types its context expects, like a lambda does.
 - **aiken-lang**: A module constant has its annotated type: `const d: Data = 1` is a `Data`. It used to be an `Int`, so `d == as_data(1)` failed at runtime.
+- **aiken-lang**: Code generation builds each variant of a generic function from a copy of its typed body with the variant's types substituted in, instead of building the body once and substituting types in the intermediate tree, so everything it decides while building sees concrete types. `TypedExpr::map_types` and `TypedPattern::map_types` replace every type a tree holds; `find_and_replace_generics` returns a type that mentions none of the substituted generics as it is.
 
 ### Fixed
 

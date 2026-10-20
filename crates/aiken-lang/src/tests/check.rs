@@ -6280,3 +6280,46 @@ fn a_lambda_return_annotation_does_not_upcast() {
         Err((_, Error::CouldNotUnify { .. }))
     ))
 }
+
+#[test]
+fn substituting_generics_in_a_copy_leaves_the_original_and_reuses_other_types() {
+    use crate::tipo::{Type, find_and_replace_generics};
+    use indexmap::IndexMap;
+    use std::rc::Rc;
+
+    let source_code = r#"
+        fn pair(x: a, n: Int) -> (a, Int) {
+          (x, n)
+        }
+    "#;
+
+    let (_, ast) = check(parse(source_code)).unwrap();
+
+    let Some(Definition::Fn(pair)) = ast.definitions.first() else {
+        panic!("expected a function")
+    };
+
+    let generic = pair.arguments[0].tipo.get_generic_id().unwrap();
+    let mono_types = IndexMap::from([(generic, Type::byte_array())]);
+
+    let mut copy = pair.body.clone();
+    copy.map_types(&mut |tipo| find_and_replace_generics(tipo, &mono_types));
+
+    let TypedExpr::Tuple { elems, tipo, .. } = &copy else {
+        panic!("expected a tuple, got {copy:#?}")
+    };
+
+    assert_eq!(tipo.to_pretty(0), "(ByteArray, Int)");
+    assert_eq!(
+        pair.body.tipo().get_inner_types()[0].get_generic_id(),
+        Some(generic)
+    );
+
+    let TypedExpr::Tuple {
+        elems: original, ..
+    } = &pair.body
+    else {
+        unreachable!()
+    };
+    assert!(Rc::ptr_eq(&elems[1].tipo(), &original[1].tipo()));
+}

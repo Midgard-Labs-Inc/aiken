@@ -770,86 +770,91 @@ pub fn convert_opaque_type(
     }
 }
 
+/// Substitutes the generics in `mono_types` into `tipo`. A type that mentions none of them is
+/// returned as it is, and no type is mutated.
 pub fn find_and_replace_generics(
     tipo: &Rc<Type>,
     mono_types: &IndexMap<u64, Rc<Type>>,
 ) -> Rc<Type> {
-    if let Some(id) = tipo.get_generic_id() {
-        mono_types.get(&id).unwrap_or(tipo).clone()
-    } else if tipo.is_generic() {
-        match &**tipo {
-            Type::App {
-                args,
-                public,
-                module,
-                name,
-                alias,
-            } => {
-                let mut new_args = vec![];
-                for arg in args {
-                    let arg = find_and_replace_generics(arg, mono_types);
-                    new_args.push(arg);
-                }
-                let t = Type::App {
-                    public: *public,
-                    module: module.clone(),
-                    name: name.clone(),
-                    args: new_args,
-                    alias: alias.clone(),
-                };
-                t.into()
-            }
-            Type::Fn { args, ret, alias } => {
-                let mut new_args = vec![];
-                for arg in args {
-                    let arg = find_and_replace_generics(arg, mono_types);
-                    new_args.push(arg);
-                }
+    replace_generics(tipo, mono_types).unwrap_or_else(|| tipo.clone())
+}
 
-                let ret = find_and_replace_generics(ret, mono_types);
+/// Like `find_and_replace_generics`, but `None` when nothing is substituted.
+fn replace_generics(tipo: &Rc<Type>, mono_types: &IndexMap<u64, Rc<Type>>) -> Option<Rc<Type>> {
+    match tipo.as_ref() {
+        Type::App {
+            public,
+            module,
+            name,
+            args,
+            alias,
+        } => Some(Rc::new(Type::App {
+            public: *public,
+            module: module.clone(),
+            name: name.clone(),
+            args: replace_generics_in_all(args, mono_types)?,
+            alias: alias.clone(),
+        })),
+        Type::Fn { args, ret, alias } => {
+            let new_args = replace_generics_in_all(args, mono_types);
+            let new_ret = replace_generics(ret, mono_types);
 
-                let t = Type::Fn {
-                    args: new_args,
-                    ret,
-                    alias: alias.clone(),
-                };
+            if new_args.is_none() && new_ret.is_none() {
+                return None;
+            }
 
-                t.into()
-            }
-            Type::Tuple { elems, alias } => {
-                let mut new_elems = vec![];
-                for elem in elems {
-                    let elem = find_and_replace_generics(elem, mono_types);
-                    new_elems.push(elem);
-                }
-                let t = Type::Tuple {
-                    elems: new_elems,
-                    alias: alias.clone(),
-                };
-                t.into()
-            }
-            Type::Var { tipo: var_tipo, .. } => {
-                let var_type = var_tipo.as_ref().borrow().clone();
-
-                match var_type {
-                    TypeVar::Link { tipo } => find_and_replace_generics(&tipo, mono_types),
-                    TypeVar::Generic { .. } | TypeVar::Unbound { .. } => unreachable!(),
-                }
-            }
-            Type::Pair { fst, snd, alias } => {
-                let fst = find_and_replace_generics(fst, mono_types);
-                let snd = find_and_replace_generics(snd, mono_types);
-                Type::Pair {
-                    fst,
-                    snd,
-                    alias: alias.clone(),
-                }
-                .into()
-            }
+            Some(Rc::new(Type::Fn {
+                args: new_args.unwrap_or_else(|| args.clone()),
+                ret: new_ret.unwrap_or_else(|| ret.clone()),
+                alias: alias.clone(),
+            }))
         }
-    } else {
-        tipo.clone()
+        Type::Tuple { elems, alias } => Some(Rc::new(Type::Tuple {
+            elems: replace_generics_in_all(elems, mono_types)?,
+            alias: alias.clone(),
+        })),
+        Type::Pair { fst, snd, alias } => {
+            let new_fst = replace_generics(fst, mono_types);
+            let new_snd = replace_generics(snd, mono_types);
+
+            if new_fst.is_none() && new_snd.is_none() {
+                return None;
+            }
+
+            Some(Rc::new(Type::Pair {
+                fst: new_fst.unwrap_or_else(|| fst.clone()),
+                snd: new_snd.unwrap_or_else(|| snd.clone()),
+                alias: alias.clone(),
+            }))
+        }
+        Type::Var { tipo: var, .. } => match &*var.borrow() {
+            TypeVar::Link { tipo } => replace_generics(tipo, mono_types),
+            TypeVar::Generic { id } => mono_types.get(id).cloned(),
+            TypeVar::Unbound { .. } => None,
+        },
     }
+}
+
+fn replace_generics_in_all(
+    types: &[Rc<Type>],
+    mono_types: &IndexMap<u64, Rc<Type>>,
+) -> Option<Vec<Rc<Type>>> {
+    let replaced: Vec<_> = types
+        .iter()
+        .map(|tipo| replace_generics(tipo, mono_types))
+        .collect();
+
+    if replaced.iter().all(Option::is_none) {
+        return None;
+    }
+
+    Some(
+        replaced
+            .into_iter()
+            .zip(types)
+            .map(|(new, old)| new.unwrap_or_else(|| old.clone()))
+            .collect(),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
