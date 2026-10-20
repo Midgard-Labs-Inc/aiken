@@ -43,6 +43,7 @@
 - **aiken-lang**: A type variable that nothing fixes becomes `Data` once every module has type-checked, so `expect x: Option<_> = d` compiles, where it used to panic.
 - **aiken-lang**: A module constant of type `MillerLoopResult` is refused; `aiken build` used to panic on it.
 - **aiken-lang**: Local and imported opaque types are cast by the same rules. An imported opaque type wrapping a `Value` or a BLS12-381 element used to be accepted by `coerce` and upcasts, which refused the same type declared locally.
+- **aiken-lang**: Inferred function types are generalised, as annotated ones are: a type variable that an unannotated function's signature still mentions becomes a type variable of that signature, so each call picks its own type, in the same module and in other modules. `fn ident(x) { x }` can now be called at two types, and a hole in an inferred signature, as in `fn decode(d: Data) { expect x: _ = d  x }`, is decoded at the type each call picks. These used to fail with a type mismatch at the second call (`sundae-contracts` and `payment-subscription` didn't compile), because the first call fixed the variable for every other one. The type variables a module constant mentions stay shared. `aiken docs` prints such a signature with its type variables, one name per variable and the annotation's name where there is one, as in `pair_up(x: a, y: b) -> (a, b)`; it used to print `pair_up(x: ?, y: ?) -> (a, b)`.
 
 ## v1.4.0 - 2026-10-18
 

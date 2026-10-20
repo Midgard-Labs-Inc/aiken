@@ -4,7 +4,12 @@ use crate::{
     tipo::{fields::FieldMap, layout::lookup_layout},
 };
 use indexmap::IndexMap;
-use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    rc::Rc,
+};
 use uplc::{ast::Type as UplcType, builtins::DefaultFunction};
 
 pub(crate) mod environment;
@@ -398,6 +403,29 @@ impl Type {
         }
     }
 
+    /// Adds the ids of the type variables still unknown in this type to `ids`.
+    pub fn collect_unbound(&self, ids: &mut HashSet<u64>) {
+        match self {
+            Self::App { args, .. } => args.iter().for_each(|arg| arg.collect_unbound(ids)),
+            Self::Fn { args, ret, .. } => {
+                args.iter().for_each(|arg| arg.collect_unbound(ids));
+                ret.collect_unbound(ids);
+            }
+            Self::Tuple { elems, .. } => elems.iter().for_each(|elem| elem.collect_unbound(ids)),
+            Self::Pair { fst, snd, .. } => {
+                fst.collect_unbound(ids);
+                snd.collect_unbound(ids);
+            }
+            Self::Var { tipo, .. } => match tipo.borrow().deref() {
+                TypeVar::Unbound { id } => {
+                    ids.insert(*id);
+                }
+                TypeVar::Link { tipo } => tipo.collect_unbound(ids),
+                TypeVar::Generic { .. } => {}
+            },
+        }
+    }
+
     /// Links each type variable in this type that is still unknown to `Data`.
     pub fn default_unbound_to_data(&self) {
         match self {
@@ -766,11 +794,27 @@ pub fn find_and_replace_generics(
     tipo: &Rc<Type>,
     mono_types: &IndexMap<u64, Rc<Type>>,
 ) -> Rc<Type> {
-    replace_generics(tipo, mono_types).unwrap_or_else(|| tipo.clone())
+    substitute(tipo, &|var| match var {
+        TypeVar::Generic { id } => mono_types.get(id).cloned(),
+        TypeVar::Unbound { .. } | TypeVar::Link { .. } => None,
+    })
+    .unwrap_or_else(|| tipo.clone())
 }
 
-/// Like `find_and_replace_generics`, but `None` when nothing is substituted.
-fn replace_generics(tipo: &Rc<Type>, mono_types: &IndexMap<u64, Rc<Type>>) -> Option<Rc<Type>> {
+/// The generic version of `tipo`: each type variable in `variables` that is still unknown
+/// becomes a generic variable with the same id. The variables themselves are left as they are,
+/// and a type that mentions none of them is returned as it is.
+pub fn generalise(tipo: &Rc<Type>, variables: &HashSet<u64>) -> Rc<Type> {
+    substitute(tipo, &|var| match var {
+        TypeVar::Unbound { id } if variables.contains(id) => Some(Type::generic_var(*id)),
+        TypeVar::Unbound { .. } | TypeVar::Generic { .. } | TypeVar::Link { .. } => None,
+    })
+    .unwrap_or_else(|| tipo.clone())
+}
+
+/// `tipo` with each type variable that `f` maps replaced by what it maps to, or `None` when it
+/// mentions none. No type is mutated.
+fn substitute(tipo: &Rc<Type>, f: &impl Fn(&TypeVar) -> Option<Rc<Type>>) -> Option<Rc<Type>> {
     match tipo.as_ref() {
         Type::App {
             public,
@@ -782,12 +826,12 @@ fn replace_generics(tipo: &Rc<Type>, mono_types: &IndexMap<u64, Rc<Type>>) -> Op
             public: *public,
             module: module.clone(),
             name: name.clone(),
-            args: replace_generics_in_all(args, mono_types)?,
+            args: substitute_all(args, f)?,
             alias: alias.clone(),
         })),
         Type::Fn { args, ret, alias } => {
-            let new_args = replace_generics_in_all(args, mono_types);
-            let new_ret = replace_generics(ret, mono_types);
+            let new_args = substitute_all(args, f);
+            let new_ret = substitute(ret, f);
 
             if new_args.is_none() && new_ret.is_none() {
                 return None;
@@ -800,12 +844,12 @@ fn replace_generics(tipo: &Rc<Type>, mono_types: &IndexMap<u64, Rc<Type>>) -> Op
             }))
         }
         Type::Tuple { elems, alias } => Some(Rc::new(Type::Tuple {
-            elems: replace_generics_in_all(elems, mono_types)?,
+            elems: substitute_all(elems, f)?,
             alias: alias.clone(),
         })),
         Type::Pair { fst, snd, alias } => {
-            let new_fst = replace_generics(fst, mono_types);
-            let new_snd = replace_generics(snd, mono_types);
+            let new_fst = substitute(fst, f);
+            let new_snd = substitute(snd, f);
 
             if new_fst.is_none() && new_snd.is_none() {
                 return None;
@@ -817,22 +861,19 @@ fn replace_generics(tipo: &Rc<Type>, mono_types: &IndexMap<u64, Rc<Type>>) -> Op
                 alias: alias.clone(),
             }))
         }
-        Type::Var { tipo: var, .. } => match &*var.borrow() {
-            TypeVar::Link { tipo } => replace_generics(tipo, mono_types),
-            TypeVar::Generic { id } => mono_types.get(id).cloned(),
-            TypeVar::Unbound { .. } => None,
-        },
+        Type::Var { tipo: var, alias } => match &*var.borrow() {
+            TypeVar::Link { tipo } => substitute(tipo, f),
+            var => f(var),
+        }
+        .map(|new| Type::with_alias(new, alias.clone())),
     }
 }
 
-fn replace_generics_in_all(
+fn substitute_all(
     types: &[Rc<Type>],
-    mono_types: &IndexMap<u64, Rc<Type>>,
+    f: &impl Fn(&TypeVar) -> Option<Rc<Type>>,
 ) -> Option<Vec<Rc<Type>>> {
-    let replaced: Vec<_> = types
-        .iter()
-        .map(|tipo| replace_generics(tipo, mono_types))
-        .collect();
+    let replaced: Vec<_> = types.iter().map(|tipo| substitute(tipo, f)).collect();
 
     if replaced.iter().all(Option::is_none) {
         return None;

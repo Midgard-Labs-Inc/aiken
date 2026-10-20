@@ -24,7 +24,7 @@ use crate::{
 use itertools::Itertools;
 use num_bigint::BigInt;
 use ordinal::Ordinal;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 use vec1::Vec1;
 
 pub const INDENT: isize = 2;
@@ -2399,18 +2399,32 @@ impl<'comments> Formatter<'comments> {
         return_annotation: &'a Option<Annotation>,
         return_type: Rc<Type>,
     ) -> Document<'a> {
-        let head = name.to_doc().append(self.docs_fn_args(args)).append(" -> ");
+        // One printer for the whole signature, which knows the names the annotations give:
+        // an inferred type variable then has the same name wherever it appears, and isn't
+        // printed under another variable's name.
+        let mut names = HashMap::new();
+        for arg in args {
+            if let Some(annotation) = &arg.annotation {
+                tipo::pretty::annotated_names(annotation, &arg.tipo, &mut names);
+            }
+        }
+        if let Some(annotation) = return_annotation {
+            tipo::pretty::annotated_names(annotation, &return_type, &mut names);
+        }
+        let mut printer = tipo::pretty::Printer::new();
+        printer.with_names(names);
 
-        let tail = self.type_or_annotation(return_annotation, &return_type);
+        let args_doc = self.docs_fn_args(args, &mut printer);
+
+        let head = name.to_doc().append(args_doc.clone()).append(" -> ");
+
+        let tail = self.type_or_annotation(return_annotation, &return_type, &mut printer);
 
         let doc = head.append(tail.clone()).group();
 
         // Wrap arguments on multi-lines if they are lengthy.
         if doc.clone().to_pretty_string(MAX_COLUMNS).contains('\n') {
-            let head = name
-                .to_doc()
-                .append(self.docs_fn_args(args).force_break())
-                .append(" -> ");
+            let head = name.to_doc().append(args_doc.force_break()).append(" -> ");
             head.append(tail).group()
         } else {
             doc
@@ -2418,13 +2432,21 @@ impl<'comments> Formatter<'comments> {
     }
 
     // Will always print the types, even if they were implicit in the original source
-    pub fn docs_fn_args<'a>(&mut self, args: &'a [TypedArg]) -> Document<'a> {
-        wrap_args(args.iter().map(|e| (self.docs_fn_arg(e), false)))
+    fn docs_fn_args<'a>(
+        &mut self,
+        args: &'a [TypedArg],
+        printer: &mut tipo::pretty::Printer,
+    ) -> Document<'a> {
+        wrap_args(args.iter().map(|e| (self.docs_fn_arg(e, printer), false)))
     }
 
-    fn docs_fn_arg<'a>(&mut self, arg: &'a TypedArg) -> Document<'a> {
+    fn docs_fn_arg<'a>(
+        &mut self,
+        arg: &'a TypedArg,
+        printer: &mut tipo::pretty::Printer,
+    ) -> Document<'a> {
         self.docs_fn_arg_name(&arg.arg_name)
-            .append(self.type_or_annotation(&arg.annotation, &arg.tipo))
+            .append(self.type_or_annotation(&arg.annotation, &arg.tipo, printer))
             .group()
     }
 
@@ -2440,10 +2462,11 @@ impl<'comments> Formatter<'comments> {
         &mut self,
         annotation: &'a Option<Annotation>,
         type_info: &Rc<Type>,
+        printer: &mut tipo::pretty::Printer,
     ) -> Document<'a> {
         match annotation {
             Some(a) => self.annotation(a),
-            None => tipo::pretty::Printer::new().print(type_info),
+            None => printer.print(type_info),
         }
     }
 

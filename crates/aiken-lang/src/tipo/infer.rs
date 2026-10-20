@@ -148,10 +148,11 @@ impl UntypedModule {
         environment.propagate_requirements()?;
         environment.check_unreachable_variables()?;
 
-        // Generalise functions now that the entire module has been inferred
+        // Every function is inferred and generalised: finish the definitions and the module's
+        // interface.
         let definitions = definitions
             .into_iter()
-            .map(|def| environment.generalise_definition(def, &module_name))
+            .map(|def| environment.finish_definition(def, &module_name))
             .collect();
 
         // Generate warnings for unused items
@@ -333,7 +334,6 @@ fn infer_definition(
             let top_level_scope = environment.open_new_scope();
             let ret = Definition::Fn(infer_function(
                 &f,
-                module_name,
                 hydrators,
                 environment,
                 tracing,
@@ -375,7 +375,6 @@ fn infer_definition(
 
                         let mut typed_fun = infer_function(
                             &handler,
-                            module_name,
                             hydrators,
                             environment,
                             tracing,
@@ -457,7 +456,6 @@ fn infer_definition(
 
                     let mut typed_fallback = infer_function(
                         &fallback,
-                        module_name,
                         hydrators,
                         environment,
                         tracing,
@@ -540,14 +538,8 @@ fn infer_definition(
                 None => Ok((None, None)),
             }?;
 
-            let typed_f = infer_function(
-                &f.into(),
-                module_name,
-                hydrators,
-                environment,
-                tracing,
-                &top_level_scope,
-            )?;
+            let typed_f =
+                infer_function(&f.into(), hydrators, environment, tracing, &top_level_scope)?;
 
             let is_bool =
                 environment.unify(typed_f.return_type.clone(), Type::bool(), typed_f.location);
@@ -615,14 +607,8 @@ fn infer_definition(
                 }
             }?;
 
-            let typed_f = infer_function(
-                &f.into(),
-                module_name,
-                hydrators,
-                environment,
-                tracing,
-                &top_level_scope,
-            )?;
+            let typed_f =
+                infer_function(&f.into(), hydrators, environment, tracing, &top_level_scope)?;
 
             let arguments = {
                 let arg = typed_f
@@ -757,6 +743,9 @@ fn infer_definition(
             if tipo.is_ml_result() {
                 return Err(Error::IllegalTypeInData { tipo, location });
             }
+
+            // Other definitions share the constant's type variables: none generalises them.
+            environment.shared_types.push(tipo.clone());
 
             let variant = ValueConstructor {
                 public,

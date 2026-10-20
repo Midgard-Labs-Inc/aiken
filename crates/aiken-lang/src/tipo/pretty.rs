@@ -151,7 +151,11 @@ impl Printer {
                 Document::String(n.clone())
             }
             None => {
-                let n = self.next_letter();
+                let mut n = self.next_letter();
+
+                while self.names.values().any(|name| name == &n) {
+                    n = self.next_letter();
+                }
 
                 self.names.insert(id, n.clone());
 
@@ -291,6 +295,66 @@ pub fn resolve_alias(
     }
 
     Some(types)
+}
+
+/// Collects the names that `annotation` gives the type variables of `tipo`, the type it
+/// annotates, so a printer shows them under those names.
+pub fn annotated_names(annotation: &Annotation, tipo: &Type, names: &mut HashMap<u64, String>) {
+    // An alias annotates the alias's parameters, not the type it stands for, which may be one
+    // of them, as in `type Identity<t> = t`.
+    let pairs: Vec<(&Annotation, Rc<Type>)> = if let Some(alias) = tipo.alias()
+        && let Annotation::Constructor { arguments, .. } = annotation
+    {
+        resolve_alias(&alias.parameters, &alias.annotation, tipo)
+            .map(|parameters| arguments.iter().zip(parameters).collect())
+            .unwrap_or_default()
+    } else {
+        match (annotation, tipo) {
+            (_, Type::Var { tipo: var, .. }) => {
+                match &*var.borrow() {
+                    TypeVar::Link { tipo } => annotated_names(annotation, tipo, names),
+                    TypeVar::Generic { id } => {
+                        if let Annotation::Var { name, .. } = annotation {
+                            names.entry(*id).or_insert_with(|| name.clone());
+                        }
+                    }
+                    TypeVar::Unbound { .. } => (),
+                }
+                vec![]
+            }
+            (Annotation::Constructor { arguments, .. }, Type::App { args, .. }) => {
+                arguments.iter().zip(args.iter().cloned()).collect()
+            }
+            (
+                Annotation::Fn { arguments, ret, .. },
+                Type::Fn {
+                    args, ret: t_ret, ..
+                },
+            ) => arguments
+                .iter()
+                .zip(args.iter().cloned())
+                .chain([(ret.as_ref(), t_ret.clone())])
+                .collect(),
+            (Annotation::Tuple { elems, .. }, Type::Tuple { elems: types, .. }) => {
+                elems.iter().zip(types.iter().cloned()).collect()
+            }
+            (
+                Annotation::Pair { fst, snd, .. },
+                Type::Pair {
+                    fst: t_fst,
+                    snd: t_snd,
+                    ..
+                },
+            ) => {
+                vec![(fst.as_ref(), t_fst.clone()), (snd.as_ref(), t_snd.clone())]
+            }
+            _ => vec![],
+        }
+    };
+
+    for (annotation, tipo) in pairs {
+        annotated_names(annotation, &tipo, names);
+    }
 }
 
 #[cfg(test)]
