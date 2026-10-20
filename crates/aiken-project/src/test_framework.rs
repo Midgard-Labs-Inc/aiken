@@ -4,7 +4,7 @@ mod test {
         module::{CheckedModule, CheckedModules},
         utils,
     };
-    use aiken_lang::tipo::TypeInfo;
+    use aiken_lang::tipo::{TypeInfo, requirement};
     use aiken_lang::{
         IdGenerator,
         ast::{Definition, ModuleKind, OnTestFailure, TraceLevel, Tracing},
@@ -43,7 +43,7 @@ mod test {
         let mut warnings = vec![];
         let (mut ast, _) = parser::module(src, TEST_KIND).expect("Failed to parse module");
         ast.name = module_name.to_string();
-        let ast = ast
+        let mut ast = ast
             .infer(
                 &id_gen,
                 TEST_KIND,
@@ -54,6 +54,8 @@ mod test {
                 None,
             )
             .expect("Failed to type-check module.");
+
+        requirement::default_unknown_types(&mut ast);
 
         module_types.insert(module_name.to_string(), ast.type_info.clone());
 

@@ -65,15 +65,26 @@ impl Export {
                 }
             };
 
+        // A type is opaque, or holds an opaque type in its fields.
+        let is_opaque = |tipo: &Rc<Type>| {
+            tipo.qualifier().is_some_and(|(module_name, name)| {
+                modules.values().any(|module| {
+                    module.ast.type_info.name == module_name
+                        && module
+                            .ast
+                            .type_info
+                            .layouts
+                            .get(&name)
+                            .is_some_and(|layout| layout.opaque || layout.summary.contents.opaque)
+                })
+            })
+        };
+
         let parameters = func
             .arguments
             .iter()
             .map(|param| {
-                if let Some(qualifier) = param.tipo.qualifier()
-                    && modules
-                        .values()
-                        .any(|module| module.ast.type_info.opaque_types.contains(&qualifier))
-                {
+                if is_opaque(&param.tipo) {
                     return Err(illegal_opaque_type(
                         module,
                         param.tipo.clone(),
@@ -104,11 +115,7 @@ impl Export {
             })
             .collect::<Result<_, _>>()?;
 
-        if let Some(qualifier) = func.return_type.qualifier()
-            && modules
-                .values()
-                .any(|module| module.ast.type_info.opaque_types.contains(&qualifier))
-        {
+        if is_opaque(&func.return_type) {
             return Err(illegal_opaque_type(
                 module,
                 func.return_type.clone(),

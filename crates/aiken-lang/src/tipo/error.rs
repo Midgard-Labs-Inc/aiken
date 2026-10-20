@@ -388,6 +388,25 @@ Use an intermediate public representation instead, then re-construct the opaque 
         location: Span,
     },
 
+    #[error("I can't test whether some Data is a {}.\n", tipo.to_pretty(0).if_supports_color(Stdout, |s| s.red()))]
+    #[diagnostic(code("illegal::soft_cast"))]
+    #[diagnostic(help(
+        r#"An {if_is} takes its {else_} branch when the Data doesn't have the shape of the type. Converting Data to a {String}, {Value}, {G1Element} or {G2Element} is itself the check, and it fails instead of telling, so an {if_is} can't convert to a type that contains one. Use {expect} to fail on such Data, or test for a {ByteArray} and convert it yourself."#,
+        if_is = "if … is".if_supports_color(Stdout, |s| s.yellow()),
+        else_ = "else".if_supports_color(Stdout, |s| s.yellow()),
+        expect = "expect".if_supports_color(Stdout, |s| s.yellow()),
+        String = "String".if_supports_color(Stdout, |s| s.cyan()),
+        Value = "Value".if_supports_color(Stdout, |s| s.cyan()),
+        G1Element = "G1Element".if_supports_color(Stdout, |s| s.cyan()),
+        G2Element = "G2Element".if_supports_color(Stdout, |s| s.cyan()),
+        ByteArray = "ByteArray".if_supports_color(Stdout, |s| s.cyan()),
+    ))]
+    IllegalSoftCast {
+        #[label("can't be tested")]
+        location: Span,
+        tipo: Rc<Type>,
+    },
+
     #[error("I found a discarded expression not bound to a variable.\n")]
     #[diagnostic(code("implicit_discard"))]
     #[diagnostic(help(
@@ -1144,6 +1163,38 @@ The best thing to do from here is to remove it."#))]
         location: Span,
     },
 
+    #[error("I found a type variable that no call to {} can choose.\n", function.if_supports_color(Stdout, |s| s.purple()))]
+    #[diagnostic(code("illegal::unreachable_type_variable"))]
+    #[diagnostic(help(
+        "{name} is decoded from {Data} here, but it doesn't appear in the function's type:\n\n    {tipo}\n\nso no call can say which type it is, and there is nothing to decode to. This happens when an alias or {Data} drops the type parameter, as in {example}, or when only the function's body names it. Give the function a parameter whose type keeps {name}, such as an opaque type or a record.",
+        name = name.if_supports_color(Stdout, |s| s.yellow()),
+        tipo = tipo.to_pretty(4).if_supports_color(Stdout, |s| s.cyan()),
+        Data = "Data".if_supports_color(Stdout, |s| s.cyan()),
+        example = "type Tag<a> = Int".if_supports_color(Stdout, |s| s.cyan()),
+    ))]
+    UnreachableTypeVariable {
+        #[label("{name} is never chosen by a call")]
+        location: Span,
+        name: String,
+        function: String,
+        tipo: Rc<Type>,
+    },
+
+    #[error("I found a type variable that nothing can choose in the constant {}.\n", constant.if_supports_color(Stdout, |s| s.purple()))]
+    #[diagnostic(code("illegal::unreachable_type_variable"))]
+    #[diagnostic(help(
+        "{name} is decoded from {Data} here, but a constant isn't called, so nothing says which type {name} is, and there is nothing to decode to. Decode to a type without type variables, as in {example}.",
+        name = name.if_supports_color(Stdout, |s| s.yellow()),
+        Data = "Data".if_supports_color(Stdout, |s| s.cyan()),
+        example = "expect x: Int = d".if_supports_color(Stdout, |s| s.cyan()),
+    ))]
+    UnreachableTypeVariableInConstant {
+        #[label("{name} is never chosen")]
+        location: Span,
+        name: String,
+        constant: String,
+    },
+
     #[error("Cannot infer caller without inferring callee first")]
     MustInferFirst { function: Box<UntypedFunction> },
 
@@ -1205,16 +1256,6 @@ The best thing to do from here is to remove it."#))]
         #[label("cannot be inspected")]
         location: Span,
     },
-
-    #[error("I couldn't quite figure out the type of that empty list.\n")]
-    #[diagnostic(code("ambiguous::empty_list"))]
-    #[diagnostic(help(
-        "In this context, the empty can designate either a empty array or an empty map. This matters because of Aiken's structural representation of types. I cannot possibly choose in this scenario and I need help to resolve the ambiguity. Either:\n\n- use a builtin such as `map_data` or `list_data` to be explicit about its Data representation; or\n- create a local declaration with a type annotation that indicates wether it's a plain `List` or a map (a.k.a `Pairs`)."
-    ))]
-    AmbiguousEmptyList {
-        #[label("ambiguous empty list")]
-        location: Span,
-    },
 }
 
 impl ExtraData for Error {
@@ -1236,6 +1277,7 @@ impl ExtraData for Error {
             | Error::IllegalTypeInData { .. }
             | Error::IllegalCoerce { .. }
             | Error::IllegalComparison { .. }
+            | Error::IllegalSoftCast { .. }
             | Error::ImplicitlyDiscardedExpression { .. }
             | Error::IncorrectFieldsArity { .. }
             | Error::IncorrectFunctionCallArity { .. }
@@ -1271,6 +1313,8 @@ impl ExtraData for Error {
             | Error::IncorrectTestArity { .. }
             | Error::IllegalTestType { .. }
             | Error::GenericLeftAtBoundary { .. }
+            | Error::UnreachableTypeVariable { .. }
+            | Error::UnreachableTypeVariableInConstant { .. }
             | Error::UnexpectedMultiPatternAssignment { .. }
             | Error::ExpectOnOpaqueType { .. }
             | Error::IllegalOpaqueType { .. }
@@ -1284,8 +1328,7 @@ impl ExtraData for Error {
             | Error::ConflictingDecorators { .. }
             | Error::DecoratorTagOverlap { .. }
             | Error::InvalidFieldAccess { .. }
-            | Error::IllegalTraceArgument { .. }
-            | Error::AmbiguousEmptyList { .. } => None,
+            | Error::IllegalTraceArgument { .. } => None,
 
             Error::PrivateTypeLeak {
                 leaked,
@@ -1322,13 +1365,13 @@ impl Error {
                 location,
                 expected,
                 given,
-                situation: note,
+                situation,
                 rigid_type_names,
-            } => Error::CouldNotUnify {
+            } if situation != Some(UnifyErrorSituation::NoDataForm) => Error::CouldNotUnify {
                 location,
                 expected: given,
                 given: expected,
-                situation: note,
+                situation,
                 rigid_type_names,
             },
             other => other,
@@ -1356,15 +1399,33 @@ impl Error {
         }
     }
 
+    /// Sets the situation of a type mismatch, unless it's a cast's (`NoDataForm`), which
+    /// says more.
     pub fn with_unify_error_situation(mut self, new_situation: UnifyErrorSituation) -> Self {
         if let Error::CouldNotUnify {
             ref mut situation, ..
         } = self
+            && *situation != Some(UnifyErrorSituation::NoDataForm)
         {
             *situation = Some(new_situation);
         }
 
         self
+    }
+
+    /// Whether a cast raised this error, rather than a mismatch of two types being unified.
+    pub fn is_cast_error(&self) -> bool {
+        matches!(
+            self,
+            Error::CouldNotUnify {
+                situation: Some(UnifyErrorSituation::NoDataForm),
+                ..
+            } | Error::IllegalTypeInData { .. }
+                | Error::IllegalComparison { .. }
+                | Error::IllegalCoerce { .. }
+                | Error::IllegalSoftCast { .. }
+                | Error::ExpectOnOpaqueType { .. }
+        )
     }
 }
 
@@ -1591,6 +1652,20 @@ fn suggest_unify(
                Either, fix (or remove) the annotation or adjust the Sampler to return the expected type."#,
             expected,
             given
+        },
+        Some(UnifyErrorSituation::NoDataForm) => formatdoc! {
+            r#"This value is converted to {} here, but it is a:
+
+                   {}
+
+               which has no Data form: functions and {} can't be converted to or from {}, and casts don't convert a {}, {} or {} yet."#,
+            expected,
+            given,
+            "MillerLoopResult".if_supports_color(Stdout, |s| s.cyan()),
+            "Data".if_supports_color(Stdout, |s| s.cyan()),
+            "Value".if_supports_color(Stdout, |s| s.cyan()),
+            "G1Element".if_supports_color(Stdout, |s| s.cyan()),
+            "G2Element".if_supports_color(Stdout, |s| s.cyan()),
         },
         None => formatdoc! {
             r#"I am inferring the following type:
@@ -2028,6 +2103,9 @@ pub enum UnifyErrorSituation {
     FuzzerAnnotationMismatch,
 
     SamplerAnnotationMismatch,
+
+    /// A cast meets a type that has no Data form.
+    NoDataForm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

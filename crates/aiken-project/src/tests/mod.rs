@@ -13,7 +13,7 @@ use aiken_lang::{
     line_numbers::LineNumbers,
     parser,
     plutus_version::PlutusVersion,
-    tipo::TypeInfo,
+    tipo::{TypeInfo, requirement},
 };
 use indexmap::IndexMap;
 use std::{
@@ -95,7 +95,7 @@ impl TestProject {
     pub fn check(&mut self, module: ParsedModule) -> CheckedModule {
         let mut warnings = vec![];
 
-        let ast = module
+        let mut ast = module
             .ast
             .infer(
                 &self.id_gen,
@@ -107,6 +107,10 @@ impl TestProject {
                 None,
             )
             .expect("Failed to type-check module");
+
+        // These tests check one module at a time: settle its types as a project does once every
+        // module has type-checked.
+        requirement::default_unknown_types(&mut ast);
 
         // Register function definitions for easier access later.
         ast.register_definitions(&mut self.functions, &mut self.constants);

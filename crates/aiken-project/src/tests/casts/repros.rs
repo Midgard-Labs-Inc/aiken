@@ -379,3 +379,133 @@ test trace_argument() {
         "up",
     );
 }
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn an_element_type_that_nothing_fixes_is_data() {
+    let compiled = assert_tests_pass(
+        &[(
+            "lib/unfixed.ak",
+            r#"
+use aiken/builtin
+use aiken/collection/list
+
+type Box<a> {
+  items: List<a>,
+}
+
+fn flag() -> Bool {
+  True
+}
+
+fn n() -> Int {
+  0
+}
+
+fn with_items(k: fn(List<a>) -> b) -> b {
+  k([])
+}
+
+pub fn coerce_pairs() -> Pairs<Int, Int> {
+  coerce p: Pairs<Int, Int> = if flag() { [] } else { [] }
+  p
+}
+
+test bare() {
+  let d: Data = []
+  d == builtin.list_data([])
+}
+
+test in_an_option() {
+  let a: Data = Some([])
+  a == builtin.constr_data(0, [builtin.list_data([])])
+}
+
+test in_a_tuple() {
+  let b: Data = ([], 1)
+  b == builtin.list_data([builtin.list_data([]), builtin.i_data(1)])
+}
+
+test in_a_pair() {
+  let c: Data = Pair(1, [])
+  c == builtin.list_data([builtin.i_data(1), builtin.list_data([])])
+}
+
+test in_a_list() {
+  let d: Data = [[]]
+  d == builtin.list_data([builtin.list_data([])])
+}
+
+test through_a_generic_function() {
+  let e: Data = list.reverse([])
+  e == builtin.list_data([])
+}
+
+test in_branches() {
+  let f: Data = if flag() { [] } else { [] }
+  let g: Data = when n() is {
+    0 -> []
+    _ -> []
+  }
+  f == builtin.list_data([]) && g == builtin.list_data([])
+}
+
+test in_a_record() {
+  let d: Data = Box([])
+  d == builtin.constr_data(0, [builtin.list_data([])])
+}
+
+test fixed_later_in_the_definition() {
+  let xs <- with_items
+  let d: Data = xs
+  let total = list.foldl(xs, 0, fn(x, acc) { x + acc })
+  d == builtin.list_data([]) && total == 0
+}
+"#,
+        )],
+        "unfixed",
+    );
+
+    // `coerce` checks nothing: a `List []` read as `Pairs` fails.
+    for project in &compiled {
+        assert_eq!(
+            project.function("unfixed", "coerce_pairs").run(&[]),
+            Outcome::Failed
+        );
+    }
+}
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn a_hole_that_nothing_fixes_decodes_data() {
+    let compiled = assert_tests_pass(
+        &[(
+            "lib/hole.ak",
+            r#"
+use aiken/builtin
+
+pub fn first(d: Data) -> Data {
+  expect Some(x): Option<_> = d
+  x
+}
+
+test hole() {
+  let d: Data = builtin.constr_data(0, [builtin.i_data(1)])
+  expect x: Option<_> = d
+  x != None
+}
+"#,
+        )],
+        "hole",
+    );
+
+    for project in &compiled {
+        let first = project.function("hole", "first");
+
+        assert_ne!(
+            first.run(&[data(Data::constr(0, vec![Data::bytestring(vec![0xaa])]))]),
+            Outcome::Failed
+        );
+        assert_eq!(first.run(&[data(Data::constr(0, vec![]))]), Outcome::Failed);
+    }
+}
