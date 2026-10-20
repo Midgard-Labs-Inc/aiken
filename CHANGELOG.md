@@ -13,6 +13,11 @@
 
 - **aiken-lang**: Code generation reads each data type's constructor indices, field types and representation from its `DataLayout`, looked up by module and name. `CodeGenerator::new` and `TypedModule::register_definitions` no longer take the data type definitions, and `UntypedExpr::reify_data`, `UntypedExpr::reify_constant` and `TestResult::reify` take the module types instead. `tipo::lookup_data_type_by_tipo` and `tipo::check_replaceable_opaque_type` are removed.
 - **aiken-lang**: An opaque type whose constructor has a decorator (such as `@tag`) is no longer erased to its field: it keeps its constructor, as the documentation says. This changes the scripts of programs that use such types.
+- **aiken-lang**: Unification no longer decides upcasts to `Data`. `unify` had modes that let `Data` unify with any type that has a `Data` form, in function argument types too; it's now strict and structural, closer to Gleam's, so types unify exactly. A `fn(Int) -> Bool` is no longer accepted where a `fn(Data) -> Bool` is expected, whether passed as an argument, through `expect`, through a generic or through a pipe; such programs used to read `Data` as an `Int` at runtime. Upcasts are a separate step: the type checker inserts a `TypedExpr::Upcast` node on a whole value at each position where one is allowed, and code generation lowers those nodes instead of comparing types. Container and function types must otherwise match exactly: a `List<Int>` can't be used as a `List<Data>`, and `expect [x]: List<Int> = [d]` is refused too.
+- **stdlib**: The `aiken/fuzz/scenario` examples wrap a validator's handlers in functions that `expect` their redeemer and datum: a handler whose redeemer has its own type can't be passed where `scenario.run` expects a `fn(Data, …)` any more.
+- **aiken-lang**: A lambda's return annotation is checked like a named function's, and gives the lambda its annotated type: `fn() -> Data { 1 }` is refused (write `as_data(1)`), where it used to be a `fn() -> Int`.
+- **aiken-lang**: `a |> f(b)` is typed as `f(a, b)`, and a capture such as `f(x, _)` gets the argument types its context expects, like a lambda does.
+- **aiken-lang**: A module constant has its annotated type: `const d: Data = 1` is a `Data`. It used to be an `Int`, so `d == as_data(1)` failed at runtime.
 
 ### Fixed
 
@@ -22,6 +27,8 @@
 - **aiken-lang**: Reporting a failing test or a counterexample no longer panics on a constructor with `@tag`, a generic argument nested in a field's type, or a `@list` record. A map is printed as a `Value` literal only when its type is `Value`, so an empty `Pairs` inside an opaque wrapper prints as `W([])`.
 - **aiken-lang**: An opaque type with one constructor, one field and no decorator is compiled as a newtype: its constructor is the identity, also when used as a function value (`list.map(xs, W)` used to panic); a pattern `W(p)` matches `p` against the same value, so literal and nested patterns inside it work (they used to panic), and `if x is W(n): W` always matches (it used to test a constructor index of the field); a record update evaluates the spread, then converts the new value to the field's type (it used to panic); module constants holding such values compile.
 - **aiken-lang**: An opaque type wrapping `Data` keeps the upcast of its constructor's argument: `Payload(5)` holds `I 5`, not the integer 5.
+- **aiken-lang**: `x == d` and `x != d`, where `d: Data` and `x` isn't, compare both sides as `Data`. They used to apply `x`'s own equality builtin to `d` and fail at runtime, and `d != True` evaluated as `d == True`.
+- **aiken-lang**: `expect` and `if … is` on a value that isn't `Data` are a pattern match on the value's own type, opaque types included. `expect x: Thing = id(t)` no longer reports an opaque cast, and `expect x: Thing = 1` reports a type mismatch.
 
 ## v1.4.0 - 2026-10-18
 

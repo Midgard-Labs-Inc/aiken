@@ -22,10 +22,7 @@ use crate::{
     expr::{FnStyle, TypedExpr, UntypedExpr},
     format,
     parser::token::Base,
-    tipo::{
-        DefaultFunction, ModuleKind, PatternConstructor, TypeConstructor, environment::UnifyMode,
-        fields::FieldMap,
-    },
+    tipo::{DefaultFunction, ModuleKind, PatternConstructor, TypeConstructor, fields::FieldMap},
 };
 use std::{
     cmp::Ordering,
@@ -765,26 +762,18 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 let left = self.infer(left)?;
                 let right = self.infer(right)?;
 
-                self.unify_with(
-                    left.tipo(),
-                    right.tipo(),
-                    right.location(),
-                    UnifyMode::AllowUpCast,
-                )
-                .or_else(|err| {
-                    if name.is_symmetric() {
-                        return self
-                            .unify_with(
-                                right.tipo(),
-                                left.tipo(),
-                                left.location(),
-                                UnifyMode::AllowUpCast,
-                            )
-                            .or(Err(err));
-                    }
-
-                    Err(err)
-                })?;
+                // If either side is `Data`, both are compared as `Data`.
+                let (left, right) = if left.tipo().is_data() {
+                    let location = right.location();
+                    let right = self.upcast(left.tipo(), right, location)?;
+                    (left, right)
+                } else if right.tipo().is_data() {
+                    let location = left.location();
+                    (self.upcast(right.tipo(), left, location)?, right)
+                } else {
+                    self.unify(left.tipo(), right.tipo(), right.location())?;
+                    (left, right)
+                };
 
                 for tipo in [left.tipo(), right.tipo()] {
                     self.environment
@@ -932,12 +921,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             // field in the record contained within the spread variable. We
             // need to check the spread, and not the constructor, in order
             // to handle polymorphic types.
-            self.unify_with(
-                spread_field.tipo(),
-                value.tipo(),
-                value.location(),
-                UnifyMode::AllowUpCast,
-            )?;
+            let value_location = value.location();
+            let value = self.upcast(spread_field.tipo(), value, value_location)?;
 
             match field_map.fields.get(&label) {
                 None => {
@@ -1491,7 +1476,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             );
         }
 
-        let typed_value = self.infer(untyped_value.clone())?;
+        let mut typed_value = self.infer(untyped_value.clone())?;
 
         let mut value_typ = typed_value.tipo();
 
@@ -1503,12 +1488,13 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 .type_from_annotation(ann)
                 .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
 
-            self.unify_with(
-                ann_typ.clone(),
-                value_typ.clone(),
-                typed_value.type_defining_location(),
-                kind.into(),
-            )?;
+            let value_location = typed_value.type_defining_location();
+
+            if value_is_data && !kind.is_let() && !ann_typ.is_data() {
+                self.downcast(ann_typ.clone(), &typed_value, value_location)?;
+            } else {
+                typed_value = self.upcast(ann_typ.clone(), typed_value, value_location)?;
+            }
 
             value_typ = ann_typ.clone();
 
@@ -1555,11 +1541,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     false,
                 ) {
                     Ok(pattern) if ann_typ.is_monomorphic() => {
-                        self.unify_with(
+                        self.downcast(
                             ann_typ.clone(),
-                            value_typ.clone(),
+                            &typed_value,
                             typed_value.type_defining_location(),
-                            kind.into(),
                         )?;
 
                         value_typ = ann_typ.clone();
@@ -1778,7 +1763,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             // about what the expected arguments are. This extra information
             // when type checking the function body means that the
             // `record.field` access syntax can be used, and improves error
-            // messages.
+            // messages. A capture gets the expected arguments too, as a lambda does.
             (
                 Type::Fn {
                     args: expected_arguments,
@@ -1792,29 +1777,22 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     location,
                     fn_style,
                 },
-            ) if fn_style != FnStyle::Capture && expected_arguments.len() == arguments.len() => {
-                self.infer_fn(
-                    arguments,
-                    expected_arguments,
-                    *body,
-                    false,
-                    return_annotation,
-                    location,
-                )
-            }
+            ) if expected_arguments.len() == arguments.len() => self.infer_fn(
+                arguments,
+                expected_arguments,
+                *body,
+                fn_style == FnStyle::Capture,
+                return_annotation,
+                location,
+            ),
 
             // Otherwise just perform normal type inference.
             (_, value) => self.infer(value),
         }?;
 
-        self.unify_with(
-            tipo.clone(),
-            value.tipo(),
-            value.location(),
-            UnifyMode::AllowUpCast,
-        )?;
+        let location = value.location();
 
-        Ok(value)
+        self.upcast(tipo, value, location)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2084,11 +2062,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         // Check that any return type is accurate.
         let return_type = match return_type {
             Some(return_type) => {
-                self.unify_with(
+                self.unify(
                     return_type.clone(),
                     body.tipo(),
                     body.type_defining_location(),
-                    UnifyMode::AllowUpCast,
                 )
                 .map_err(|e| {
                     e.return_annotation_mismatch()
@@ -2669,18 +2646,16 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                         .push(Warning::CompactTraceLabelIsNotstring { location });
                 }
 
-                self.unify_with(
-                    Type::data(),
-                    typed_arg.tipo(),
-                    typed_arg.location(),
-                    UnifyMode::AllowUpCast,
-                )
-                .map_err(|err| match err {
-                    Error::CouldNotUnify { location, .. } => {
-                        Error::IllegalTraceArgument { location }
-                    }
-                    err => err,
-                })?;
+                let arg_location = typed_arg.location();
+
+                let typed_arg = self.upcast(Type::data(), typed_arg, arg_location).map_err(
+                    |err| match err {
+                        Error::CouldNotUnify { location, .. } => {
+                            Error::IllegalTraceArgument { location }
+                        }
+                        err => err,
+                    },
+                )?;
 
                 diagnose_expr(typed_arg)
             }
@@ -2984,15 +2959,43 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         self.environment.unify(t1, t2, location)
     }
 
+    /// `value` where a value of type `expected` is expected, in a position that upcasts: there,
+    /// a value of another type is accepted where `Data` is expected, and converted to it.
     #[allow(clippy::result_large_err)]
-    pub(super) fn unify_with(
+    fn upcast(
         &mut self,
-        t1: Rc<Type>,
-        t2: Rc<Type>,
+        expected: Rc<Type>,
+        value: TypedExpr,
         location: Span,
-        unify_mode: UnifyMode,
+    ) -> Result<TypedExpr, Error> {
+        if expected.is_data()
+            && !value.tipo().is_data()
+            && self.environment.check_upcast(&value.tipo(), location)?
+        {
+            return Ok(TypedExpr::Upcast {
+                location: value.location(),
+                value: Box::new(value),
+            });
+        }
+
+        self.unify(expected, value.tipo(), location)?;
+
+        Ok(value)
+    }
+
+    /// Checks that `expect` or `if … is` can convert `value`, which is `Data`, to `target`.
+    #[allow(clippy::result_large_err)]
+    fn downcast(
+        &mut self,
+        target: Rc<Type>,
+        value: &TypedExpr,
+        location: Span,
     ) -> Result<(), Error> {
-        self.environment.unify_with(t1, t2, location, unify_mode)
+        if self.environment.check_downcast(&target, location)? {
+            Ok(())
+        } else {
+            self.unify(target, value.tipo(), location)
+        }
     }
 }
 

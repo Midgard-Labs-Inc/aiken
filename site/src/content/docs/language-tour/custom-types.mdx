@@ -455,9 +455,8 @@ It replaces the given binding with their new values.
 
 ## Relationship with Data
 
-At runtime custom types become an opaque Plutus' Data. In Aiken's type system
-`Data` matches with any user-defined type (but with none of the primitive
-types).
+At runtime custom types become an opaque Plutus' Data. In Aiken's type system,
+a value of a custom type is accepted where `Data` is expected, and converted.
 
 ### Upcasting
 
@@ -479,6 +478,14 @@ builtin.serialise_data(datum)
 // Or similarly, by providing an annotation.
 let as_data: Data = datum
 ```
+
+An upcast happens only on a value: as a call argument, or bound by a `let`
+annotated `Data`, for example. Container and function types must otherwise
+match exactly: a `List<Datum>` can't be used as a `List<Data>`, and a
+`fn(Datum) -> Bool` can't be passed as a `fn(Data) -> Bool`. To pass a list as
+`Data`, upcast the whole list.
+Likewise, a function annotated `-> Data` must return a `Data`: write
+`as_data(datum)` to return a converted `datum`.
 
 ### Downcasting
 

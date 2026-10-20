@@ -50,6 +50,29 @@ pub type Scenario<st> {
 /// Run a given scenario for a given set of handlers. See also: [`ok`](#ok) and
 /// [`ko`](#ko) for generating scenarii.
 ///
+/// A validator's handlers take their redeemer (and a spend handler its datum) at their own
+/// types, where the runner gives `Data`. Convert them with `expect`, as the validator does
+/// on-chain:
+///
+/// ```aiken
+/// fn mint(redeemer: Data, policy_id: PolicyId, self: Transaction) -> Bool {
+///   expect redeemer: MyRedeemer = redeemer
+///   handlers.mint(redeemer, policy_id, self)
+/// }
+///
+/// fn spend(
+///   datum: Option<Data>,
+///   redeemer: Data,
+///   output: OutputReference,
+///   self: Transaction,
+/// ) -> Bool {
+///   let datum: Data = datum
+///   expect datum: Option<MyDatum> = datum
+///   expect redeemer: MyRedeemer = redeemer
+///   handlers.spend(datum, redeemer, output, self)
+/// }
+/// ```
+///
 /// Any missing handler from the validator can be plucked using one of the following:
 ///
 /// - [`into_mint_handler`](#into_mint_handler)
@@ -80,6 +103,7 @@ pub fn run(
 }
 
 /// Generate only _K.O._ scenarii from an initial state and a stepping function.
+/// `mint` and `spend` are the handlers [`run`](#run) shows how to write.
 ///
 /// ```aiken
 /// test prop_end_to_end_ko((labels, scenario) via scenario.ko(initial_state, step)) {
@@ -87,8 +111,8 @@ pub fn run(
 ///   scenario.run(
 ///     scenario,
 ///     my_script,
-///     handlers.mint,
-///     handlers.spend,
+///     mint,
+///     spend,
 ///     scenario.into_withdraw_handler(handlers.else),
 ///     scenario.into_publish_handler(handlers.else),
 ///     scenario.into_vote_handler(handlers.else),
@@ -103,14 +127,15 @@ pub fn ko(
 }
 
 /// Generate only _O.K._ scenarii from an initial state and a stepping function.
+/// `mint` and `spend` are the handlers [`run`](#run) shows how to write.
 ///
 /// ```aiken
 /// test prop_end_to_end_ok(scenario via scenario.ok(initial_state, step)) {
 ///   scenario.run(
 ///     scenario,
 ///     my_script,
-///     handlers.mint,
-///     handlers.spend,
+///     mint,
+///     spend,
 ///     scenario.into_withdraw_handler(handlers.else),
 ///     scenario.into_publish_handler(handlers.else),
 ///     scenario.into_vote_handler(handlers.else),
