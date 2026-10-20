@@ -1,6 +1,7 @@
-//! Tests of casts through `Data`: programs whose results must not change, a reference model of
-//! the semantics (`site/src/content/docs/casts.mdx`), and the properties that compare the
-//! compiler against the model, and the optimized programs against their baseline.
+//! Tests of casts through `Data`: programs whose results must not change, reproductions of
+//! fixed bugs (ignored by default), a reference model of the semantics
+//! (`site/src/content/docs/casts.mdx`), and the properties that compare the compiler against the
+//! model, and the optimized programs against their baseline.
 //!
 //! Every program is compiled twice, at silent and verbose, and run twice: optimized, and as
 //! the baseline (`Program::lower`), which only does the lowering every program needs.
@@ -27,6 +28,7 @@ use uplc::{
 mod guards;
 mod model;
 mod properties;
+mod repros;
 
 pub const LEVELS: [TraceLevel; 2] = [TraceLevel::Silent, TraceLevel::Verbose];
 

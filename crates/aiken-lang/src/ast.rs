@@ -139,7 +139,6 @@ impl TypedModule {
         &self,
         functions: &mut IndexMap<FunctionAccessKey, TypedFunction>,
         constants: &mut IndexMap<FunctionAccessKey, TypedExpr>,
-        data_types: &mut IndexMap<DataTypeKey, TypedDataType>,
     ) {
         for def in self.definitions() {
             match def {
@@ -173,16 +172,6 @@ impl TypedModule {
                     );
                 }
 
-                Definition::DataType(dt) => {
-                    data_types.insert(
-                        DataTypeKey {
-                            module_name: self.name.clone(),
-                            defined_type: dt.name.clone(),
-                        },
-                        dt.clone(),
-                    );
-                }
-
                 Definition::Validator(v) => {
                     let module_name = self.name.as_str();
 
@@ -201,7 +190,7 @@ impl TypedModule {
                     );
                 }
 
-                Definition::TypeAlias(_) | Definition::Use(_) => {}
+                Definition::DataType(_) | Definition::TypeAlias(_) | Definition::Use(_) => {}
             }
         }
     }
@@ -390,12 +379,6 @@ pub struct TypeAlias<T> {
     pub parameters: Vec<String>,
     pub public: bool,
     pub tipo: T,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DataTypeKey {
-    pub module_name: String,
-    pub defined_type: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]

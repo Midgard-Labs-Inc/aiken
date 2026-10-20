@@ -6,10 +6,9 @@ use indexmap::IndexMap;
 use itertools::{Either, Itertools, Position};
 
 use crate::{
-    ast::{DataTypeKey, DecoratorKind, Pattern, TypedClause, TypedDataType, TypedPattern},
-    expr::{Type, TypeVar, TypedExpr, lookup_data_type_by_tipo},
-    gen_uplc::builder::get_constr_index_variant,
-    tipo::PatternConstructor,
+    ast::{Pattern, TypedClause, TypedPattern},
+    expr::{Type, TypeVar, TypedExpr},
+    tipo::{PatternConstructor, TypeInfo, layout::lookup_layout},
 };
 
 use super::{interner::AirInterner, tree::AirTree};
@@ -603,19 +602,19 @@ impl Display for DecisionTree<'_> {
 
 pub struct TreeGen<'a, 'b> {
     interner: &'b mut AirInterner,
-    data_types: &'b IndexMap<&'a DataTypeKey, &'a TypedDataType>,
+    module_types: &'b IndexMap<&'a str, &'a TypeInfo>,
     wild_card_pattern: RowItem<'a>,
 }
 
 impl<'a, 'b> TreeGen<'a, 'b> {
     pub fn new(
         interner: &'b mut AirInterner,
-        data_types: &'b IndexMap<&'a DataTypeKey, &'a TypedDataType>,
+        module_types: &'b IndexMap<&'a str, &'a TypeInfo>,
         wild_card_pattern: &'a TypedPattern,
     ) -> Self {
         TreeGen {
             interner,
-            data_types,
+            module_types,
             wild_card_pattern: RowItem {
                 path: vec![],
                 pattern: wild_card_pattern,
@@ -885,10 +884,10 @@ impl<'a, 'b> TreeGen<'a, 'b> {
                         tipo,
                         ..
                     } => {
-                        let data_type =
-                            lookup_data_type_by_tipo(self.data_types, &specialized_tipo).unwrap();
-
-                        let (constr_index, _) = get_constr_index_variant(&data_type, name).unwrap();
+                        let constr_index = lookup_layout(self.module_types, &specialized_tipo)
+                            .and_then(|layout| layout.constructor(name))
+                            .unwrap_or_else(|| panic!("no layout for constructor {name}"))
+                            .index;
 
                         (
                             CaseTest::Constr(constr_index),
@@ -1214,18 +1213,9 @@ impl<'a, 'b> TreeGen<'a, 'b> {
             Pattern::Constructor {
                 arguments, tipo, ..
             } => {
-                let data_type = lookup_data_type_by_tipo(self.data_types, &current_tipo).unwrap();
+                let layout = lookup_layout(self.module_types, &current_tipo).unwrap();
 
-                let list_decorator = data_type
-                    .decorators
-                    .iter()
-                    .any(|dec| matches!(&dec.kind, DecoratorKind::List));
-
-                let is_transparent = data_type.opaque
-                    && data_type.constructors[0].arguments.len() == 1
-                    && !list_decorator;
-
-                if data_type.constructors.len() == 1 || data_type.is_never() {
+                if layout.constructors.len() == 1 {
                     arguments
                         .iter()
                         .enumerate()
@@ -1234,12 +1224,10 @@ impl<'a, 'b> TreeGen<'a, 'b> {
 
                             let mut item_path = path.clone();
 
-                            if is_transparent {
+                            if layout.is_erased() {
                                 item_path.push(Path::OpaqueConstr(tipo.clone()));
-                            } else if list_decorator {
-                                item_path.push(Path::Constr(tipo.clone(), index, true));
                             } else {
-                                item_path.push(Path::Constr(tipo.clone(), index, false));
+                                item_path.push(Path::Constr(tipo.clone(), index, layout.is_list()));
                             }
 
                             let (assigns, patts) =
@@ -1394,7 +1382,6 @@ mod tester {
         gen_uplc::{decision_tree::TreeGen, interner::AirInterner},
         parser,
         tipo::error::{Error, Warning},
-        utils,
     };
 
     fn parse(source_code: &str) -> UntypedModule {
@@ -1655,16 +1642,15 @@ mod tester {
 
         let id_gen = IdGenerator::new();
 
-        let data_types = builtins::prelude_data_types(&id_gen);
+        let prelude = builtins::prelude(&id_gen);
+        let module_types = IndexMap::from([(builtins::PRELUDE, &prelude)]);
 
         let pattern = TypedPattern::Discard {
             name: "_".to_string(),
             location: Span::empty(),
         };
 
-        let data_types = utils::indexmap::as_ref_values(&data_types);
-
-        let tree_gen = TreeGen::new(&mut air_interner, &data_types, &pattern);
+        let tree_gen = TreeGen::new(&mut air_interner, &module_types, &pattern);
 
         let tree = tree_gen.build_tree(&subject.tipo(), clauses);
 

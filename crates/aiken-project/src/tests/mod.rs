@@ -7,10 +7,7 @@ use crate::{
 };
 use aiken_lang::{
     IdGenerator,
-    ast::{
-        DataTypeKey, FunctionAccessKey, ModuleKind, TraceLevel, Tracing, TypedDataType,
-        TypedFunction,
-    },
+    ast::{FunctionAccessKey, ModuleKind, TraceLevel, Tracing, TypedFunction},
     expr::TypedExpr,
     gen_uplc::CodeGenerator,
     line_numbers::LineNumbers,
@@ -37,7 +34,6 @@ pub struct TestProject {
     pub id_gen: IdGenerator,
     pub functions: IndexMap<FunctionAccessKey, TypedFunction>,
     pub constants: IndexMap<FunctionAccessKey, TypedExpr>,
-    pub data_types: IndexMap<DataTypeKey, TypedDataType>,
     pub module_types: HashMap<String, TypeInfo>,
     pub module_sources: HashMap<String, (String, LineNumbers)>,
 }
@@ -56,7 +52,6 @@ impl TestProject {
         module_types.insert("aiken/builtin".to_string(), builtins::plutus(&id_gen));
 
         let functions = builtins::prelude_functions(&id_gen, &module_types);
-        let data_types = builtins::prelude_data_types(&id_gen);
         let constants = IndexMap::new();
 
         TestProject {
@@ -65,7 +60,6 @@ impl TestProject {
             module_types,
             functions,
             constants,
-            data_types,
             module_sources: HashMap::new(),
         }
     }
@@ -75,7 +69,6 @@ impl TestProject {
             PlutusVersion::default(),
             utils::indexmap::as_ref_values(&self.functions),
             utils::indexmap::as_ref_values(&self.constants),
-            utils::indexmap::as_ref_values(&self.data_types),
             utils::indexmap::as_str_ref_values(&self.module_types),
             utils::indexmap::as_str_ref_values(&self.module_sources),
             tracing,
@@ -115,12 +108,8 @@ impl TestProject {
             )
             .expect("Failed to type-check module");
 
-        // Register function definitions & data-types for easier access later.
-        ast.register_definitions(
-            &mut self.functions,
-            &mut self.constants,
-            &mut self.data_types,
-        );
+        // Register function definitions for easier access later.
+        ast.register_definitions(&mut self.functions, &mut self.constants);
 
         // Register module sources for an easier access later.
         self.module_sources.insert(

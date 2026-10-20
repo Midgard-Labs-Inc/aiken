@@ -1068,7 +1068,6 @@ impl Forms {
     /// Two decoded values through a generic function: `g_N_M`.
     const GENERIC: Forms = Forms(8);
     const ALL: Forms = Forms(15);
-    const NOT_GENERIC: Forms = Forms(7);
 
     fn has(self, form: Form) -> bool {
         let category = match form {
@@ -1350,8 +1349,35 @@ mod baseline_agrees_with_the_model {
     use super::*;
 
     property!(supported, SUPPORTED, 12, BaselineModel, Forms::ALL);
-    property!(list_types, WITH_LISTS, 8, BaselineModel, Forms::NOT_GENERIC);
     property!(opaque, WITH_OPAQUE, 8, BaselineModel, Forms::ALL);
+
+    // A `@list` record doesn't share a generic function's variant with other records.
+    property!(list_types, WITH_LISTS, 8, BaselineModel, Forms::ALL);
+
+    // A record-level `@tag` is the index `expect` and `if … is` check.
+    property!(
+        type_tags,
+        Features {
+            type_tags: true,
+            ..NONE
+        },
+        6,
+        BaselineModel,
+        Forms::ALL
+    );
+
+    // An opaque type whose constructor has a decorator isn't erased.
+    property!(
+        tagged_opaque,
+        Features {
+            opaque: true,
+            tags: true,
+            ..NONE
+        },
+        6,
+        BaselineModel,
+        Forms::ALL
+    );
 }
 
 mod optimized_agrees_with_the_model {

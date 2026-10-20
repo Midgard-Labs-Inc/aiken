@@ -1,10 +1,7 @@
 use self::{environment::Environment, pretty::Printer};
 use crate::{
-    ast::{
-        Annotation, DataType, DataTypeKey, DefinitionLocation, ModuleKind, Span, TypedDataType,
-        well_known,
-    },
-    tipo::fields::FieldMap,
+    ast::{Annotation, DefinitionLocation, ModuleKind, Span, well_known},
+    tipo::{fields::FieldMap, layout::lookup_layout},
 };
 use indexmap::IndexMap;
 use std::{
@@ -315,6 +312,16 @@ impl Type {
                 true
             }
             Self::Var { tipo, .. } => tipo.borrow().is_value(),
+            _ => false,
+        }
+    }
+
+    pub fn is_never(&self) -> bool {
+        match self {
+            Self::App { module, name, .. } => well_known::NEVER == name && module.is_empty(),
+            Self::Var { tipo, .. } => {
+                matches!(tipo.borrow().deref(), TypeVar::Link { tipo } if tipo.is_never())
+            }
             _ => false,
         }
     }
@@ -656,40 +663,6 @@ impl Type {
     }
 }
 
-pub fn lookup_data_type_by_tipo(
-    data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
-    tipo: &Type,
-) -> Option<DataType<Rc<Type>>> {
-    match tipo {
-        Type::Fn { ret, .. } => match ret.as_ref() {
-            Type::App { module, name, .. } => {
-                let data_type_key = DataTypeKey {
-                    module_name: module.clone(),
-                    defined_type: name.clone(),
-                };
-                data_types.get(&data_type_key).map(|item| (*item).clone())
-            }
-            _ => None,
-        },
-        Type::App { module, name, .. } => {
-            let data_type_key = DataTypeKey {
-                module_name: module.clone(),
-                defined_type: name.clone(),
-            };
-
-            data_types.get(&data_type_key).map(|item| (*item).clone())
-        }
-        Type::Var { tipo, .. } => {
-            if let TypeVar::Link { tipo } = &*tipo.borrow() {
-                lookup_data_type_by_tipo(data_types, tipo)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
 pub fn get_generic_id_and_type(tipo: &Type, param: &Type) -> Vec<(u64, Rc<Type>)> {
     let mut generics_ids = vec![];
 
@@ -710,27 +683,17 @@ pub fn get_generic_id_and_type(tipo: &Type, param: &Type) -> Vec<(u64, Rc<Type>)
 
 pub fn convert_opaque_type(
     t: &Rc<Type>,
-    data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+    module_types: &IndexMap<&str, &TypeInfo>,
     deep: bool,
 ) -> Rc<Type> {
-    if check_replaceable_opaque_type(t, data_types) && matches!(t.as_ref(), Type::App { .. }) {
-        let data_type = lookup_data_type_by_tipo(data_types, t).unwrap();
-
-        let new_type_fields = data_type.typed_parameters;
-
-        let mut mono_type_vec = vec![];
-
-        for (tipo, param) in new_type_fields.iter().zip(t.arg_types().unwrap()) {
-            mono_type_vec.append(&mut get_generic_id_and_type(tipo, &param));
-        }
-        let mono_types = mono_type_vec.into_iter().collect();
-
-        let generic_type = &data_type.constructors[0].arguments[0].tipo;
-
-        let mono_type = find_and_replace_generics(generic_type, &mono_types);
+    if let Type::App { args, .. } = t.as_ref()
+        && let Some(layout) = lookup_layout(module_types, t)
+        && layout.is_erased()
+    {
+        let mono_type = layout.field_types(&layout.constructors[0], args).remove(0);
 
         if deep {
-            convert_opaque_type(&mono_type, data_types, deep)
+            convert_opaque_type(&mono_type, module_types, deep)
         } else {
             mono_type
         }
@@ -745,7 +708,7 @@ pub fn convert_opaque_type(
             } => {
                 let mut new_args = vec![];
                 for arg in args {
-                    let arg = convert_opaque_type(arg, data_types, deep);
+                    let arg = convert_opaque_type(arg, module_types, deep);
                     new_args.push(arg);
                 }
 
@@ -761,11 +724,11 @@ pub fn convert_opaque_type(
             Type::Fn { args, ret, alias } => {
                 let mut new_args = vec![];
                 for arg in args {
-                    let arg = convert_opaque_type(arg, data_types, deep);
+                    let arg = convert_opaque_type(arg, module_types, deep);
                     new_args.push(arg);
                 }
 
-                let ret = convert_opaque_type(ret, data_types, deep);
+                let ret = convert_opaque_type(ret, module_types, deep);
 
                 Type::Fn {
                     args: new_args,
@@ -776,7 +739,7 @@ pub fn convert_opaque_type(
             }
             Type::Var { tipo: var_tipo, .. } => {
                 if let TypeVar::Link { tipo } = &var_tipo.borrow().clone() {
-                    convert_opaque_type(tipo, data_types, deep)
+                    convert_opaque_type(tipo, module_types, deep)
                 } else {
                     t.clone()
                 }
@@ -784,7 +747,7 @@ pub fn convert_opaque_type(
             Type::Tuple { elems, alias } => {
                 let mut new_elems = vec![];
                 for arg in elems {
-                    let arg = convert_opaque_type(arg, data_types, deep);
+                    let arg = convert_opaque_type(arg, module_types, deep);
                     new_elems.push(arg);
                 }
                 Type::Tuple {
@@ -794,8 +757,8 @@ pub fn convert_opaque_type(
                 .into()
             }
             Type::Pair { fst, snd, alias } => {
-                let fst = convert_opaque_type(fst, data_types, deep);
-                let snd = convert_opaque_type(snd, data_types, deep);
+                let fst = convert_opaque_type(fst, module_types, deep);
+                let snd = convert_opaque_type(snd, module_types, deep);
                 Type::Pair {
                     fst,
                     snd,
@@ -807,23 +770,9 @@ pub fn convert_opaque_type(
     }
 }
 
-pub fn check_replaceable_opaque_type(
-    t: &Type,
-    data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
-) -> bool {
-    let data_type = lookup_data_type_by_tipo(data_types, t);
-
-    if let Some(data_type) = data_type
-        && let [constructor] = &data_type.constructors[..]
-    {
-        return constructor.arguments.len() == 1
-            && data_type.opaque
-            // BIG WARNING: Adding any kind decorator
-            // will make the opaque type not replaceable
-            && data_type.decorators.is_empty();
-    }
-
-    false
+/// Whether `t` is an erased opaque type, whose values are the values of its one field.
+pub fn check_replaceable_opaque_type(t: &Type, module_types: &IndexMap<&str, &TypeInfo>) -> bool {
+    lookup_layout(module_types, t).is_some_and(DataLayout::is_erased)
 }
 
 pub fn find_and_replace_generics(

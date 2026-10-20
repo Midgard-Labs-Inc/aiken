@@ -149,7 +149,8 @@ holding an opaque type) as a validator's datum and/or redeemer.
 :::
 
 There's a _special treatment_ for an opaque type with only one constructor,
-and if that constructor has only 1 field. Under the hood, it behaves like a
+and if that constructor has only 1 field, and neither the type nor the
+constructor has a decorator (such as `@tag`). Under the hood, it behaves like a
 Haskell's `newtype`. This matters when we're dealing with CBOR.
 
 For example:

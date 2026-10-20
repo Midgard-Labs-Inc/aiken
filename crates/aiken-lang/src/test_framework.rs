@@ -1,13 +1,10 @@
 use crate::{
-    ast::{
-        BinOp, DataTypeKey, IfBranch, OnTestFailure, Span, TraceLevel, Tracing, TypedArg,
-        TypedDataType, TypedTest,
-    },
+    ast::{BinOp, IfBranch, OnTestFailure, Span, TraceLevel, Tracing, TypedArg, TypedTest},
     expr::{CallArg, TypedExpr, UntypedExpr},
     format::Formatter,
     gen_uplc::{CodeGenerator, Error as CodeGenError},
     plutus_version::PlutusVersion,
-    tipo::{Type, convert_opaque_type},
+    tipo::{Type, TypeInfo, convert_opaque_type},
 };
 use cryptoxide::{blake2b::Blake2b, digest::Digest};
 use indexmap::IndexMap;
@@ -130,7 +127,8 @@ impl Test {
 
             let type_info = parameter.arg.tipo.clone();
 
-            let stripped_type_info = convert_opaque_type(&type_info, generator.data_types(), true);
+            let stripped_type_info =
+                convert_opaque_type(&type_info, generator.module_types(), true);
 
             // As in `unit_test`, optimization of both programs is deferred to
             // the run phase so the shrinker cost is paid in parallel.
@@ -1141,12 +1139,14 @@ unsafe impl<U, T> Send for TestResult<U, T> {}
 impl TestResult<(Constant, Rc<Type>), PlutusData> {
     pub fn reify(
         self,
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
     ) -> TestResult<UntypedExpr, UntypedExpr> {
         match self {
-            TestResult::UnitTestResult(test) => TestResult::UnitTestResult(test.reify(data_types)),
+            TestResult::UnitTestResult(test) => {
+                TestResult::UnitTestResult(test.reify(module_types))
+            }
             TestResult::PropertyTestResult(test) => {
-                TestResult::PropertyTestResult(test.reify(data_types))
+                TestResult::PropertyTestResult(test.reify(module_types))
             }
             TestResult::BenchmarkResult(result) => TestResult::BenchmarkResult(result),
         }
@@ -1214,10 +1214,7 @@ pub struct UnitTestResult<T> {
 unsafe impl<T> Send for UnitTestResult<T> {}
 
 impl UnitTestResult<(Constant, Rc<Type>)> {
-    pub fn reify(
-        self,
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
-    ) -> UnitTestResult<UntypedExpr> {
+    pub fn reify(self, module_types: &IndexMap<&str, &TypeInfo>) -> UnitTestResult<UntypedExpr> {
         UnitTestResult {
             success: self.success,
             spent_budget: self.spent_budget,
@@ -1233,12 +1230,12 @@ impl UnitTestResult<(Constant, Rc<Type>)> {
                 Some(Assertion {
                     bin_op: assertion.bin_op,
                     head: assertion.head.map(|(cst, tipo)| {
-                        UntypedExpr::reify_constant(data_types, cst, tipo)
+                        UntypedExpr::reify_constant(module_types, cst, tipo)
                             .expect("failed to reify assertion operand?")
                     }),
                     tail: assertion.tail.map(|xs| {
                         xs.mapped(|(cst, tipo)| {
-                            UntypedExpr::reify_constant(data_types, cst, tipo)
+                            UntypedExpr::reify_constant(module_types, cst, tipo)
                                 .expect("failed to reify assertion operand?")
                         })
                     }),
@@ -1262,13 +1259,13 @@ unsafe impl<T> Send for PropertyTestResult<T> {}
 impl PropertyTestResult<PlutusData> {
     pub fn reify(
         self,
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
     ) -> PropertyTestResult<UntypedExpr> {
         PropertyTestResult {
             counterexample: self.counterexample.map(|ok| {
                 ok.map(|counterexample| {
                     UntypedExpr::reify_data(
-                        data_types,
+                        module_types,
                         counterexample,
                         self.test.fuzzer.type_info.clone(),
                     )

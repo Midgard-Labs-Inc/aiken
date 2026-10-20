@@ -4,11 +4,10 @@ mod test {
         module::{CheckedModule, CheckedModules},
         utils,
     };
+    use aiken_lang::tipo::TypeInfo;
     use aiken_lang::{
         IdGenerator,
-        ast::{
-            DataTypeKey, Definition, ModuleKind, OnTestFailure, TraceLevel, Tracing, TypedDataType,
-        },
+        ast::{Definition, ModuleKind, OnTestFailure, TraceLevel, Tracing},
         builtins,
         expr::UntypedExpr,
         format::Formatter,
@@ -30,23 +29,25 @@ mod test {
 
     pub fn with_test_from_source<R>(
         src: &str,
-        and_then: impl FnOnce(Test, &mut CodeGenerator<'_>, &IndexMap<DataTypeKey, TypedDataType>) -> R,
+        and_then: impl FnOnce(Test, &mut CodeGenerator<'_>, &HashMap<String, TypeInfo>) -> R,
     ) -> R {
         let id_gen = IdGenerator::new();
 
-        let module_name = "";
+        // Not `""`, which is the prelude's module in types.
+        let module_name = "test";
 
         let mut module_types = HashMap::new();
         module_types.insert(builtins::PRELUDE.to_string(), builtins::prelude(&id_gen));
         module_types.insert(builtins::BUILTIN.to_string(), builtins::plutus(&id_gen));
 
         let mut warnings = vec![];
-        let (ast, _) = parser::module(src, TEST_KIND).expect("Failed to parse module");
+        let (mut ast, _) = parser::module(src, TEST_KIND).expect("Failed to parse module");
+        ast.name = module_name.to_string();
         let ast = ast
             .infer(
                 &id_gen,
                 TEST_KIND,
-                module_name,
+                "",
                 &module_types,
                 Tracing::All(TraceLevel::Verbose),
                 &mut warnings,
@@ -66,9 +67,8 @@ mod test {
             .expect("No test found in declared src?");
 
         let mut functions = builtins::prelude_functions(&id_gen, &module_types);
-        let mut data_types = builtins::prelude_data_types(&id_gen);
         let mut constants = IndexMap::new();
-        ast.register_definitions(&mut functions, &mut constants, &mut data_types);
+        ast.register_definitions(&mut functions, &mut constants);
 
         let mut module_sources = HashMap::new();
         module_sources.insert(
@@ -94,7 +94,6 @@ mod test {
             PlutusVersion::default(),
             utils::indexmap::as_ref_values(&functions),
             utils::indexmap::as_ref_values(&constants),
-            utils::indexmap::as_ref_values(&data_types),
             utils::indexmap::as_str_ref_values(&module_types),
             utils::indexmap::as_str_ref_values(&module_sources),
             Tracing::All(TraceLevel::Verbose),
@@ -109,12 +108,12 @@ mod test {
         )
         .expect("failed to generate test program");
 
-        and_then(test, &mut generator, &data_types)
+        and_then(test, &mut generator, &module_types)
     }
 
-    pub fn test_from_source(src: &str) -> (Test, IndexMap<DataTypeKey, TypedDataType>) {
-        with_test_from_source(src, |test, _generator, data_types| {
-            (test, data_types.clone())
+    pub fn test_from_source(src: &str) -> (Test, HashMap<String, TypeInfo>) {
+        with_test_from_source(src, |test, _generator, module_types| {
+            (test, module_types.clone())
         })
     }
 
@@ -225,13 +224,13 @@ mod test {
         let src = format!("{prelude}\n{src}");
 
         match test_from_source(&src) {
-            (Test::PropertyTest(test), data_types) => {
+            (Test::PropertyTest(test), module_types) => {
                 let type_info = test.fuzzer.type_info.clone();
 
                 let reify = move |counterexample| {
-                    let data_type_refs = utils::indexmap::as_ref_values(&data_types);
+                    let module_types = utils::indexmap::as_str_ref_values(&module_types);
                     let expr =
-                        UntypedExpr::reify_data(&data_type_refs, counterexample, type_info.clone())
+                        UntypedExpr::reify_data(&module_types, counterexample, type_info.clone())
                             .expect("Failed to reify value.");
                     Formatter::new().expr(&expr, false).to_pretty_string(70)
                 };
@@ -248,7 +247,7 @@ mod test {
     }
 
     fn unit_test(src: &str) -> Option<String> {
-        with_test_from_source(src, |test, generator, data_types| match test {
+        with_test_from_source(src, |test, generator, module_types| match test {
             Test::PropertyTest(..) => {
                 panic!("Expected to yield a UnitTest but found a PropertyTest")
             }
@@ -256,7 +255,7 @@ mod test {
                 let expected_failure =
                     matches!(test.on_test_failure, OnTestFailure::SucceedImmediately);
 
-                let data_types_refs = utils::indexmap::as_ref_values(data_types);
+                let module_types = utils::indexmap::as_str_ref_values(module_types);
 
                 let mut result = test.run(&PlutusVersion::V3, Tracing::verbose());
 
@@ -268,7 +267,7 @@ mod test {
                     result.assertion = Some(assertion.evaluate(generator, &result.test.module));
                 }
 
-                let result = result.reify(&data_types_refs);
+                let result = result.reify(&module_types);
 
                 result
                     .assertion
@@ -328,6 +327,93 @@ mod test {
                 .trim()
                 .to_string()
             ),
+        );
+    }
+
+    fn assert_reported(src: &str, left: &str, right: &str) {
+        assert_eq!(
+            unit_test(src),
+            Some(format!("× expected\n│ {left}\n× to equal\n│ {right}")),
+        );
+    }
+
+    #[test]
+    fn reify_tagged_constructors() {
+        assert_reported(
+            r#"
+            type T {
+              @tag(4)
+              A(Int)
+              B
+            }
+
+            @tag(7)
+            type R { r: Int }
+
+            test t() {
+              (A(1), R { r: 1 }) == (A(2), R { r: 2 })
+            }
+            "#,
+            "(A(1), R { r: 1 })",
+            "(A(2), R { r: 2 })",
+        );
+    }
+
+    #[test]
+    fn reify_generic_arguments_nested_in_field_types() {
+        assert_reported(
+            r#"
+            type Bag<a> {
+              Bag(List<a>)
+            }
+
+            type Holder<a> {
+              items: Option<a>,
+            }
+
+            test t() {
+              (Bag([1]), Holder { items: Some(#"aa") }) == (Bag([2]), Holder { items: None })
+            }
+            "#,
+            "(Bag([1]), Holder { items: Some(#\"aa\") })",
+            "(Bag([2]), Holder { items: None })",
+        );
+    }
+
+    #[test]
+    fn reify_list_records() {
+        assert_reported(
+            r#"
+            @list
+            type L {
+              a: Int,
+              b: ByteArray,
+            }
+
+            test t() {
+              L { a: 1, b: #"" } == L { a: 2, b: #"" }
+            }
+            "#,
+            "L { a: 1, b: #\"\" }",
+            "L { a: 2, b: #\"\" }",
+        );
+    }
+
+    #[test]
+    fn reify_maps_that_look_like_values_as_pairs() {
+        assert_reported(
+            r#"
+            opaque type W {
+              W(Pairs<Int, Int>)
+            }
+
+            test t() {
+              let shaped: Pairs<ByteArray, Pairs<ByteArray, Int>> = [Pair(#"aa", [Pair(#"bb", 0)])]
+              (W([]), shaped) == (W([Pair(1, 1)]), [])
+            }
+            "#,
+            "(W([]), [Pair(#\"aa\", [Pair(#\"bb\", 0)])])",
+            "(W([Pair(1, 1)]), [])",
         );
     }
 

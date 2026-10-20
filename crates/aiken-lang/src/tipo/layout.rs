@@ -4,8 +4,12 @@
 //! reads the summary, which says what a type's values can contain, so it never needs to look a
 //! type's constructors up by name.
 
-use super::{Type, TypeVar};
-use crate::ast::{DecoratorKind, TypedDataType, well_known};
+use super::{Type, TypeInfo, TypeVar, find_and_replace_generics};
+use crate::{
+    ast::{DecoratorKind, TypedDataType, well_known},
+    builtins::PRELUDE,
+};
+use indexmap::IndexMap;
 use std::{collections::HashMap, ops::Deref, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -25,6 +29,7 @@ pub struct ConstructorLayout {
     pub index: usize,
     /// The field types, in terms of the type's parameters.
     pub fields: Vec<Rc<Type>>,
+    pub labels: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -75,12 +80,55 @@ impl DataLayout {
             .find(|constructor| constructor.name == name)
     }
 
+    pub fn constructor_at(&self, index: usize) -> Option<&ConstructorLayout> {
+        self.constructors
+            .iter()
+            .find(|constructor| constructor.index == index)
+    }
+
     pub fn is_erased(&self) -> bool {
         self.representation == Representation::Erased
     }
 
     pub fn is_list(&self) -> bool {
         self.representation == Representation::List
+    }
+
+    /// The field types of `constructor`, in a value of this type applied to `args`.
+    pub fn field_types(&self, constructor: &ConstructorLayout, args: &[Rc<Type>]) -> Vec<Rc<Type>> {
+        let mono_types = self
+            .parameters
+            .iter()
+            .zip(args)
+            .filter_map(|(parameter, arg)| Some((parameter.get_generic_id()?, arg.clone())))
+            .collect();
+
+        constructor
+            .fields
+            .iter()
+            .map(|field| find_and_replace_generics(field, &mono_types))
+            .collect()
+    }
+}
+
+/// The layout of the data type `tipo` is (or returns, for a constructor), looked up by its
+/// module and name in `module_types`.
+pub fn lookup_layout<'a>(
+    module_types: &IndexMap<&str, &'a TypeInfo>,
+    tipo: &Type,
+) -> Option<&'a DataLayout> {
+    match tipo {
+        Type::App { module, name, .. } => {
+            let module = if module.is_empty() { PRELUDE } else { module };
+
+            module_types.get(module)?.layouts.get(name)
+        }
+        Type::Fn { ret, .. } => lookup_layout(module_types, ret),
+        Type::Var { tipo, .. } => match tipo.borrow().deref() {
+            TypeVar::Link { tipo } => lookup_layout(module_types, tipo),
+            TypeVar::Unbound { .. } | TypeVar::Generic { .. } => None,
+        },
+        Type::Tuple { .. } | Type::Pair { .. } => None,
     }
 }
 
@@ -139,10 +187,14 @@ fn initial_layout(data_type: &TypedDataType) -> DataLayout {
             })
     };
 
+    // `Never`'s first constructor is a placeholder: its only value is `Constr 1 []`.
+    let placeholders = usize::from(data_type.is_never());
+
     let constructors: Vec<ConstructorLayout> = data_type
         .constructors
         .iter()
         .enumerate()
+        .skip(placeholders)
         .map(|(position, constructor)| ConstructorLayout {
             name: constructor.name.clone(),
             index: tag(&constructor.decorators)
@@ -152,6 +204,11 @@ fn initial_layout(data_type: &TypedDataType) -> DataLayout {
                 .arguments
                 .iter()
                 .map(|argument| argument.tipo.clone())
+                .collect(),
+            labels: constructor
+                .arguments
+                .iter()
+                .map(|argument| argument.label.clone())
                 .collect(),
         })
         .collect();

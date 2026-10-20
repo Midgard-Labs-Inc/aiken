@@ -1,9 +1,9 @@
 use crate::{
     IdGenerator, aiken_fn,
     ast::{
-        Annotation, ArgName, CallArg, DataType, DataTypeKey, Function, FunctionAccessKey,
-        ModuleKind, OnTestFailure, RecordConstructor, RecordConstructorArg, Span, TypedArg,
-        TypedDataType, TypedFunction, UnOp, well_known,
+        Annotation, ArgName, CallArg, DataType, Function, FunctionAccessKey, ModuleKind,
+        OnTestFailure, RecordConstructor, RecordConstructorArg, Span, TypedArg, TypedDataType,
+        TypedFunction, UnOp, well_known,
     },
     expr::TypedExpr,
     tipo::{
@@ -575,16 +575,9 @@ pub fn prelude(id_gen: &IdGenerator) -> TypeInfo {
         },
     );
 
-    // The layouts only need to be consistent with themselves, so their type variables come
-    // from a generator of their own and don't shift the ids the rest of the prelude uses.
-    let data_types = prelude_data_types(&IdGenerator::new());
-    let data_types: Vec<&TypedDataType> = data_types
-        .values()
-        .filter(|data_type| {
-            ![well_known::DATA, well_known::PAIR].contains(&data_type.name.as_str())
-        })
-        .collect();
-    prelude.layouts = layout::compute_layouts("", &data_types, |_, _| None);
+    let data_types = prelude_data_types();
+    prelude.layouts =
+        layout::compute_layouts("", &data_types.iter().collect::<Vec<_>>(), |_, _| None);
 
     prelude
 }
@@ -1959,112 +1952,22 @@ pub fn prelude_functions(
     functions
 }
 
-pub fn prelude_data_types(id_gen: &IdGenerator) -> IndexMap<DataTypeKey, TypedDataType> {
-    let mut data_types = IndexMap::new();
+/// The prelude's data types that have a layout: `Data` and `Pair` have none.
+fn prelude_data_types() -> Vec<TypedDataType> {
+    // Layouts only need to be consistent with themselves, so their type variables come from a
+    // generator of their own and don't shift the ids the rest of the prelude uses.
+    let id_gen = IdGenerator::new();
 
-    // Data
-    let data_data_type = TypedDataType::data();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::DATA.to_string(),
-        },
-        data_data_type,
-    );
-
-    // Void
-    let void_data_type = TypedDataType::void();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::VOID.to_string(),
-        },
-        void_data_type,
-    );
-
-    // Ordering
-    let ordering_data_type = TypedDataType::ordering();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::ORDERING.to_string(),
-        },
-        ordering_data_type,
-    );
-
-    // Bool
-    let bool_data_type = TypedDataType::bool();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::BOOL.to_string(),
-        },
-        bool_data_type,
-    );
-
-    // Option
-    let option_data_type = TypedDataType::option(Type::generic_var(id_gen.next()));
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::OPTION.to_string(),
-        },
-        option_data_type,
-    );
-
-    // Pair
-    let pair_data_type = TypedDataType::pair(
-        Type::generic_var(id_gen.next()),
-        Type::generic_var(id_gen.next()),
-    );
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::PAIR.to_string(),
-        },
-        pair_data_type,
-    );
-
-    // Never
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::NEVER.to_string(),
-        },
+    vec![
+        TypedDataType::void(),
+        TypedDataType::ordering(),
+        TypedDataType::bool(),
+        TypedDataType::option(Type::generic_var(id_gen.next())),
         TypedDataType::never(),
-    );
-
-    // PRNG
-    let prng_data_type = TypedDataType::prng();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::PRNG.to_string(),
-        },
-        prng_data_type,
-    );
-
-    // __ScriptPurpose
-    let script_purpose_data_type = TypedDataType::script_purpose();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::SCRIPT_PURPOSE.to_string(),
-        },
-        script_purpose_data_type,
-    );
-
-    // __ScriptContext
-    let script_context_data_type = TypedDataType::script_context();
-    data_types.insert(
-        DataTypeKey {
-            module_name: "".to_string(),
-            defined_type: well_known::SCRIPT_CONTEXT.to_string(),
-        },
-        script_context_data_type,
-    );
-
-    data_types
+        TypedDataType::prng(),
+        TypedDataType::script_purpose(),
+        TypedDataType::script_context(),
+    ]
 }
 
 // ----------------------------------------------------------------------------
@@ -2074,10 +1977,6 @@ pub fn prelude_data_types(id_gen: &IdGenerator) -> IndexMap<DataTypeKey, TypedDa
 // consistency with prelude definitions.
 
 impl TypedDataType {
-    pub fn data() -> Self {
-        DataType::known_enum(well_known::DATA, &[])
-    }
-
     pub fn void() -> Self {
         DataType::known_enum(well_known::VOID, well_known::VOID_CONSTRUCTORS)
     }
@@ -2173,48 +2072,6 @@ impl TypedDataType {
             parameters: vec!["a".to_string()],
             public: true,
             typed_parameters: vec![tipo],
-        }
-    }
-
-    pub fn pair(left: Rc<Type>, right: Rc<Type>) -> Self {
-        DataType {
-            decorators: vec![],
-            constructors: vec![RecordConstructor {
-                decorators: vec![],
-                location: Span::empty(),
-                name: well_known::PAIR.to_string(),
-                arguments: vec![
-                    RecordConstructorArg {
-                        label: None,
-                        annotation: Annotation::Var {
-                            location: Span::empty(),
-                            name: "left".to_string(),
-                        },
-                        location: Span::empty(),
-                        tipo: left.clone(),
-                        doc: None,
-                    },
-                    RecordConstructorArg {
-                        label: None,
-                        annotation: Annotation::Var {
-                            location: Span::empty(),
-                            name: "right".to_string(),
-                        },
-                        location: Span::empty(),
-                        tipo: right.clone(),
-                        doc: None,
-                    },
-                ],
-                doc: None,
-                sugar: false,
-            }],
-            doc: None,
-            location: Span::empty(),
-            name: well_known::PAIR.to_string(),
-            opaque: false,
-            parameters: vec!["left".to_string(), "right".to_string()],
-            public: true,
-            typed_parameters: vec![left, right],
         }
     }
 

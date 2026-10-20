@@ -9,6 +9,18 @@
 - **uplc**: `uplc::data::arbitrary::arb_plutus_data` generates arbitrary `PlutusData` for property tests, behind the new `proptest` feature.
 - **aiken-lang**: `TypeInfo::layouts` holds a `DataLayout` for every data type a module defines, private and opaque ones included: each constructor's index (its `@tag`, else the type's `@tag`, else its position) and field types, the runtime representation (erased, `Constr`, or `@list`), and a summary of which type parameters a value stores and whether it contains an opaque type, a type with no `Data` form, or a type `if … is` can't test. A parameter used only as a phantom argument of a field's type counts as phantom.
 
+### Changed
+
+- **aiken-lang**: Code generation reads each data type's constructor indices, field types and representation from its `DataLayout`, looked up by module and name. `CodeGenerator::new` and `TypedModule::register_definitions` no longer take the data type definitions, and `UntypedExpr::reify_data`, `UntypedExpr::reify_constant` and `TestResult::reify` take the module types instead.
+- **aiken-lang**: An opaque type whose constructor has a decorator (such as `@tag`) is no longer erased to its field: it keeps its constructor, as the documentation says. This changes the scripts of programs that use such types.
+
+### Fixed
+
+- **aiken-lang**: `expect` and `if … is` use a record's type-level `@tag` as its constructor index, like construction and `when` do. They used to check index 0, so the record a program built was rejected, and an untagged one accepted.
+- **aiken-lang**: A record update keeps the record's `@tag`, on the type or on the constructor. It used to build constructor 0.
+- **aiken-lang**: A generic function called with a `@list` record no longer shares its compiled variant with other records, which converted the record as a `Constr`.
+- **aiken-lang**: Reporting a failing test or a counterexample no longer panics on a constructor with `@tag`, a generic argument nested in a field's type, or a `@list` record. A map is printed as a `Value` literal only when its type is `Value`, so an empty `Pairs` inside an opaque wrapper prints as `W([])`.
+
 ## v1.4.0 - 2026-10-18
 
 ### Added
