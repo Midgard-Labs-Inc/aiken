@@ -50,6 +50,7 @@
 - **aiken-lang**: A `@list` record validator parameter is converted from its `Data` to a list. It used to be read as the `Data` itself, so the validator failed on any value.
 - **uplc**: The optimizer's `split_body_lambda` no longer hoists an unapplied lambda above a binding whose argument can fail. It used to, so a check written before a closure, as in `let f = { expect n: Int = d  fn(x) { x + n } }`, ran only when the closure was called, and not at all when it wasn't.
 - **uplc**: The optimizer no longer panics with `FreeUnique(… "__slice_bytearray_N_curried" …)` on a three-argument builtin called several times with the same arguments after a first one that isn't a constant, as in `builtin.slice_bytearray(i, 2, #"aabbcc")`, `integer_to_bytearray(e, 4, n)`, `and_bytearray(e, a, b)` or `or_bytearray(e, a, b)`: only prefixes of constant arguments are hoisted. Programs that compiled before compile to the same code.
+- **uplc**: The optimizer no longer folds a builtin call whose result is a BLS12-381 point or Miller-loop result, such as `bls12_381_g1_hash_to_group(#"abcd", #"")` or an `add` or `scalar_mul` of such points, into a constant. Such a constant has no Flat encoding, so `aiken build` panicked ("BLS12-381 G1 points are not supported for flat encoding"), even in a branch never taken, while `aiken check` passed and reported too low a cost.
 
 ## v1.4.0 - 2026-10-18
 
