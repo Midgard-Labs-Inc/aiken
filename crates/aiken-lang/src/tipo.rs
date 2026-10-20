@@ -1,15 +1,10 @@
-use self::{environment::Environment, pretty::Printer};
+use self::pretty::Printer;
 use crate::{
     ast::{Annotation, DefinitionLocation, ModuleKind, Span, well_known},
     tipo::{fields::FieldMap, layout::lookup_layout},
 };
 use indexmap::IndexMap;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    ops::Deref,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 use uplc::{ast::Type as UplcType, builtins::DefaultFunction};
 
 pub(crate) mod environment;
@@ -23,6 +18,7 @@ pub mod layout;
 mod pattern;
 mod pipe;
 pub mod pretty;
+pub mod requirement;
 
 pub use layout::DataLayout;
 
@@ -368,13 +364,64 @@ impl Type {
         }
     }
 
-    pub fn is_unbounded_list(&self) -> bool {
+    /// Whether a type variable in this type is still unknown.
+    pub fn contains_unbound(&self) -> bool {
         match self {
-            Self::App {
-                module, name, args, ..
-            } if "List" == name && module.is_empty() => args.iter().any(|arg| arg.is_unbound()),
-            Self::Var { tipo, .. } => tipo.borrow().is_unbounded_list(),
-            _ => false,
+            Self::App { args, .. } => args.iter().any(|arg| arg.contains_unbound()),
+            Self::Fn { args, ret, .. } => {
+                args.iter().any(|arg| arg.contains_unbound()) || ret.contains_unbound()
+            }
+            Self::Tuple { elems, .. } => elems.iter().any(|elem| elem.contains_unbound()),
+            Self::Pair { fst, snd, .. } => fst.contains_unbound() || snd.contains_unbound(),
+            Self::Var { tipo, .. } => match tipo.borrow().deref() {
+                TypeVar::Unbound { .. } => true,
+                TypeVar::Link { tipo } => tipo.contains_unbound(),
+                TypeVar::Generic { .. } => false,
+            },
+        }
+    }
+
+    /// Whether the generic type variable `id` appears in this type.
+    pub fn mentions_generic(&self, id: u64) -> bool {
+        match self {
+            Self::App { args, .. } => args.iter().any(|arg| arg.mentions_generic(id)),
+            Self::Fn { args, ret, .. } => {
+                args.iter().any(|arg| arg.mentions_generic(id)) || ret.mentions_generic(id)
+            }
+            Self::Tuple { elems, .. } => elems.iter().any(|elem| elem.mentions_generic(id)),
+            Self::Pair { fst, snd, .. } => fst.mentions_generic(id) || snd.mentions_generic(id),
+            Self::Var { tipo, .. } => match tipo.borrow().deref() {
+                TypeVar::Generic { id: generic } => *generic == id,
+                TypeVar::Link { tipo } => tipo.mentions_generic(id),
+                TypeVar::Unbound { .. } => false,
+            },
+        }
+    }
+
+    /// Links each type variable in this type that is still unknown to `Data`.
+    pub fn default_unbound_to_data(&self) {
+        match self {
+            Self::App { args, .. } => args.iter().for_each(|arg| arg.default_unbound_to_data()),
+            Self::Fn { args, ret, .. } => {
+                args.iter().for_each(|arg| arg.default_unbound_to_data());
+                ret.default_unbound_to_data();
+            }
+            Self::Tuple { elems, .. } => {
+                elems.iter().for_each(|elem| elem.default_unbound_to_data())
+            }
+            Self::Pair { fst, snd, .. } => {
+                fst.default_unbound_to_data();
+                snd.default_unbound_to_data();
+            }
+            Self::Var { tipo, .. } => {
+                let unbound = tipo.borrow().is_unbound();
+
+                if unbound {
+                    *tipo.borrow_mut() = TypeVar::Link { tipo: Type::data() };
+                } else if let TypeVar::Link { tipo } = tipo.borrow().deref() {
+                    tipo.default_unbound_to_data();
+                }
+            }
         }
     }
 
@@ -555,63 +602,6 @@ impl Type {
             Some(UplcType::Data)
         } else {
             None
-        }
-    }
-
-    /// Get the args for the type if the type is a specific `Type::App`.
-    /// Returns None if the type is not a `Type::App` or is an incorrect `Type:App`
-    ///
-    /// This function is currently only used for finding the `List` type.
-    pub fn get_app_args(
-        &self,
-        public: bool,
-        module: &str,
-        name: &str,
-        arity: usize,
-        environment: &mut Environment<'_>,
-    ) -> Option<Vec<Rc<Self>>> {
-        match self {
-            Self::App {
-                module: m,
-                name: n,
-                args,
-                ..
-            } => {
-                if module == m && name == n && args.len() == arity {
-                    Some(args.clone())
-                } else {
-                    None
-                }
-            }
-
-            Self::Var { tipo, alias } => {
-                let args: Vec<_> = match tipo.borrow().deref() {
-                    TypeVar::Link { tipo } => {
-                        return tipo.get_app_args(public, module, name, arity, environment);
-                    }
-
-                    TypeVar::Unbound { .. } => {
-                        (0..arity).map(|_| environment.new_unbound_var()).collect()
-                    }
-
-                    TypeVar::Generic { .. } => return None,
-                };
-
-                // We are an unbound type variable! So convert us to a type link
-                // to the desired type.
-                *tipo.borrow_mut() = TypeVar::Link {
-                    tipo: Rc::new(Self::App {
-                        public,
-                        name: name.to_string(),
-                        module: module.to_owned(),
-                        args: args.clone(),
-                        alias: alias.to_owned(),
-                    }),
-                };
-                Some(args)
-            }
-
-            _ => None,
         }
     }
 
@@ -968,13 +958,6 @@ impl TypeVar {
         }
     }
 
-    pub fn is_unbounded_list(&self) -> bool {
-        match self {
-            Self::Link { tipo } => tipo.is_unbounded_list(),
-            _ => false,
-        }
-    }
-
     pub fn is_option(&self) -> bool {
         match self {
             Self::Link { tipo } => tipo.is_option(),
@@ -1284,9 +1267,11 @@ pub struct TypeInfo {
     pub package: String,
     pub types: HashMap<String, TypeConstructor>,
     pub types_constructors: HashMap<String, Vec<String>>,
-    pub opaque_types: HashSet<(String, String)>,
     /// The layout of every data type the module defines, private ones included.
     pub layouts: HashMap<String, DataLayout>,
+    /// What the eventual type of each type variable the module's types mention must allow,
+    /// by variable id.
+    pub requirements: HashMap<u64, requirement::Requirement>,
     pub values: HashMap<String, ValueConstructor>,
     pub accessors: HashMap<String, AccessorsMap>,
     pub annotations: HashMap<Annotation, Rc<Type>>,

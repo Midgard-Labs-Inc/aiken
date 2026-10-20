@@ -118,7 +118,14 @@ fn layout_contents_of_local_and_imported_types() {
     assert_eq!(contents("Direct"), opaque);
     assert_eq!(contents("Imported"), opaque);
     assert_eq!(contents("Text"), untestable);
-    assert_eq!(contents("Points"), untestable);
+    assert_eq!(
+        contents("Points"),
+        Contents {
+            untestable: true,
+            value_or_point: true,
+            ..Contents::default()
+        }
+    );
     assert_eq!(contents("Plain"), Contents::default());
 
     // A local type named like a prelude type doesn't change what an imported type holds.

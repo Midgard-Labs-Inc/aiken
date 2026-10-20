@@ -7,7 +7,10 @@ use crate::{
     builtins,
     expr::{CallArg, Span, TypedExpr},
     parser,
-    tipo::error::{Error, UnifyErrorSituation, Warning},
+    tipo::{
+        error::{Error, UnifyErrorSituation, Warning},
+        requirement,
+    },
 };
 use std::collections::HashMap;
 
@@ -40,6 +43,8 @@ fn check_module(
     module_types.insert(builtins::PRELUDE.to_string(), builtins::prelude(&id_gen));
     module_types.insert(builtins::BUILTIN.to_string(), builtins::plutus(&id_gen));
 
+    let mut dependencies = vec![];
+
     for module in extra {
         let mut warnings = vec![];
 
@@ -64,21 +69,33 @@ fn check_module(
             .expect("extra dependency did not compile");
 
         module_types.insert(typed_module.name.clone(), typed_module.type_info.clone());
+        dependencies.push(typed_module);
     }
 
-    let result = ast.infer(
-        &id_gen,
-        kind,
-        DEFAULT_PACKAGE,
-        &module_types,
-        tracing,
-        &mut warnings,
-        None,
-    );
+    let mut module = ast
+        .infer(
+            &id_gen,
+            kind,
+            DEFAULT_PACKAGE,
+            &module_types,
+            tracing,
+            &mut warnings,
+            None,
+        )
+        .map_err(|e| (warnings.clone(), e))?;
 
-    result
-        .map(|o| (warnings.clone(), o))
-        .map_err(|e| (warnings, e))
+    // Every module has type-checked: settle the types that nothing fixed, as projects do.
+    for typed_module in dependencies.iter_mut().chain([&mut module]) {
+        requirement::default_unknown_types(typed_module);
+    }
+
+    module_types.insert(module.name.clone(), module.type_info.clone());
+
+    for typed_module in dependencies.iter().chain([&module]) {
+        requirement::recheck_casts(typed_module, &module_types);
+    }
+
+    Ok((warnings, module))
 }
 
 #[allow(clippy::result_large_err)]
@@ -115,6 +132,13 @@ fn check_validator_with_deps(
     extra: Vec<UntypedModule>,
 ) -> Result<(Vec<Warning>, TypedModule), (Vec<Warning>, Error)> {
     check_module(ast, extra, ModuleKind::Validator, Tracing::verbose())
+}
+
+/// Asserts that `source_code` type-checks with `dependencies`; `name` identifies the case.
+fn accepted(name: &str, source_code: &str, dependencies: Vec<UntypedModule>) {
+    let result = check_with_deps(parse(source_code), dependencies);
+
+    assert!(result.is_ok(), "{name}: {result:#?}");
 }
 
 #[test]
@@ -630,30 +654,6 @@ fn equality_allows_value_in_a_recursive_phantom_type_argument() {
     "#;
 
     assert!(check(parse(source_code)).is_ok())
-}
-
-#[test]
-fn recursive_type_revisit_checks_type_arguments() {
-    let source_code = r#"
-        type Recursive<a> {
-          End
-          Next(Recursive<a>)
-        }
-
-        fn compare(
-          left: Recursive<MillerLoopResult>,
-          right: Recursive<MillerLoopResult>,
-        ) -> Bool {
-          left == right
-        }
-    "#;
-
-    let result = check(parse(source_code));
-
-    assert!(
-        matches!(result, Err((_, Error::IllegalTypeInData { .. }))),
-        "{result:#?}"
-    )
 }
 
 #[test]
@@ -4526,8 +4526,8 @@ fn soft_casts_from_data_to_value_is_illegal() {
     "#;
 
     assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_value()
     ));
 }
 
@@ -4544,8 +4544,8 @@ fn soft_casts_from_data_to_list_value_is_illegal() {
     "#;
 
     assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_list()
     ));
 }
 
@@ -4562,8 +4562,8 @@ fn soft_casts_from_data_to_option_value_is_illegal() {
     "#;
 
     assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_option()
     ));
 }
 
@@ -4584,8 +4584,8 @@ fn soft_casts_from_data_to_wrapped_value_is_illegal() {
     "#;
 
     assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
     ));
 }
 
@@ -4634,7 +4634,7 @@ fn soft_casts_from_data_to_imported_generic_value_wrapper_is_illegal() {
 
     assert!(matches!(
         check_with_deps(parse(source_code), vec![parse_as(dependency, "wrapped")]),
-        Err((_, Error::CouldNotUnify { given, .. })) if given.is_data()
+        Err((_, Error::IllegalSoftCast { .. }))
     ));
 }
 
@@ -4660,7 +4660,7 @@ fn soft_cast_from_data_to_imported_opaque_value_wrapper_is_illegal() {
 
     assert!(matches!(
         check_with_deps(parse(source_code), vec![parse_as(dependency, "wrapped")]),
-        Err((_, Error::ExpectOnOpaqueType { .. })),
+        Err((_, Error::IllegalSoftCast { .. })),
     ));
 }
 
@@ -6133,21 +6133,6 @@ fn coerce_into_value() {
 }
 
 #[test]
-fn coerce_empty_list() {
-    let source_code = r#"
-        fn bar() -> Int {
-          coerce n: Int = []
-          n
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::AmbiguousEmptyList { .. }))
-    ))
-}
-
-#[test]
 fn coerce_binding_has_the_annotated_type() {
     let source_code = r#"
         type Datum { owner: ByteArray, amount: Int }
@@ -6322,4 +6307,1275 @@ fn substituting_generics_in_a_copy_leaves_the_original_and_reuses_other_types() 
         unreachable!()
     };
     assert!(Rc::ptr_eq(&elems[1].tipo(), &original[1].tipo()));
+}
+
+/// A cast on a value whose type isn't known yet is recorded on its type variable, and checked
+/// when the variable becomes known.
+#[test]
+fn upcast_refuses_an_unknown_type_that_becomes_a_function() {
+    let source_code = r#"
+        fn main() -> Data {
+          let to_data = fn(x) {
+            let data: Data = x
+            data
+          }
+
+          to_data(fn(n: Int) { n + 1 })
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::CouldNotUnify { .. }))
+    ))
+}
+
+// The refusal is reported by the coerce, not as a type mismatch: the cast is checked once the
+// type is known, and a coerce never unifies its value with anything.
+#[test]
+fn coerce_refuses_an_unknown_type_that_becomes_a_function() {
+    let source_code = r#"
+        fn main() -> Int {
+          let to_int = fn(x) {
+            coerce n: Int = x
+            n
+          }
+
+          to_int(fn(n: Int) { n + 1 })
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalCoerce { .. }))
+    ))
+}
+
+/// `expect xs: List<_>` doesn't know its element type yet, so it can't tell the cast is opaque.
+/// The element type becomes `Secret` after, which the cast is refused for.
+#[test]
+fn expect_refuses_an_unknown_type_argument_that_becomes_opaque() {
+    let local = r#"
+        opaque type Secret { inner: Int }
+
+        fn main(data: Data) -> List<Secret> {
+          expect xs: List<_> = data
+          let hidden: List<Secret> = xs
+          hidden
+        }
+    "#;
+
+    let dependency = r#"
+        pub opaque type Secret { inner: Int }
+    "#;
+
+    let imported = r#"
+        use secret.{Secret}
+
+        fn main(data: Data) -> List<Secret> {
+          expect xs: List<_> = data
+          let hidden: List<Secret> = xs
+          hidden
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(local)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+
+    assert!(matches!(
+        check_with_deps(parse(imported), vec![parse_as(dependency, "secret")]),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_refuses_an_unknown_type_argument_that_becomes_a_string() {
+    let source_code = r#"
+        fn main(data: Data) -> Int {
+          if data is xs: List<_> {
+            let strings: List<String> = xs
+            list_length(strings)
+          } else {
+            0
+          }
+        }
+
+        fn list_length(xs: List<a>) -> Int {
+          todo
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ))
+}
+
+/// `==` compares through Data, and functions and `MillerLoopResult` have no Data form. A type
+/// variable that meets `==` can't become one later, whether it's known by the end of the
+/// definition (a lambda's argument) or a generic of a function that compares it, directly or
+/// through another function, and is instantiated with one.
+#[test]
+fn equality_refuses_types_without_a_data_form_through_type_variables() {
+    for source_code in [
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn main() -> Bool {
+          same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn main() -> Bool {
+          let same = fn(x, y) { x == y }
+          same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        use aiken/builtin
+
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn main(p: G1Element, q: G2Element) -> Bool {
+          let ml = builtin.bls12_381_miller_loop(p, q)
+          same(ml, ml)
+        }
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x != y
+        }
+
+        fn same_again(x: b, y: b) -> Bool {
+          same(x, y)
+        }
+
+        fn main() -> Bool {
+          same_again(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn comparer() -> fn(a, a) -> Bool {
+          fn(x, y) { x == y }
+        }
+
+        fn main() -> Bool {
+          comparer()(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn apply(f: fn(b, b) -> Bool, x: b) -> Bool {
+          f(x, x)
+        }
+
+        fn main() -> Bool {
+          apply(same, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn other(x: a, y: a) -> Bool {
+          same(x, y, False)
+        }
+
+        fn same(x: a, y: a, b: Bool) -> Bool {
+          if b { other(x, y) } else { x == y }
+        }
+
+        fn main() -> Bool {
+          other(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+        "#,
+        r#"
+        fn main() -> Bool {
+          same(fn(n: Int) { n }, fn(n: Int) { n }, True)
+        }
+
+        fn same(x: a, y: a, b: Bool) -> Bool {
+          if b { other(x, y) } else { x == y }
+        }
+
+        fn other(x: a, y: a) -> Bool {
+          same(x, y, False) && main()
+        }
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn id(n: Int) -> Int {
+          n
+        }
+
+        const compared: Bool = same(id, id)
+        "#,
+        r#"
+        fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+
+        fn id(n: Int) -> Int {
+          n
+        }
+
+        fn pick(b: Bool) -> Fuzzer<Int> {
+          fn(prng) { if b { Some((prng, 1)) } else { None } }
+        }
+
+        test prop(n via pick(same(id, id))) {
+          n == 1
+        }
+        "#,
+    ] {
+        let result = check(parse(source_code));
+
+        assert!(
+            matches!(result, Err((_, Error::IllegalComparison { .. }))),
+            "{source_code}\n{result:#?}"
+        );
+    }
+
+    let dependency = r#"
+        pub fn same(x: a, y: a) -> Bool {
+          x == y
+        }
+    "#;
+
+    let source_code = r#"
+        use dep
+
+        fn main() -> Bool {
+          dep.same(fn(n: Int) { n }, fn(n: Int) { n })
+        }
+    "#;
+
+    let result = check_with_deps(parse(source_code), vec![parse_as(dependency, "dep")]);
+
+    assert!(
+        matches!(result, Err((_, Error::IllegalComparison { .. }))),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn expect_into_opaque_phantom_type_argument() {
+    let phantom = r#"
+        opaque type Thing { inner: Int }
+
+        type Tagged<a> {
+          Tagged(Int)
+        }
+
+        fn bar(data: Data) -> Tagged<Thing> {
+          expect x: Tagged<Thing> = data
+          x
+        }
+    "#;
+
+    // The same argument, once a constructor field uses it.
+    let used_by_a_field = r#"
+        opaque type Thing { inner: Int }
+
+        type Tagged<a> {
+          Tagged(Int)
+          Holding(List<a>)
+        }
+
+        fn bar(data: Data) -> Tagged<Thing> {
+          expect x: Tagged<Thing> = data
+          x
+        }
+    "#;
+
+    let result = check(parse(phantom));
+    assert!(result.is_ok(), "{result:#?}");
+
+    assert!(matches!(
+        check(parse(used_by_a_field)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+/// `if … is` refuses a type that contains a `String` (or a `Value`, `G1Element`, `G2Element`),
+/// which it can't test without failing. A phantom argument never appears in a value, so it
+/// doesn't count, as for opaque types; the same argument used by a field still does.
+#[test]
+fn soft_cast_into_a_phantom_type_argument_that_cant_be_tested() {
+    for argument in [
+        "String",
+        "Value",
+        "G1Element",
+        "G2Element",
+        "Option<String>",
+    ] {
+        let phantom = format!(
+            r#"
+            type Tagged<a> {{
+              Tagged(Int)
+            }}
+
+            fn f(d: Data) -> Bool {{
+              if d is x: Tagged<{argument}> {{
+                x == x
+              }} else {{
+                False
+              }}
+            }}
+            "#
+        );
+
+        let used_by_a_field = format!(
+            r#"
+            type Tagged<a> {{
+              Tagged(Int)
+              Holding(a)
+            }}
+
+            fn f(d: Data) -> Bool {{
+              if d is x: Tagged<{argument}> {{
+                x == x
+              }} else {{
+                False
+              }}
+            }}
+            "#
+        );
+
+        let result = check(parse(&phantom));
+        assert!(result.is_ok(), "{argument}: {result:#?}");
+
+        let result = check(parse(&used_by_a_field));
+        assert!(
+            matches!(result, Err((_, Error::IllegalSoftCast { .. }))),
+            "{argument}: {result:#?}"
+        );
+    }
+}
+
+#[test]
+fn expect_into_prelude_option_of_opaque_with_local_constructors_named_like_its_own() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        type Maybe<a> {
+          Some(Int)
+          None
+        }
+
+        fn bar(data: Data) -> Option<Thing> {
+          expect x: Option<Thing> = data
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn expect_into_prelude_types_of_opaque_with_local_types_named_like_them() {
+    let dependency = r#"
+        pub opaque type Thing { inner: Int }
+
+        pub type MaybeThing = Option<Thing>
+
+        pub type Things = List<Thing>
+    "#;
+
+    let shadowed_option = r#"
+        use thing.{MaybeThing}
+
+        type Option<a> {
+          Nope
+        }
+
+        fn bar(data: Data) -> MaybeThing {
+          expect x: MaybeThing = data
+          x
+        }
+    "#;
+
+    let shadowed_list = r#"
+        use thing.{Things}
+
+        type List<a> {
+          Nil
+        }
+
+        fn bar(data: Data) -> Things {
+          expect x: Things = data
+          x
+        }
+    "#;
+
+    for source_code in [shadowed_option, shadowed_list] {
+        assert!(matches!(
+            check_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]),
+            Err((_, Error::ExpectOnOpaqueType { .. }))
+        ));
+    }
+}
+
+#[test]
+fn a_record_holding_a_prelude_option_of_opaque_is_opaque_despite_a_local_some() {
+    let source_code = r#"
+        opaque type Thing { inner: Int }
+
+        type Maybe<a> {
+          Some(Int)
+          None
+        }
+
+        type Holder {
+          held: Option<Thing>,
+        }
+
+        fn bar(data: Data) -> Holder {
+          expect x: Holder = data
+          x
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::ExpectOnOpaqueType { .. }))
+    ));
+}
+
+#[test]
+fn forbid_a_function_in_a_generic_constructor() {
+    let in_a_box = r#"
+        type Box<a> {
+          Box(a)
+        }
+
+        fn main() -> Bool {
+          when Box(fn(x) { x + 1 }) is {
+            Box(g) -> g(1) == 2
+          }
+        }
+    "#;
+
+    let in_an_option = r#"
+        fn main() -> Bool {
+          when Some(fn(x) { x + 1 }) is {
+            Some(g) -> g(1) == 2
+            None -> False
+          }
+        }
+    "#;
+
+    for source_code in [in_a_box, in_an_option] {
+        assert!(
+            matches!(
+                check(parse(source_code)),
+                Err((_, Error::IllegalTypeInData { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_a_function_stored_by_a_generic_function_of_the_same_module() {
+    let source_code = r#"
+        fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        fn main() -> Int {
+          let _ = wrap(fn(n: Int) { n })
+          1
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn forbid_a_function_stored_by_a_generic_function_of_an_imported_module() {
+    let dependency = r#"
+        pub fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        pub fn pair_up(x: a, y: b) -> Pair<a, b> {
+          Pair(x, y)
+        }
+
+        pub fn through(x: a) -> Int {
+          let _ = wrap(x)
+          1
+        }
+    "#;
+
+    let wrap = r#"
+        use dep
+
+        fn main() -> Int {
+          1
+        }
+
+        test t() {
+          let _ = dep.wrap(fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    let pair_up = r#"
+        use dep
+
+        test t() {
+          let _ = dep.pair_up(1, fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    let through = r#"
+        use dep
+
+        test t() {
+          let _ = dep.through(fn(n: Int) { n })
+          True
+        }
+    "#;
+
+    for source_code in [wrap, pair_up, through] {
+        assert!(
+            matches!(
+                check_with_deps(parse(source_code), vec![parse_as(dependency, "dep")]),
+                Err((_, Error::IllegalTypeInData { .. }))
+            ),
+            "{source_code}"
+        );
+    }
+}
+
+#[test]
+fn forbid_a_function_consed_by_the_builtin() {
+    let source_code = r#"
+        use aiken/builtin
+
+        fn main() -> Int {
+          let _xs = builtin.cons_list(fn(n: Int) { n }, [])
+          1
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn forbid_a_fuzzer_of_miller_loop_results() {
+    let source_code = r#"
+        fn int() -> Fuzzer<Int> { todo }
+
+        fn map(fuzzer: Fuzzer<a>, f: fn(a) -> b) -> Fuzzer<b> {
+          fn(prng) {
+            when fuzzer(prng) is {
+              Some((next, x)) -> Some((next, f(x)))
+              None -> None
+            }
+          }
+        }
+
+        fn to_ml(_n: Int) -> MillerLoopResult { todo }
+
+        test prop(ml via map(int(), to_ml)) { True }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_g2_element_in_a_tuple_is_illegal() {
+    let source_code = r#"
+        fn decode(data: Data) -> Bool {
+          if data is pair: (Int, G2Element) {
+            True
+          } else {
+            False
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_string_is_illegal() {
+    let source_code = r#"
+        fn decode(data: Data) -> String {
+          if data is s: String {
+            s
+          } else {
+            @"not a string"
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_string()
+    ));
+}
+
+#[test]
+fn soft_cast_from_data_to_record_with_a_string_is_illegal() {
+    let source_code = r#"
+        type Named {
+          name: String,
+          age: Int,
+        }
+
+        fn decode(data: Data) -> Bool {
+          if data is Named { age, .. }: Named {
+            age > 0
+          } else {
+            False
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalSoftCast { .. }))
+    ));
+}
+
+/// The casts don't convert a `Value` or a `G1Element` yet, so all of these are refused, and
+/// the same way whether the wrappers are local or imported.
+#[test]
+fn local_and_imported_opaque_wrappers_cast_the_same_way() {
+    let dependency = r#"
+        pub opaque type Wrapped {
+          Wrapped(Value)
+        }
+
+        pub opaque type Point {
+          Point(G1Element)
+        }
+    "#;
+
+    let casts = [
+        "fn cast(data: Data) -> Wrapped { coerce w: Wrapped = data\n w }",
+        "fn cast(w: Wrapped) -> Data { coerce d: Data = w\n d }",
+        "fn cast(w: Wrapped) -> Data { let d: Data = w\n d }",
+        "fn cast(data: Data) -> Wrapped { expect w: Wrapped = data\n w }",
+        "fn cast(data: Data) -> Point { coerce p: Point = data\n p }",
+        "fn cast(p: Point) -> Data { let d: Data = p\n d }",
+    ];
+
+    for cast in casts {
+        let local = format!(
+            "opaque type Wrapped {{ Wrapped(Value) }}\nopaque type Point {{ Point(G1Element) }}\n{cast}"
+        );
+        let imported = format!("use wrapped.{{Wrapped, Point}}\n{cast}");
+
+        let local = check(parse(&local)).map(|_| ()).map_err(|(_, e)| e);
+        let imported = check_with_deps(parse(&imported), vec![parse_as(dependency, "wrapped")])
+            .map(|_| ())
+            .map_err(|(_, e)| e);
+
+        match (&local, &imported) {
+            (Err(local_error), Err(imported_error)) => assert_eq!(
+                std::mem::discriminant(local_error),
+                std::mem::discriminant(imported_error),
+                "{cast}\nlocal: {local:#?}\nimported: {imported:#?}"
+            ),
+            _ => panic!("{cast}\nlocal: {local:#?}\nimported: {imported:#?}"),
+        }
+    }
+}
+
+/// Casts and comparisons that stay legal: a phantom argument or a type that no value stores
+/// doesn't count, and `==` through type variables is accepted for the types that have a Data
+/// form.
+#[test]
+fn casts_and_comparisons_that_stay_legal() {
+    accepted(
+        "a parameter used only recursively is phantom",
+        r#"
+        type Recursive<a> {
+          End
+          Next(Recursive<a>)
+        }
+
+        fn compare(
+          left: Recursive<MillerLoopResult>,
+          right: Recursive<MillerLoopResult>,
+        ) -> Bool {
+          left == right
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "storing, comparing, upcasting or coercing at a type variable that an alias drops",
+        r#"
+        pub type Tag<a> =
+          Int
+
+        fn store(_tag: Tag<a>) -> Bool {
+          let _xs: List<a> = []
+          True
+        }
+
+        fn compare(_tag: Data<a>) -> Bool {
+          let xs: List<a> = []
+          xs == []
+        }
+
+        fn upcast(_tag: Tag<a>) -> Data {
+          let xs: List<a> = []
+          as_data(xs)
+        }
+
+        fn convert(_tag: Tag<a>, d: Data) -> Bool {
+          coerce x: a = d
+          let _ = x
+          True
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "coerce of an empty list of unknown element type",
+        r#"
+        fn bar() -> Int {
+          coerce n: Int = []
+          n
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "an upcast of a list through a generic function once its element type is known",
+        r#"
+        fn reverse(xs: List<a>) -> List<a> {
+          xs
+        }
+
+        fn main() -> Data {
+          let known: List<Int> = reverse([])
+          let d: Data = known
+          d
+        }
+
+        fn other() -> Data {
+          let d: Data = reverse([1])
+          d
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "== through type variables that end up with a Data form",
+        r#"
+        use dep
+
+        fn same_again(x: b, y: b) -> Bool {
+          dep.same(x, y)
+        }
+
+        fn has(xs: List<a>, x: a) -> Bool {
+          when xs is {
+            [] -> False
+            [head, ..tail] -> head == x || has(tail, x)
+          }
+        }
+
+        fn main(g: G1Element) -> Bool {
+          let same = fn(x, y) { x == y }
+          and {
+            same_again(1, 1),
+            dep.same([#"00"], []),
+            has([Some(g)], None),
+            same(as_data(1), as_data(1)),
+          }
+        }
+        "#,
+        vec![parse_as(
+            r#"
+            pub fn same(x: a, y: a) -> Bool {
+              x == y
+            }
+            "#,
+            "dep",
+        )],
+    );
+
+    accepted(
+        "generic constructors and functions holding data forms",
+        r#"
+        use aiken/builtin
+
+        type Box<a> {
+          Box(a)
+        }
+
+        type Tagged<a> {
+          Tagged(Int)
+        }
+
+        fn unbox(b: Box<a>) -> a {
+          let Box(x) = b
+          x
+        }
+
+        fn wrap(x: a) -> List<a> {
+          [x]
+        }
+
+        fn main(g1: G1Element) -> Bool {
+          let tagged: Tagged<Int> = Tagged(1)
+          let _ = Some(g1)
+          let ys = wrap(Box([1, 2]))
+          unbox(Box(1)) == 1 && builtin.length_of_bytearray(#"") == 0 && ys != []
+        }
+        "#,
+        vec![],
+    );
+
+    for argument in ["fn(Int) -> Int", "MillerLoopResult"] {
+        accepted(
+            &format!("a phantom {argument} through every cast"),
+            &format!(
+                r#"
+            type Tagged<a> {{
+              Tagged(Int)
+            }}
+
+            fn same(x: a, y: a) -> Bool {{
+              x == y
+            }}
+
+            fn f(d: Data, t: Tagged<{argument}>) -> Bool {{
+              let up: Data = t
+              expect e: Tagged<{argument}> = d
+              coerce c: Tagged<{argument}> = d
+              let ts = [t, e, c]
+              if d is i: Tagged<{argument}> {{
+                i == t && same(e, c) && up == d && ts != []
+              }} else {{
+                False
+              }}
+            }}
+            "#
+            ),
+            vec![],
+        );
+    }
+}
+
+#[test]
+fn a_constant_cannot_be_a_miller_loop_result() {
+    let source_code = r#"
+        use aiken/builtin
+
+        const ml: MillerLoopResult =
+          builtin.bls12_381_miller_loop(
+            builtin.bls12_381_g1_uncompress(#"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+            builtin.bls12_381_g2_uncompress(#"c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+          )
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+/// A generic erased opaque wrapper stores its argument like any other data type.
+#[test]
+fn an_erased_opaque_wrapper_cannot_hold_a_function() {
+    let source_code = r#"
+        opaque type W<a> {
+          W(a)
+        }
+
+        fn inc(n: Int) -> Int {
+          n + 1
+        }
+
+        fn main() -> Bool {
+          when W(inc) is {
+            W(g) -> g(1) == 2
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check(parse(source_code)),
+        Err((_, Error::IllegalTypeInData { .. }))
+    ));
+}
+
+#[test]
+fn a_type_that_nothing_fixes_is_linked_to_data_once_every_module_type_checks() {
+    let source_code = r#"
+        pub fn main(data: Data) {
+          expect xs: List<_> = data
+          xs
+        }
+    "#;
+
+    let (_, module) = check(parse(source_code)).expect("should type-check");
+
+    let tipo = &module.type_info.values["main"].tipo;
+
+    assert_eq!(tipo.to_pretty(0), "fn(Data) -> List<Data>");
+}
+
+/// Modules that share a type variable each record the casts it meets; the strongest one
+/// decides, whichever order the modules are looked up in.
+#[test]
+fn the_strongest_requirement_of_a_shared_variable_decides() {
+    let constant = r#"
+        pub const k = []
+    "#;
+
+    let stored = r#"
+        use constant.{k}
+
+        pub fn stored() {
+          [k]
+        }
+    "#;
+
+    let tested = r#"
+        use constant.{k}
+
+        pub fn tested(d: Data) -> Bool {
+          if d is x: List<_> {
+            x == k
+          } else {
+            False
+          }
+        }
+    "#;
+
+    let source_code = r#"
+        use constant.{k}
+        use stored
+        use tested
+
+        fn strings() -> List<String> {
+          k
+        }
+    "#;
+
+    // Modules are looked up in a hash map's order, which changes with each check.
+    for _ in 0..20 {
+        let result = check_with_deps(
+            parse(source_code),
+            vec![
+                parse_as(constant, "constant"),
+                parse_as(stored, "stored"),
+                parse_as(tested, "tested"),
+            ],
+        );
+
+        assert!(
+            matches!(result, Err((_, Error::IllegalSoftCast { .. }))),
+            "{result:#?}"
+        );
+    }
+}
+
+#[test]
+fn calling_a_value_after_an_upcast_refuses_a_function() {
+    let source_code = r#"
+        fn f(g) {
+          let d: Data = g
+          (d, g(1))
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((
+                _,
+                Error::CouldNotUnify {
+                    situation: Some(UnifyErrorSituation::NoDataForm),
+                    ..
+                }
+            ))
+        ),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn a_list_pattern_keeps_the_requirement_of_what_it_matches() {
+    let source_code = r#"
+        pub opaque type Secret {
+          Secret(Int)
+        }
+
+        fn first(d: Data) {
+          expect xs: _ = d
+          when xs is {
+            [x, ..] -> x
+            [] -> fail
+          }
+        }
+
+        fn reveal(d: Data) -> Secret {
+          first(d)
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(result, Err((_, Error::ExpectOnOpaqueType { .. }))),
+        "{result:#?}"
+    );
+}
+
+/// Spans don't say which module they're in, so an error found through another module's
+/// requirement points at the code of the module being checked.
+#[test]
+fn a_requirement_from_another_module_is_reported_where_it_fails() {
+    let shared = r#"
+        pub const nothing = None
+
+        pub fn is_nothing(d: Data) -> Bool {
+          expect o: Option<_> = d
+          o == nothing
+        }
+    "#;
+
+    let source_code = r#"
+        use shared
+
+        pub opaque type Secret {
+          Secret(Int)
+        }
+
+        pub fn none() -> Option<Secret> {
+          shared.nothing
+        }
+    "#;
+
+    let result = check_with_deps(parse(source_code), vec![parse_as(shared, "shared")]);
+
+    let Err((_, Error::ExpectOnOpaqueType { location })) = result else {
+        panic!("{result:#?}");
+    };
+
+    assert!(
+        source_code[location.start..].starts_with("shared.nothing"),
+        "{location:?}"
+    );
+}
+
+#[test]
+fn the_first_requirement_error_doesnt_depend_on_a_map_order() {
+    let source_code = r#"
+        opaque type Secret {
+          Secret(Int)
+        }
+
+        fn f(d: Data, n: Int) -> Int {
+          g(fn(x) { x }, Secret(1), d, n)
+        }
+
+        fn g(x: a, y: b, d: Data, n: Int) -> Int {
+          if n > 0 {
+            f(d, n - 1)
+          } else {
+            expect _v: a = d
+            expect _w: b = d
+            0
+          }
+        }
+    "#;
+
+    for _ in 0..20 {
+        let result = check(parse(source_code));
+
+        assert!(
+            matches!(
+                result,
+                Err((
+                    _,
+                    Error::CouldNotUnify {
+                        situation: Some(UnifyErrorSituation::NoDataForm),
+                        ..
+                    }
+                ))
+            ),
+            "{result:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_decode_at_a_type_variable_that_an_alias_drops_is_refused() {
+    let source_code = r#"
+        pub type Tag<a> =
+          Int
+
+        pub fn holds(_tag: Tag<a>, d: Data) -> Bool {
+          expect _x: a = d
+          True
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariable { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn a_decode_at_a_type_variable_only_the_body_names_is_refused() {
+    let source_code = r#"
+        pub fn holds(d: Data) -> Bool {
+          expect _x: a = d
+          True
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariable { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn a_decode_at_a_type_variable_only_a_lambda_names_is_refused() {
+    let source_code = r#"
+        pub fn holds(d: Data) -> Bool {
+          let decode =
+            fn(x: Data) -> Bool {
+              expect _y: a = x
+              True
+            }
+          decode(d)
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariable { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
+}
+
+#[test]
+fn a_decode_at_a_type_variable_only_a_constant_names_is_refused() {
+    let source_code = r#"
+        const holds: Bool = {
+          expect _x: a = as_data(1)
+          True
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariableInConstant { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
+}
+
+/// A constant's type mentioning the variable doesn't help: no call chooses it.
+#[test]
+fn a_decode_at_a_type_variable_a_constant_returns_is_refused() {
+    let source_code = r#"
+        const value = {
+          expect x: a = as_data(1)
+          x
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariableInConstant { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
+}
+
+/// The constant has `decode` inferred out of order, so `a` learns it's decoded only once the
+/// module is inferred.
+#[test]
+fn a_decode_at_a_dropped_type_variable_found_after_inference_is_refused() {
+    let source_code = r#"
+        const warm: Int = decode(as_data(1))
+
+        fn f(_tag: Data<a>, d: Data) -> Bool {
+          let x: a = decode(d)
+          as_data(x) == d
+        }
+
+        fn decode(d: Data) -> b {
+          expect x: b = d
+          x
+        }
+    "#;
+
+    let result = check(parse(source_code));
+
+    assert!(
+        matches!(
+            result,
+            Err((_, Error::UnreachableTypeVariable { ref name, .. })) if name == "a"
+        ),
+        "{result:#?}"
+    );
 }

@@ -802,6 +802,45 @@ impl TypedValidator {
 pub type TypedDefinition = Definition<Rc<Type>, TypedArg, TypedExpr, String>;
 pub type UntypedDefinition = Definition<(), UntypedArg, UntypedExpr, ()>;
 
+impl TypedDefinition {
+    /// Replaces every type the definition's signature and body hold with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Definition::Fn(function) => function.map_types(f),
+            Definition::Test(test) | Definition::Benchmark(test) => {
+                for argument in &mut test.arguments {
+                    argument.arg.tipo = f(&argument.arg.tipo);
+                    argument.via.map_types(f);
+                }
+                test.return_type = f(&test.return_type);
+                test.body.map_types(f);
+            }
+            Definition::Validator(validator) => {
+                for param in &mut validator.params {
+                    param.tipo = f(&param.tipo);
+                }
+                for handler in &mut validator.handlers {
+                    handler.map_types(f);
+                }
+                validator.fallback.map_types(f);
+            }
+            Definition::ModuleConstant(constant) => constant.value.map_types(f),
+            Definition::TypeAlias(_) | Definition::DataType(_) | Definition::Use(_) => {}
+        }
+    }
+}
+
+impl TypedFunction {
+    /// Replaces every type the function's signature and body hold with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        for argument in &mut self.arguments {
+            argument.tipo = f(&argument.tipo);
+        }
+        self.return_type = f(&self.return_type);
+        self.body.map_types(f);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Definition<T, Arg, Expr, PackageName> {
     Fn(Function<T, Expr, Arg>),

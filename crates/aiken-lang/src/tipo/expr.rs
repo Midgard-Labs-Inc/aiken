@@ -7,6 +7,7 @@ use super::{
     hydrator::Hydrator,
     pattern::PatternTyper,
     pipe::PipeTyper,
+    requirement::Cast,
 };
 use crate::{
     IdGenerator,
@@ -177,6 +178,12 @@ pub(crate) fn infer_function(
     let args_types = arguments.iter().map(|a| a.tipo.clone()).collect();
 
     let tipo = Type::function(args_types, return_type);
+
+    expr_typer.environment.note_unreachable_variables(
+        name,
+        Some(&tipo),
+        expr_typer.hydrator.all_rigid_names(),
+    );
 
     let safe_to_generalise = !expr_typer.ungeneralised_function_used;
 
@@ -762,7 +769,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 let left = self.infer(left)?;
                 let right = self.infer(right)?;
 
-                // If either side is `Data`, both are compared as `Data`.
+                // If either side is `Data`, both are compared as `Data`. Otherwise, the types
+                // must match, and allow comparison.
                 let (left, right) = if left.tipo().is_data() {
                     let location = right.location();
                     let right = self.upcast(left.tipo(), right, location)?;
@@ -772,14 +780,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     (self.upcast(right.tipo(), left, location)?, right)
                 } else {
                     self.unify(left.tipo(), right.tipo(), right.location())?;
+                    self.environment
+                        .require(&left.tipo(), Cast::Compare, location)?;
                     (left, right)
                 };
-
-                for tipo in [left.tipo(), right.tipo()] {
-                    self.environment
-                        .ensure_serialisable(tipo, location)
-                        .map_err(|_| Error::IllegalComparison { location })?;
-                }
 
                 return Ok(TypedExpr::BinOp {
                     location,
@@ -1491,7 +1495,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             let value_location = typed_value.type_defining_location();
 
             if value_is_data && !kind.is_let() && !ann_typ.is_data() {
-                self.downcast(ann_typ.clone(), &typed_value, value_location)?;
+                self.environment
+                    .require(&ann_typ, Cast::from_data(&kind), value_location)?;
             } else {
                 typed_value = self.upcast(ann_typ.clone(), typed_value, value_location)?;
             }
@@ -1541,9 +1546,9 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     false,
                 ) {
                     Ok(pattern) if ann_typ.is_monomorphic() => {
-                        self.downcast(
-                            ann_typ.clone(),
-                            &typed_value,
+                        self.environment.require(
+                            &ann_typ,
+                            Cast::from_data(&kind),
                             typed_value.type_defining_location(),
                         )?;
 
@@ -1686,31 +1691,15 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
         let typed_value = self.infer(untyped_value)?;
 
-        let value_type = typed_value.tipo();
-
-        if value_type.is_unbounded_list() {
-            return Err(Error::AmbiguousEmptyList {
-                location: typed_value.location(),
-            });
-        }
-
-        if !self.environment.is_data_like(&value_type) {
-            return Err(Error::IllegalCoerce {
-                location: typed_value.location(),
-                tipo: value_type,
-            });
-        }
+        self.environment
+            .require(&typed_value.tipo(), Cast::Coerce, typed_value.location())?;
 
         let tipo = self
             .type_from_annotation(annotation)
             .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
 
-        if !self.environment.is_data_like(&tipo) {
-            return Err(Error::IllegalCoerce {
-                location: annotation.location(),
-                tipo,
-            });
-        }
+        self.environment
+            .require(&tipo, Cast::Coerce, annotation.location())?;
 
         let pattern = PatternTyper::new(self.environment, &self.hydrator).unify(
             untyped_pattern,
@@ -2078,7 +2067,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         };
 
         self.environment
-            .ensure_serialisable_at_top_level(return_type.clone(), body.type_defining_location())?;
+            .require_stored(&return_type, body.type_defining_location())?;
 
         Ok((args, body, return_type))
     }
@@ -2112,9 +2101,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             elems.push(element)
         }
 
-        // Ensure elements are serialisable to Data.
-        self.environment
-            .ensure_serialisable(tipo.clone(), location)?;
+        self.environment.require(&tipo, Cast::Store, location)?;
 
         // Type check the ..tail, if there is one
         let tipo = Type::list(tipo);
@@ -2529,11 +2516,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
     ) -> Result<TypedExpr, Error> {
         let typed_fst = self.infer(fst)?;
         self.environment
-            .ensure_serialisable(typed_fst.tipo(), location)?;
+            .require(&typed_fst.tipo(), Cast::Store, location)?;
 
         let typed_snd = self.infer(snd)?;
         self.environment
-            .ensure_serialisable(typed_snd.tipo(), location)?;
+            .require(&typed_snd.tipo(), Cast::Store, location)?;
 
         Ok(TypedExpr::Pair {
             location,
@@ -2550,9 +2537,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         for elem in elems {
             let typed_elem = self.infer(elem)?;
 
-            // Ensure elements are serialisable to Data.
             self.environment
-                .ensure_serialisable(typed_elem.tipo(), location)?;
+                .require(&typed_elem.tipo(), Cast::Store, location)?;
 
             typed_elems.push(typed_elem);
         }
@@ -2933,8 +2919,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         location: Span,
     ) -> Result<Rc<Type>, Error> {
         let result = self.environment.instantiate(t, ids, &self.hydrator);
-        self.environment
-            .ensure_serialisable_at_top_level(result.clone(), location)?;
+        self.environment.require_stored(&result, location)?;
+        self.environment.require_instantiated(ids, location)?;
         Ok(result)
     }
 
@@ -2968,10 +2954,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         value: TypedExpr,
         location: Span,
     ) -> Result<TypedExpr, Error> {
-        if expected.is_data()
-            && !value.tipo().is_data()
-            && self.environment.check_upcast(&value.tipo(), location)?
-        {
+        if expected.is_data() && !value.tipo().is_data() {
+            self.environment
+                .require(&value.tipo(), Cast::Upcast, location)?;
+
             return Ok(TypedExpr::Upcast {
                 location: value.location(),
                 value: Box::new(value),
@@ -2981,21 +2967,6 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         self.unify(expected, value.tipo(), location)?;
 
         Ok(value)
-    }
-
-    /// Checks that `expect` or `if … is` can convert `value`, which is `Data`, to `target`.
-    #[allow(clippy::result_large_err)]
-    fn downcast(
-        &mut self,
-        target: Rc<Type>,
-        value: &TypedExpr,
-        location: Span,
-    ) -> Result<(), Error> {
-        if self.environment.check_downcast(&target, location)? {
-            Ok(())
-        } else {
-            self.unify(target, value.tipo(), location)
-        }
     }
 }
 

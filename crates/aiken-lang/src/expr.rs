@@ -525,6 +525,74 @@ impl TypedExpr {
         }
     }
 
+    /// Calls `f` on this expression and on every expression inside it, parents first.
+    pub fn walk<'a>(&'a self, f: &mut impl FnMut(&'a TypedExpr)) {
+        f(self);
+
+        match self {
+            Self::UInt { .. }
+            | Self::String { .. }
+            | Self::Value { .. }
+            | Self::ByteArray { .. }
+            | Self::CurvePoint { .. }
+            | Self::Var { .. }
+            | Self::ModuleSelect { .. }
+            | Self::ErrorTerm { .. } => {}
+            Self::Sequence { expressions, .. } | Self::Pipeline { expressions, .. } => {
+                expressions.iter().for_each(|expression| expression.walk(f))
+            }
+            Self::Fn { body, .. } => body.walk(f),
+            Self::List { elements, tail, .. } => {
+                elements.iter().for_each(|element| element.walk(f));
+                if let Some(tail) = tail {
+                    tail.walk(f);
+                }
+            }
+            Self::Call { fun, args, .. } => {
+                fun.walk(f);
+                args.iter().for_each(|arg| arg.value.walk(f));
+            }
+            Self::BinOp { left, right, .. } => {
+                left.walk(f);
+                right.walk(f);
+            }
+            Self::Assignment { value, .. } => value.walk(f),
+            Self::Trace { then, text, .. } => {
+                text.walk(f);
+                then.walk(f);
+            }
+            Self::When {
+                subject, clauses, ..
+            } => {
+                subject.walk(f);
+                clauses.iter().for_each(|clause| clause.then.walk(f));
+            }
+            Self::If {
+                branches,
+                final_else,
+                ..
+            } => {
+                for branch in branches {
+                    branch.condition.walk(f);
+                    branch.body.walk(f);
+                }
+                final_else.walk(f);
+            }
+            Self::RecordAccess { record, .. } => record.walk(f),
+            Self::Tuple { elems, .. } => elems.iter().for_each(|elem| elem.walk(f)),
+            Self::Pair { fst, snd, .. } => {
+                fst.walk(f);
+                snd.walk(f);
+            }
+            Self::TupleIndex { tuple, .. } => tuple.walk(f),
+            Self::RecordUpdate { spread, args, .. } => {
+                spread.walk(f);
+                args.iter().for_each(|arg| arg.value.walk(f));
+            }
+            Self::UnOp { value, .. } | Self::Upcast { value, .. } => value.walk(f),
+        }
+    }
+
     pub fn is_literal(&self) -> bool {
         matches!(
             self,

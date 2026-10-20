@@ -61,6 +61,8 @@ pub struct Contents {
     /// A `String`, `Value`, `G1Element` or `G2Element`, whose conversion from `Data` fails
     /// instead of telling whether the `Data` is one.
     pub untestable: bool,
+    /// A `Value`, `G1Element` or `G2Element`, which casts don't convert yet.
+    pub value_or_point: bool,
 }
 
 impl Contents {
@@ -69,6 +71,7 @@ impl Contents {
             no_data_form: self.no_data_form || other.no_data_form,
             opaque: self.opaque || other.opaque,
             untestable: self.untestable || other.untestable,
+            value_or_point: self.value_or_point || other.value_or_point,
         }
     }
 }
@@ -130,6 +133,18 @@ pub fn lookup_layout<'a>(
         },
         Type::Tuple { .. } | Type::Pair { .. } => None,
     }
+}
+
+/// The layout of the data type `name` defined in `module`, among `modules`. Types name the
+/// prelude's module `""`.
+pub fn find_layout<'a>(
+    modules: &'a HashMap<String, TypeInfo>,
+    module: &str,
+    name: &str,
+) -> Option<&'a DataLayout> {
+    let module = if module.is_empty() { PRELUDE } else { module };
+
+    modules.get(module)?.layouts.get(name)
 }
 
 /// Computes the layouts of a module's data types. `imported` finds the layout of a data type
@@ -272,9 +287,9 @@ fn summarise<'a>(
     Summary { stored, contents }
 }
 
-/// What a value of `tipo` contains in its stored positions, apart from its generic type
-/// variables, which it reports to `found`.
-fn stored_contents<'a>(
+/// What a value of `tipo` contains in its stored positions, apart from its type variables,
+/// which it reports to `found`.
+pub(super) fn stored_contents<'a>(
     tipo: &Type,
     lookup: &impl Fn(&str, &str) -> Option<&'a DataLayout>,
     found: &mut impl FnMut(u64),
@@ -293,11 +308,10 @@ fn stored_contents<'a>(
 
         Type::Var { tipo, .. } => match tipo.borrow().deref() {
             TypeVar::Link { tipo } => stored_contents(tipo, lookup, found),
-            TypeVar::Generic { id } => {
+            TypeVar::Unbound { id } | TypeVar::Generic { id } => {
                 found(*id);
                 Contents::default()
             }
-            TypeVar::Unbound { .. } => Contents::default(),
         },
 
         Type::Tuple { elems, .. } => elems.iter().fold(Contents::default(), |acc, elem| {
@@ -319,41 +333,45 @@ fn stored_contents<'a>(
                             ..Contents::default()
                         };
                     }
-                    well_known::STRING
-                    | well_known::VALUE
-                    | well_known::G1_ELEMENT
-                    | well_known::G2_ELEMENT => {
+                    well_known::STRING => {
                         return Contents {
                             untestable: true,
                             ..Contents::default()
                         };
                     }
-                    well_known::LIST => {
-                        return args.iter().fold(Contents::default(), |acc, arg| {
-                            acc.union(stored_contents(arg, lookup, found))
-                        });
+                    well_known::VALUE | well_known::G1_ELEMENT | well_known::G2_ELEMENT => {
+                        return Contents {
+                            untestable: true,
+                            value_or_point: true,
+                            ..Contents::default()
+                        };
                     }
                     _ => {}
                 }
             }
 
-            match lookup(module, name) {
-                Some(layout) => {
-                    let mut own = layout.summary.contents;
-                    own.opaque |= layout.opaque;
+            let layout = lookup(module, name);
+            let own = layout.map_or(Contents::default(), |layout| Contents {
+                opaque: layout.summary.contents.opaque || layout.opaque,
+                ..layout.summary.contents
+            });
 
-                    args.iter()
-                        .zip(&layout.summary.stored)
-                        .filter(|(_, stored)| **stored)
-                        .fold(own, |acc, (arg, _)| {
-                            acc.union(stored_contents(arg, lookup, found))
-                        })
-                }
-                // Primitives (`Int`, `ByteArray`, `Data`, ...) have no layout and no arguments.
-                None => args.iter().fold(Contents::default(), |acc, arg| {
-                    acc.union(stored_contents(arg, lookup, found))
-                }),
-            }
+            stored_args(args, layout).fold(own, |acc, arg| {
+                acc.union(stored_contents(arg, lookup, found))
+            })
         }
     }
+}
+
+/// The arguments of a type with `layout` that its values store. A type without a layout, such
+/// as `List` or a primitive (`Int`, `ByteArray`, `Data`, ...), stores every argument.
+pub(super) fn stored_args<'a>(
+    args: &'a [Rc<Type>],
+    layout: Option<&'a DataLayout>,
+) -> impl Iterator<Item = &'a Rc<Type>> {
+    args.iter().enumerate().filter_map(move |(at, arg)| {
+        layout
+            .is_none_or(|layout| layout.summary.stored.get(at) == Some(&true))
+            .then_some(arg)
+    })
 }

@@ -14,7 +14,6 @@ use crate::{
         TypedValidator, UntypedArg, UntypedDefinition, UntypedModule, UntypedPattern,
         UntypedValidator, Use, Validator,
     },
-    builtins::PRELUDE,
     expr::{TypedExpr, UntypedAssignmentKind, UntypedExpr},
     parser::token::Token,
     tipo::{Span, Type, TypeVar, expr::infer_function, layout},
@@ -93,11 +92,6 @@ impl UntypedModule {
             )?;
         }
 
-        // Refresh the registry after constructor and accessor hydration. Types are marked as they
-        // are registered, and this catches nested records whose dependency is marked later in
-        // source order.
-        environment.collect_opaque_types();
-
         // Data types come first: their layouts tell the rest of the module what their values
         // contain.
         let mut data_types = HashMap::new();
@@ -114,10 +108,7 @@ impl UntypedModule {
         environment.layouts = layout::compute_layouts(
             &module_name,
             &data_types.values().collect::<Vec<_>>(),
-            |module, name| {
-                let module = if module.is_empty() { PRELUDE } else { module };
-                modules.get(module)?.layouts.get(name)
-            },
+            |module, name| layout::find_layout(modules, module, name),
         );
 
         // Infer the types of each definition in the module
@@ -153,6 +144,9 @@ impl UntypedModule {
 
             definitions.push(definition);
         }
+
+        environment.propagate_requirements()?;
+        environment.check_unreachable_variables()?;
 
         // Generalise functions now that the entire module has been inferred
         let definitions = definitions
@@ -205,8 +199,8 @@ impl UntypedModule {
         let Environment {
             module_types: types,
             module_types_constructors: types_constructors,
-            opaque_types,
             layouts,
+            requirements,
             module_values: values,
             accessors,
             annotations,
@@ -223,8 +217,8 @@ impl UntypedModule {
                 name: module_name,
                 types,
                 types_constructors,
-                opaque_types,
                 layouts,
+                requirements,
                 values,
                 accessors,
                 annotations,
@@ -721,7 +715,9 @@ fn infer_definition(
             public,
             value,
         }) => {
-            let typed_assignment = ExprTyper::new(environment, tracing).infer_assignment(
+            let mut expr_typer = ExprTyper::new(environment, tracing);
+
+            let typed_assignment = expr_typer.infer_assignment(
                 UntypedPattern::Var {
                     location,
                     name: name.clone(),
@@ -732,6 +728,8 @@ fn infer_definition(
                 None,
                 location,
             )?;
+
+            let rigid_names = expr_typer.hydrator.all_rigid_names();
 
             // NOTE: The assignment above is only a convenient way to create the TypedExpression
             // that will be reduced at compile-time. We must increment its usage to not
@@ -748,8 +746,16 @@ fn infer_definition(
 
             let tipo = typed_expr.tipo();
 
+            environment.note_unreachable_variables(&name, None, rigid_names);
+
             if tipo.is_function() && !tipo.is_monomorphic() {
                 return Err(Error::GenericLeftAtBoundary { location });
+            }
+
+            // A constant is compiled to a UPLC constant, and a `MillerLoopResult` has no
+            // serialised form.
+            if tipo.is_ml_result() {
+                return Err(Error::IllegalTypeInData { tipo, location });
             }
 
             let variant = ValueConstructor {
@@ -879,7 +885,7 @@ fn check_validator_abi_arg(
 ) -> Result<(), Error> {
     let tipo = Type::collapse_links(arg.tipo.clone());
 
-    let opaque = if environment.contains_opaque(&tipo) {
+    let opaque = if environment.mentions_opaque(&tipo) {
         Some(tipo)
     } else {
         arg.annotation
@@ -902,7 +908,7 @@ fn find_opaque_in_annotation(
     annotation: &Annotation,
 ) -> Option<Rc<Type>> {
     if let Some(tipo) = environment.annotations.get(annotation)
-        && environment.contains_opaque(tipo)
+        && environment.mentions_opaque(tipo)
     {
         return Some(tipo.clone());
     }

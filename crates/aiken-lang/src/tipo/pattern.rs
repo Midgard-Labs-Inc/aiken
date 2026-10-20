@@ -6,7 +6,7 @@ use super::{
     error::{Error, Warning},
     hydrator::Hydrator,
 };
-use crate::ast::{CallArg, Namespace, Pattern, Span, TypedPattern, UntypedPattern};
+use crate::ast::{CallArg, Namespace, Pattern, Span, TypedPattern, UntypedPattern, well_known};
 use itertools::Itertools;
 use std::{
     collections::{HashMap, HashSet},
@@ -217,43 +217,55 @@ impl<'a, 'b> PatternTyper<'a, 'b> {
                 location,
                 elements,
                 tail,
-            } => match tipo.get_app_args(true, "", "List", 1, self.environment) {
-                Some(args) => {
-                    let tipo = args
-                        .first()
-                        .expect("Failed to get type argument of List")
-                        .clone();
+            } => {
+                let element_type = match Type::collapse_links(tipo.clone()).deref() {
+                    Type::App {
+                        module, name, args, ..
+                    } if module.is_empty() && name == well_known::LIST && args.len() == 1 => {
+                        args[0].clone()
+                    }
 
-                    let elements = elements
-                        .into_iter()
-                        .map(|element| self.unify(element, tipo.clone(), None, false))
-                        .try_collect()?;
+                    Type::Var { .. } => {
+                        let element_type = self.environment.new_unbound_var();
 
-                    let tail = match tail {
-                        Some(tail) => Some(Box::new(self.unify(
-                            *tail,
-                            Type::list(tipo),
-                            None,
-                            false,
-                        )?)),
-                        None => None,
-                    };
+                        self.environment
+                            .unify(tipo, Type::list(element_type.clone()), location)?;
 
-                    Ok(Pattern::List {
-                        location,
-                        elements,
-                        tail,
-                    })
-                }
+                        element_type
+                    }
 
-                None => Err(Error::CouldNotUnify {
-                    given: Type::list(self.environment.new_unbound_var()),
-                    expected: tipo.clone(),
-                    situation: None,
+                    _ => {
+                        return Err(Error::CouldNotUnify {
+                            given: Type::list(self.environment.new_unbound_var()),
+                            expected: tipo.clone(),
+                            situation: None,
+                            location,
+                            rigid_type_names: HashMap::new(),
+                        });
+                    }
+                };
+
+                let elements = elements
+                    .into_iter()
+                    .map(|element| self.unify(element, element_type.clone(), None, false))
+                    .try_collect()?;
+
+                let tail = match tail {
+                    Some(tail) => Some(Box::new(self.unify(
+                        *tail,
+                        Type::list(element_type),
+                        None,
+                        false,
+                    )?)),
+                    None => None,
+                };
+
+                Ok(Pattern::List {
                     location,
-                    rigid_type_names: HashMap::new(),
-                }),
-            },
+                    elements,
+                    tail,
+                })
+            }
 
             Pattern::Pair { fst, snd, location } => {
                 match Type::collapse_links(tipo.clone()).deref() {

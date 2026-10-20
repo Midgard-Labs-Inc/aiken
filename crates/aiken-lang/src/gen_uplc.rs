@@ -507,14 +507,18 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    // TODO: pass mono types to build so monomorphization
-    // happens as we build the AIR Tree rather than after
     fn build(
         &mut self,
         body: &TypedExpr,
         module_build_name: &str,
         context: &[TypedExpr],
     ) -> AirTree {
+        assert!(
+            !body.tipo().contains_unbound(),
+            "an unknown type reached code generation: {}",
+            body.tipo().to_pretty(0)
+        );
+
         stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
             self.build_inner(body, module_build_name, context)
         })

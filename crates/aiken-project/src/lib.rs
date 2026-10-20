@@ -41,7 +41,7 @@ use aiken_lang::{
     gen_uplc::CodeGenerator,
     line_numbers::LineNumbers,
     test_framework::{RunnableKind, Test, TestResult},
-    tipo::{Type, TypeInfo},
+    tipo::{Type, TypeInfo, requirement},
     utils,
 };
 use export::Export;
@@ -963,6 +963,15 @@ where
                 self.checked_modules
                     .insert(checked_module.name.clone(), checked_module);
             }
+        }
+
+        // Every module has type-checked: settle the types that nothing fixed.
+        for module in self.checked_modules.values_mut() {
+            requirement::default_unknown_types(&mut module.ast);
+        }
+
+        for module in self.checked_modules.values() {
+            requirement::recheck_casts(&module.ast, &self.module_types);
         }
 
         Ok(())

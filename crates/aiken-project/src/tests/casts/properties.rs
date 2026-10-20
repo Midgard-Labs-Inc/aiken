@@ -1378,6 +1378,20 @@ mod baseline_agrees_with_the_model {
         BaselineModel,
         Forms::ALL
     );
+
+    // A phantom argument never appears in a value, so one without a Data form doesn't count.
+    property!(
+        phantom_args,
+        Features {
+            phantom_args: true,
+            opaque: true,
+            generics: true,
+            ..NONE
+        },
+        6,
+        BaselineModel,
+        Forms::ALL
+    );
 }
 
 mod optimized_agrees_with_the_model {
@@ -1408,4 +1422,16 @@ mod refuses_what_the_model_refuses {
         refuses IfIs
     );
     property!(coerce, Features::everything(), 8, refuses Coerce);
+
+    // The model refuses `if … is` on a `String`, whose conversion fails instead of taking the
+    // `else` branch.
+    property!(
+        if_is_strings,
+        Features {
+            strings: true,
+            ..NONE
+        },
+        6,
+        refuses IfIs
+    );
 }
