@@ -7822,3 +7822,122 @@ fn a_decode_at_a_dropped_type_variable_found_after_inference_is_refused() {
         "{result:#?}"
     );
 }
+
+#[test]
+fn validator_forbid_opaque_type_in_parameter_abi() {
+    let source_code = r#"
+        pub opaque type Config {
+          threshold: Int,
+        }
+
+        validator foo(config: Config) {
+          mint(_redeemer: Data, _policy_id: ByteArray, _ctx: Data) {
+            config == config
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check_validator(parse(source_code)),
+        Err((_, Error::IllegalOpaqueType { position, .. })) if position == "parameter"
+    ))
+}
+
+#[test]
+fn validator_forbid_record_containing_opaque_type_in_parameter_abi() {
+    let dependency = r#"
+        pub opaque type Thing {
+          inner: Int,
+        }
+
+        pub type Config {
+          things: List<Thing>,
+        }
+    "#;
+
+    let source_code = r#"
+        use thing.{Config}
+
+        validator foo(config: Config) {
+          else(_ctx) {
+            config == config
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check_validator_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]),
+        Err((_, Error::IllegalOpaqueType { position, .. })) if position == "parameter"
+    ))
+}
+
+#[test]
+fn validator_forbid_opaque_type_argument_in_parameter_abi() {
+    let dependency = r#"
+        pub opaque type Thing {
+          inner: Int,
+        }
+    "#;
+
+    let source_code = r#"
+        use thing.{Thing}
+
+        validator foo(things: Option<Thing>) {
+          else(_ctx) {
+            things == things
+          }
+        }
+    "#;
+
+    assert!(matches!(
+        check_validator_with_deps(parse(source_code), vec![parse_as(dependency, "thing")]),
+        Err((_, Error::IllegalOpaqueType { position, .. })) if position == "parameter"
+    ))
+}
+
+/// A phantom argument holds no value of an opaque type, so a validator parameter may name one,
+/// through an alias or a data type, however it's spelled.
+#[test]
+fn validator_parameter_accepts_an_opaque_phantom_argument() {
+    let dependency = r#"
+        pub opaque type Blake2b_224 {
+          Blake2b_224
+        }
+
+        pub type Hash<alg, a> =
+          ByteArray
+
+        pub type VerificationKeyHash =
+          Hash<Blake2b_224, ByteArray>
+
+        pub type Tagged<a> {
+          Tagged(Int)
+        }
+    "#;
+
+    let source_code = |annotation: &str| {
+        format!(
+            r#"
+            use crypto.{{Blake2b_224, Hash, Tagged, VerificationKeyHash}}
+
+            validator foo(owner: {annotation}) {{
+              else(_ctx) {{
+                owner == owner
+              }}
+            }}
+            "#
+        )
+    };
+
+    for annotation in [
+        "Hash<Blake2b_224, ByteArray>",
+        "VerificationKeyHash",
+        "Tagged<Blake2b_224>",
+    ] {
+        let result = check_validator_with_deps(
+            parse(&source_code(annotation)),
+            vec![parse_as(dependency, "crypto")],
+        );
+        assert!(result.is_ok(), "{annotation}: {result:#?}");
+    }
+}

@@ -1094,6 +1094,12 @@ impl<'a> Environment<'a> {
         requirement::mentions_opaque(tipo, &|module, name| self.layout(module, name))
     }
 
+    /// Whether a value of `tipo` can hold a value of an opaque type; a phantom argument holds
+    /// none.
+    pub fn holds_opaque(&self, tipo: &Type) -> bool {
+        requirement::holds_opaque(tipo, &|module, name| self.layout(module, name))
+    }
+
     /// Instantiate converts generic variables into unbound ones.
     pub fn instantiate(
         &mut self,

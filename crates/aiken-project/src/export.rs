@@ -11,7 +11,7 @@ use aiken_lang::{
     ast::{ArgName, Span, TypedArg, TypedFunction},
     gen_uplc::CodeGenerator,
     plutus_version::PlutusVersion,
-    tipo::{Type, error as tipo},
+    tipo::{Type, error as tipo, requirement},
 };
 use miette::NamedSource;
 use std::rc::Rc;
@@ -65,18 +65,13 @@ impl Export {
                 }
             };
 
-        // A type is opaque, or holds an opaque type in its fields.
+        // A value of the type can hold a value of an opaque type, which an off-chain caller
+        // could build breaking its invariants; a phantom argument holds none.
         let is_opaque = |tipo: &Rc<Type>| {
-            tipo.qualifier().is_some_and(|(module_name, name)| {
-                modules.values().any(|module| {
-                    module.ast.type_info.name == module_name
-                        && module
-                            .ast
-                            .type_info
-                            .layouts
-                            .get(&name)
-                            .is_some_and(|layout| layout.opaque || layout.summary.contents.opaque)
-                })
+            requirement::holds_opaque(tipo, &|module_name, name| {
+                modules
+                    .get(module_name)
+                    .and_then(|module| module.ast.type_info.layouts.get(name))
             })
         };
 
@@ -281,5 +276,94 @@ mod tests {
             }
             "#
         );
+    }
+
+    fn export(code: &str) -> Result<Export, crate::Error> {
+        let mut project = TestProject::new();
+        let modules = CheckedModules::singleton(project.check(project.parse(code)));
+        let mut generator = project.new_generator(Tracing::All(TraceLevel::Verbose));
+        let (module, func) = modules
+            .functions()
+            .next()
+            .expect("source code did no yield any exports");
+
+        Export::from_function(
+            func,
+            module,
+            &mut generator,
+            &modules,
+            &PlutusVersion::default(),
+        )
+    }
+
+    fn is_illegal_opaque_type(result: &Result<Export, crate::Error>) -> bool {
+        matches!(
+            result,
+            Err(crate::Error::Type { error, .. })
+                if matches!(**error, aiken_lang::tipo::error::Error::IllegalOpaqueType { .. })
+        )
+    }
+
+    #[test]
+    fn an_opaque_type_in_an_argument_type_argument_is_refused() {
+        let result = export(
+            r#"
+            pub opaque type Thing {
+              a: Int
+            }
+
+            pub fn count(things: Option<Thing>) -> Int {
+              when things is {
+                Some(_) -> 1
+                None -> 0
+              }
+            }
+            "#,
+        );
+
+        assert!(is_illegal_opaque_type(&result), "{result:#?}");
+    }
+
+    #[test]
+    fn an_opaque_type_in_a_return_type_argument_is_refused() {
+        let result = export(
+            r#"
+            pub opaque type Thing {
+              a: Int
+            }
+
+            pub fn things() -> List<Thing> {
+              []
+            }
+            "#,
+        );
+
+        assert!(is_illegal_opaque_type(&result), "{result:#?}");
+    }
+
+    /// A phantom argument holds no value of the opaque type, through a data type or an alias.
+    #[test]
+    fn a_phantom_opaque_argument_is_accepted() {
+        let result = export(
+            r#"
+            pub opaque type Thing {
+              a: Int
+            }
+
+            pub type Tagged<a> {
+              Tagged(Int)
+            }
+
+            pub type Tag<a> =
+              Int
+
+            pub fn add(tagged: Tagged<Thing>, tag: Tag<Thing>) -> Int {
+              let Tagged(n) = tagged
+              n + tag
+            }
+            "#,
+        );
+
+        assert!(result.is_ok(), "{result:#?}");
     }
 }
