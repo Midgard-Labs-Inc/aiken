@@ -485,7 +485,8 @@ match exactly: a `List<Datum>` can't be used as a `List<Data>`, and a
 `fn(Datum) -> Bool` can't be passed as a `fn(Data) -> Bool`. To pass a list as
 `Data`, upcast the whole list.
 Likewise, a function annotated `-> Data` must return a `Data`: write
-`as_data(datum)` to return a converted `datum`.
+`as_data(datum)` to return a converted `datum`. [Casts through
+Data](/casts/#where-upcasts-happen) lists every place an upcast happens.
 
 ### Downcasting
 

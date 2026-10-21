@@ -261,7 +261,8 @@ fn decode(data: Data) -> a {
 ```
 
 Each call then checks the type it picks, and is refused if `expect` can't
-convert `Data` to that type.
+convert `Data` to that type (see [casts on type
+variables](/casts/#casts-on-type-variables)).
 
 ### Custom traces
 
@@ -333,7 +334,8 @@ A `coerce` binds a single name and always needs a type annotation: it doesn't
 take patterns, so use a `let` afterwards to destructure the result. It refuses
 functions and `MillerLoopResult`, which have no `Data` form. For a `Value`, a
 `G1Element` or a `G2Element`, the conversion from `Data` is also a check:
-`un_value_data`, or uncompressing the point, fails on a malformed value.
+`un_value_data`, or uncompressing the point, fails on a malformed value. [Data
+forms](/casts/#data-forms) lists each type's `Data` form.
 
 ## Soft casting with `if/is`
 
@@ -373,4 +375,5 @@ A final `else` is always required and acts like a wildcard / catch-all case to h
 
 `if/is` refuses a type that holds a `String`, a `Value`, a `G1Element` or a
 `G2Element`: converting `Data` to one of them fails instead of taking the
-`else` branch.
+`else` branch (see [which casts accept which
+types](/casts/#which-casts-accept-which-types)).
