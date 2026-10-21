@@ -322,7 +322,7 @@ You can use '{discard}' and numbers to distinguish between similar names.
     #[diagnostic(code("illegal::opaque_type_in_abi"))]
     #[diagnostic(url("https://aiken-lang.com/language-tour/modules/#opaque-types"))]
     #[diagnostic(help(
-        r#"Opaque types cannot appear in an exposed interface such as a validator's datum or redeemer type or an exported function. Indeed, an opaque type hides its implementation details, usually because it enforces an invariant that cannot be safely reconstructed from arbitrary Plutus Data.
+        r#"Opaque types cannot appear in an exposed interface such as a validator's parameter, datum or redeemer type or an exported function. Indeed, an opaque type hides its implementation details, usually because it enforces an invariant that cannot be safely reconstructed from arbitrary Plutus Data.
 
 The problematic interface type is:
 

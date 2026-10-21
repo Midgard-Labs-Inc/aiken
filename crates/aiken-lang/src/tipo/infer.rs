@@ -471,7 +471,7 @@ fn infer_definition(
                         });
                     }
 
-                    let typed_params = typed_fallback
+                    let typed_params: Vec<TypedArg> = typed_fallback
                         .arguments
                         .drain(0..params_length)
                         .map(|mut arg| {
@@ -482,6 +482,18 @@ fn infer_definition(
                             arg
                         })
                         .collect();
+
+                    // Parameters are applied off-chain without a check: none can hold a value
+                    // of an opaque type, which could break its invariants.
+                    for param in &typed_params {
+                        if environment.holds_opaque(&param.tipo) {
+                            return Err(Error::IllegalOpaqueType {
+                                location: param.location,
+                                position: "parameter".to_string(),
+                                tipo: Type::collapse_links(param.tipo.clone()),
+                            });
+                        }
+                    }
 
                     if typed_fallback.arguments.len() != 1 {
                         return Err(Error::IncorrectValidatorArity {

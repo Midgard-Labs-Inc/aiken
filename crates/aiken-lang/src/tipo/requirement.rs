@@ -189,8 +189,18 @@ pub fn check_stored<'a>(
     }
 }
 
+/// Whether a value of `tipo` can hold a value of an opaque type, in its stored positions: a
+/// phantom argument holds none. A validator's parameters and an exported function's
+/// arguments are applied off-chain without a check, so they can't.
+pub fn holds_opaque<'a>(
+    tipo: &Type,
+    lookup: &impl Fn(&str, &str) -> Option<&'a DataLayout>,
+) -> bool {
+    stored_contents(tipo, lookup, &mut |_| ()).opaque
+}
+
 /// Whether `tipo` mentions an opaque type anywhere, in its fields and phantom arguments
-/// included, as validator signatures require.
+/// included, as a validator's datum and redeemer require.
 pub fn mentions_opaque<'a>(
     tipo: &Type,
     lookup: &impl Fn(&str, &str) -> Option<&'a DataLayout>,
