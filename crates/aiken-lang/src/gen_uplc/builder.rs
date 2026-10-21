@@ -1141,7 +1141,11 @@ pub fn cast_validator_args(
             .map(|arg| interner.lookup_interned(&arg.to_string()))
             .unwrap_or_else(|| "_".to_string());
 
-        if !matches!(arg.tipo.get_uplc_type(), Some(UplcType::Data) | None) {
+        // A record's runtime form is its `Data`, except a `@list` record's, which is the list.
+        let converts = is_list_record(&arg.tipo, module_types)
+            || !matches!(arg.tipo.get_uplc_type(), Some(UplcType::Data) | None);
+
+        if converts {
             term = term.lambda(&name).apply(known_data_to_type(
                 Term::var(&name),
                 &arg.tipo,
