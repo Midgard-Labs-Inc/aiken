@@ -647,19 +647,38 @@ impl TypedValidator {
                             redeemer.location,
                         ));
 
-                        // Cast the datum, if any
+                        // Check the datum like the redeemer, unless it's an `Option<Data>`, which
+                        // any datum is.
                         if let Some(datum) = datum {
-                            // expect datum: tipo = __datum__
-                            then.push(TypedExpr::flexible_expect(
-                                TypedExpr::local_var(
-                                    var_datum,
-                                    Type::option(Type::data()),
+                            let pattern =
+                                TypedPattern::var(datum.get_variable_name().unwrap_or("_"));
+
+                            let holds_data = matches!(
+                                datum.tipo.arg_types().as_deref(),
+                                Some([inner]) if inner.is_data()
+                            );
+
+                            then.push(if holds_data {
+                                // let datum = __datum__
+                                TypedExpr::let_(
+                                    TypedExpr::local_var(
+                                        var_datum,
+                                        datum.tipo.clone(),
+                                        datum.location,
+                                    ),
+                                    pattern,
+                                    datum.tipo.clone(),
                                     datum.location,
-                                ),
-                                TypedPattern::var(datum.get_variable_name().unwrap_or("_")),
-                                datum.tipo.clone(),
-                                datum.location,
-                            ))
+                                )
+                            } else {
+                                // expect datum: tipo = __datum__
+                                TypedExpr::flexible_expect(
+                                    TypedExpr::local_var(var_datum, Type::data(), datum.location),
+                                    pattern,
+                                    datum.tipo.clone(),
+                                    datum.location,
+                                )
+                            })
                         }
 
                         // let purpose_arg = __purpose_arg__

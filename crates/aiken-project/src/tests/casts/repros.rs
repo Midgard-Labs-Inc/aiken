@@ -681,3 +681,82 @@ fn polymorphic_recursion_with_a_phantom_decode_compiles() {
 
     assert_tests_pass(&[("lib/recursion.ak", &source)], "recursion");
 }
+
+/// `ScriptContext { transaction, redeemer, info }`, with the transaction `I 0`.
+fn script_context(redeemer: Data, info: Data) -> PlutusData {
+    data(Data::constr(
+        0,
+        vec![Data::integer(0.into()), redeemer, info],
+    ))
+}
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn a_spend_datum_is_checked_like_the_redeemer() {
+    let source = r#"
+pub type MyDatum {
+  owner: ByteArray,
+  amount: Int,
+}
+
+validator typed {
+  spend(datum: Option<MyDatum>, _redeemer: Data, _own_ref: Data, _self: Data) {
+    expect Some(d) = datum
+    d.owner == #"00"
+  }
+
+  else(_) {
+    fail
+  }
+}
+
+validator untyped {
+  spend(datum: Option<Data>, _redeemer: Data, _own_ref: Data, _self: Data) {
+    datum != None
+  }
+
+  else(_) {
+    fail
+  }
+}
+"#;
+
+    // `Spending { output, datum: Some(datum) }`
+    let spending = |datum: Data| {
+        script_context(
+            Data::integer(0.into()),
+            Data::constr(
+                1,
+                vec![Data::integer(0.into()), Data::constr(0, vec![datum])],
+            ),
+        )
+    };
+
+    let owner = Data::bytestring(vec![0]);
+    let datum = |fields: Vec<Data>| spending(Data::constr(0, fields));
+
+    for project in &compile_ok(&[("validators/datum.ak", source)]) {
+        let typed = project.validator("datum", "typed");
+        assert_ne!(
+            typed.run(&[datum(vec![owner.clone(), Data::integer(1.into())])]),
+            Outcome::Failed
+        );
+        for malformed in [
+            vec![owner.clone()],
+            vec![owner.clone(), Data::bytestring(vec![0xff])],
+            vec![
+                owner.clone(),
+                Data::integer(1.into()),
+                Data::integer(2.into()),
+            ],
+        ] {
+            assert_eq!(typed.run(&[datum(malformed)]), Outcome::Failed);
+        }
+
+        let untyped = project.validator("datum", "untyped");
+        assert_ne!(
+            untyped.run(&[spending(Data::integer(5.into()))]),
+            Outcome::Failed
+        );
+    }
+}
