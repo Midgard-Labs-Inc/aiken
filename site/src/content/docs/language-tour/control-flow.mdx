@@ -330,10 +330,10 @@ unauthenticated datum.
 :::
 
 A `coerce` binds a single name and always needs a type annotation: it doesn't
-take patterns, so use a `let` afterwards to destructure the result. It only
-converts between types whose `Data` representation is free to convert to and
-from, which rules out functions, `Value`s and BLS12-381 elements. For a
-`Value`, call `builtin.un_value_data`.
+take patterns, so use a `let` afterwards to destructure the result. It refuses
+functions and `MillerLoopResult`, which have no `Data` form. For a `Value`, a
+`G1Element` or a `G2Element`, the conversion from `Data` is also a check:
+`un_value_data`, or uncompressing the point, fails on a malformed value.
 
 ## Soft casting with `if/is`
 

@@ -44,8 +44,6 @@ pub enum Cast {
 pub enum Level {
     /// No function and no `MillerLoopResult`.
     DataForm,
-    /// Also no `Value`, `G1Element` or `G2Element`, which casts don't convert yet.
-    Castable,
     /// Also no opaque type.
     Decodable,
     /// Also no `String`, `Value`, `G1Element` or `G2Element`, whose conversions fail instead of
@@ -65,8 +63,7 @@ impl Cast {
 
     pub fn level(self) -> Level {
         match self {
-            Cast::Store | Cast::Compare => Level::DataForm,
-            Cast::Upcast | Cast::Coerce => Level::Castable,
+            Cast::Store | Cast::Compare | Cast::Upcast | Cast::Coerce => Level::DataForm,
             Cast::Expect => Level::Decodable,
             Cast::IfIs => Level::Testable,
         }
@@ -81,9 +78,7 @@ impl Cast {
             (Cast::Expect | Cast::IfIs, Violation::Opaque) => {
                 Error::ExpectOnOpaqueType { location }
             }
-            (Cast::IfIs, Violation::Untestable | Violation::Uncastable) => {
-                Error::IllegalSoftCast { tipo, location }
-            }
+            (Cast::IfIs, Violation::Untestable) => Error::IllegalSoftCast { tipo, location },
             (Cast::Upcast | Cast::Expect | Cast::IfIs, _) => Error::CouldNotUnify {
                 location,
                 expected: Type::data(),
@@ -124,7 +119,6 @@ pub fn strongest<'a>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Violation {
     NoDataForm,
-    Uncastable,
     Opaque,
     Untestable,
 }
@@ -146,8 +140,6 @@ pub fn check<'a>(
         Err(Violation::Untestable)
     } else if level >= Level::Decodable && contents.opaque {
         Err(Violation::Opaque)
-    } else if level >= Level::Castable && contents.value_or_point {
-        Err(Violation::Uncastable)
     } else {
         Ok(())
     }

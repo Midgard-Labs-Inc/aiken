@@ -61,8 +61,6 @@ pub struct Contents {
     /// A `String`, `Value`, `G1Element` or `G2Element`, whose conversion from `Data` fails
     /// instead of telling whether the `Data` is one.
     pub untestable: bool,
-    /// A `Value`, `G1Element` or `G2Element`, which casts don't convert yet.
-    pub value_or_point: bool,
 }
 
 impl Contents {
@@ -71,7 +69,6 @@ impl Contents {
             no_data_form: self.no_data_form || other.no_data_form,
             opaque: self.opaque || other.opaque,
             untestable: self.untestable || other.untestable,
-            value_or_point: self.value_or_point || other.value_or_point,
         }
     }
 }
@@ -333,16 +330,12 @@ pub(super) fn stored_contents<'a>(
                             ..Contents::default()
                         };
                     }
-                    well_known::STRING => {
+                    well_known::STRING
+                    | well_known::VALUE
+                    | well_known::G1_ELEMENT
+                    | well_known::G2_ELEMENT => {
                         return Contents {
                             untestable: true,
-                            ..Contents::default()
-                        };
-                    }
-                    well_known::VALUE | well_known::G1_ELEMENT | well_known::G2_ELEMENT => {
-                        return Contents {
-                            untestable: true,
-                            value_or_point: true,
                             ..Contents::default()
                         };
                     }

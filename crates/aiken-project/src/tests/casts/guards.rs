@@ -626,3 +626,51 @@ test discards_what_nothing_picks() {
         "late",
     );
 }
+
+/// `Value`, `G1Element` and `G2Element` compare equal to their `Data` form, on either side of
+/// `==`, and an opaque wrapper of a `Value` is coerced from and upcast to the same `Data`.
+#[test]
+fn values_and_points_go_through_data() {
+    assert_tests_pass(
+        &[(
+            "lib/values.ak",
+            r#"
+use aiken/builtin
+
+opaque type Lovelace {
+  Lovelace(Value)
+}
+
+fn as_raw(d: Data) -> Data {
+  d
+}
+
+test g1_equals_data_in_both_orders() {
+  let p = builtin.bls12_381_g1_hash_to_group("abc", "dst")
+  let d = as_raw(builtin.b_data(builtin.bls12_381_g1_compress(p)))
+  p == d && d == p
+}
+
+test g2_equals_data_in_both_orders() {
+  let p = builtin.bls12_381_g2_hash_to_group("abc", "dst")
+  let d = as_raw(builtin.b_data(builtin.bls12_381_g2_compress(p)))
+  p == d && d == p
+}
+
+test value_equals_data_in_both_orders() {
+  let v: Value = { lovelace: 10 }
+  let d = as_raw(builtin.value_data(v))
+  v == d && d == v
+}
+
+test opaque_value_wrapper_coerce_roundtrips() {
+  let v: Value = { lovelace: 7 }
+  coerce l: Lovelace = builtin.value_data(v)
+  let d: Data = l
+  d == v
+}
+"#,
+        )],
+        "values",
+    );
+}
