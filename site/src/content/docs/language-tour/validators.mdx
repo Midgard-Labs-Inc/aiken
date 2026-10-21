@@ -102,7 +102,8 @@ to/in your validator), it always produces an `Option<T>` where `T` is a
 user-defined type that depends on the contract.
 
 A datum that is present is checked like the redeemer: if it isn't a `T`, the
-validator fails. An `Option<Data>` datum isn't checked.
+validator fails. An `Option<Data>` datum isn't checked. [Casts through
+Data](/casts/#validators) describes what a validator checks.
 
 Nevertheless, should your contract require a datum to be present, then it is
 straightforward to enforce this constraint using [`expect`](/language-tour/control-flow/#non-exhaustive-pattern-matching)

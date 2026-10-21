@@ -483,7 +483,8 @@ An upcast happens only on a value: as a call argument, or bound by a `let`
 annotated `Data`, for example. It never happens inside a type: a `List<Datum>`
 isn't a `List<Data>`, and a `fn(Datum) -> Bool` isn't a `fn(Data) -> Bool`.
 Likewise, a function annotated `-> Data` must return a `Data`: write
-`as_data(datum)` to return a converted `datum`.
+`as_data(datum)` to return a converted `datum`. [Casts through
+Data](/casts/#where-upcasts-happen) lists every place an upcast happens.
 
 ### Downcasting
 
