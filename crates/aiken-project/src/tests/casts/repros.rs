@@ -760,3 +760,44 @@ validator untyped {
         );
     }
 }
+
+#[test]
+#[ignore = "reproduction: run with `cargo test -- --ignored`"]
+fn a_list_record_validator_parameter_is_converted_from_its_data() {
+    let source = r#"
+@list
+pub type P {
+  a: Int,
+  b: Int,
+}
+
+validator params(p: P) {
+  mint(_redeemer: Data, _policy_id: ByteArray, _self: Data) {
+    p.a + p.b == 3
+  }
+
+  else(_) {
+    fail
+  }
+}
+"#;
+
+    let p = |a: i64, b: i64| {
+        data(Data::list(vec![
+            Data::integer(a.into()),
+            Data::integer(b.into()),
+        ]))
+    };
+
+    // `Minting(#"")`
+    let minting = script_context(
+        Data::integer(0.into()),
+        Data::constr(0, vec![Data::bytestring(vec![])]),
+    );
+
+    for project in &compile_ok(&[("validators/params.ak", source)]) {
+        let params = project.validator("params", "params");
+        assert_ne!(params.run(&[p(1, 2), minting.clone()]), Outcome::Failed);
+        assert_eq!(params.run(&[p(1, 1), minting.clone()]), Outcome::Failed);
+    }
+}
