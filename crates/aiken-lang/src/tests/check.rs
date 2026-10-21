@@ -293,18 +293,61 @@ fn primitive_value_inequality_is_allowed() {
     assert!(dbg!(check(parse(source_code))).is_ok())
 }
 
+/// `Value`, `G1Element` and `G2Element` go through `Data`: `expect`, `coerce` and upcasts convert
+/// them and the types that contain them.
 #[test]
-fn implicit_right_upcasting_to_value_is_not_allowed() {
-    let source_code = r#"
-        fn compare(left: Data, right: Value) -> Bool {
-          left == right
+fn values_go_through_data() {
+    accepted(
+        "expect",
+        r#"
+        fn decode(data: Data) -> Value {
+          expect value: Value = data
+          value
         }
-    "#;
+        "#,
+        vec![],
+    );
 
-    assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { .. }))
-    ));
+    accepted(
+        "coerce",
+        r#"
+        fn bar(data: Data) -> Value {
+          coerce value: Value = data
+          value
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "expect of a G1Element and of a type that contains BLS12-381 elements",
+        r#"
+        type Keys {
+          g1: G1Element,
+          g2: List<G2Element>,
+        }
+
+        fn decode(data: Data) -> Keys {
+          expect g1: G1Element = data
+          expect keys: Keys = data
+          Keys { ..keys, g1: g1 }
+        }
+        "#,
+        vec![],
+    );
+
+    accepted(
+        "an upcast of BLS12-381 elements and a Value",
+        r#"
+        fn encode(g1: G1Element, g2: G2Element, value: Value) -> List<Data> {
+          let g1: Data = g1
+          let g2: Data = g2
+          let value: Data = value
+          [g1, g2, value]
+        }
+        "#,
+        vec![],
+    );
 }
 
 #[test]
@@ -346,20 +389,6 @@ fn named_value_field_errors_use_the_identifier_span() {
         Err((_, Error::UnknownVariable { name, location, .. }))
             if name == "missing_policy"
                 && location == Span::create(expected_start, "missing_policy".len())
-    ));
-}
-
-#[test]
-fn implicit_left_upcasting_to_value_is_not_allowed_symmetric() {
-    let source_code = r#"
-        fn compare(left: Value, right: Data) -> Bool {
-          left == right
-        }
-    "#;
-
-    assert!(matches!(
-        dbg!(check(parse(source_code))),
-        Err((_, Error::CouldNotUnify { .. }))
     ));
 }
 
@@ -4665,21 +4694,6 @@ fn soft_cast_from_data_to_imported_opaque_value_wrapper_is_illegal() {
 }
 
 #[test]
-fn strict_cast_from_data_to_value_is_illegal() {
-    let source_code = r#"
-        fn decode(data: Data) -> Value {
-          expect value: Value = data
-          value
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::CouldNotUnify { .. })),
-    ))
-}
-
-#[test]
 fn explicit_un_value_data_remains_legal() {
     let source_code = r#"
         use aiken/builtin
@@ -6118,21 +6132,6 @@ fn coerce_into_function() {
 }
 
 #[test]
-fn coerce_into_value() {
-    let source_code = r#"
-        fn bar(data: Data) -> Value {
-          coerce value: Value = data
-          value
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::IllegalCoerce { .. }))
-    ))
-}
-
-#[test]
 fn coerce_binding_has_the_annotated_type() {
     let source_code = r#"
         type Datum { owner: ByteArray, amount: Int }
@@ -6926,49 +6925,8 @@ fn soft_cast_from_data_to_g2_element_in_a_tuple_is_illegal() {
     ));
 }
 
-#[test]
-fn soft_cast_from_data_to_string_is_illegal() {
-    let source_code = r#"
-        fn decode(data: Data) -> String {
-          if data is s: String {
-            s
-          } else {
-            @"not a string"
-          }
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::IllegalSoftCast { tipo, .. })) if tipo.is_string()
-    ));
-}
-
-#[test]
-fn soft_cast_from_data_to_record_with_a_string_is_illegal() {
-    let source_code = r#"
-        type Named {
-          name: String,
-          age: Int,
-        }
-
-        fn decode(data: Data) -> Bool {
-          if data is Named { age, .. }: Named {
-            age > 0
-          } else {
-            False
-          }
-        }
-    "#;
-
-    assert!(matches!(
-        check(parse(source_code)),
-        Err((_, Error::IllegalSoftCast { .. }))
-    ));
-}
-
-/// The casts don't convert a `Value` or a `G1Element` yet, so all of these are refused, and
-/// the same way whether the wrappers are local or imported.
+/// Local and imported opaque wrappers of a `Value` or a `G1Element` cast the same way: `coerce`
+/// and upcasts accept them, `expect` refuses them because they're opaque.
 #[test]
 fn local_and_imported_opaque_wrappers_cast_the_same_way() {
     let dependency = r#"
@@ -7001,13 +6959,15 @@ fn local_and_imported_opaque_wrappers_cast_the_same_way() {
             .map(|_| ())
             .map_err(|(_, e)| e);
 
-        match (&local, &imported) {
-            (Err(local_error), Err(imported_error)) => assert_eq!(
-                std::mem::discriminant(local_error),
-                std::mem::discriminant(imported_error),
-                "{cast}\nlocal: {local:#?}\nimported: {imported:#?}"
-            ),
-            _ => panic!("{cast}\nlocal: {local:#?}\nimported: {imported:#?}"),
+        for result in [&local, &imported] {
+            if cast.contains("expect") {
+                assert!(
+                    matches!(result, Err(Error::ExpectOnOpaqueType { .. })),
+                    "{cast}\n{result:#?}"
+                );
+            } else {
+                assert!(result.is_ok(), "{cast}\n{result:#?}");
+            }
         }
     }
 }

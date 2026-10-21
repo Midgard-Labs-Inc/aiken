@@ -1392,6 +1392,28 @@ mod baseline_agrees_with_the_model {
         BaselineModel,
         Forms::ALL
     );
+
+    // `Value`, `G1Element` and `G2Element` go through `Data`.
+    property!(
+        values,
+        Features {
+            values: true,
+            ..NONE
+        },
+        6,
+        BaselineModel,
+        Forms::ALL
+    );
+    property!(
+        points,
+        Features {
+            points: true,
+            ..NONE
+        },
+        6,
+        BaselineModel,
+        Forms::ALL
+    );
 }
 
 mod optimized_agrees_with_the_model {
