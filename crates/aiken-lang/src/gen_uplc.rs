@@ -271,7 +271,6 @@ fn remove_from_sorted(
 
 #[derive(Clone)]
 pub struct CodeGenerator<'a> {
-    #[allow(dead_code)]
     plutus_version: PlutusVersion,
     /// immutable index maps
     functions: IndexMap<&'a FunctionAccessKey, &'a TypedFunction>,
