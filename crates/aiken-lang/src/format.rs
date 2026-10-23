@@ -1046,7 +1046,7 @@ impl<'comments> Formatter<'comments> {
         spans: Option<&ValueLiteralSpans>,
         insertions: Vec<ValueInsertion<'a>>,
     ) -> Document<'a> {
-        debug_assert!(
+        assert!(
             spans.is_none_or(|spans| entries.len() == spans.entries.len()),
             "Value literal payload and source spans must remain aligned",
         );
