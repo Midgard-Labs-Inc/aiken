@@ -64,6 +64,7 @@ blst.workspace = true
 indoc.workspace = true
 insta = { workspace = true, features = ["yaml", "json", "redactions"] }
 proptest.workspace = true
+uplc = { workspace = true, features = ["proptest"] }
 pretty_assertions.workspace = true
 
 [build-dependencies]

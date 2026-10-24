@@ -2,16 +2,16 @@ use crate::ast::well_known;
 pub(crate) use crate::{
     ast::{
         self, Annotation, ArgBy, ArgName, AssignmentKind, AssignmentPattern, BinOp, Bls12_381Point,
-        ByteArrayFormatPreference, CallArg, Curve, DataType, DataTypeKey, DefinitionLocation,
-        Located, LogicalOpChainKind, ParsedCallArg, RecordConstructorArg, RecordUpdateSpread, Span,
-        TraceKind, TypedArg, TypedAssignmentKind, TypedClause, TypedDataType, TypedIfBranch,
-        TypedPattern, TypedRecordUpdateArg, UnOp, UntypedArg, UntypedAssignmentKind, UntypedClause,
-        UntypedIfBranch, UntypedRecordUpdateArg,
+        ByteArrayFormatPreference, CallArg, Curve, DefinitionLocation, Located, LogicalOpChainKind,
+        ParsedCallArg, RecordUpdateSpread, Span, TraceKind, TypedArg, TypedAssignmentKind,
+        TypedClause, TypedIfBranch, TypedPattern, TypedRecordUpdateArg, UnOp, UntypedArg,
+        UntypedAssignmentKind, UntypedClause, UntypedIfBranch, UntypedRecordUpdateArg,
     },
     parser::token::Base,
     tipo::{
-        ModuleValueConstructor, Type, TypeVar, ValueConstructor, ValueConstructorVariant,
-        check_replaceable_opaque_type, convert_opaque_type, lookup_data_type_by_tipo,
+        DataLayout, ModuleValueConstructor, Type, TypeInfo, TypeVar, ValueConstructor,
+        ValueConstructorVariant, convert_opaque_type,
+        layout::{ConstructorLayout, lookup_layout},
     },
 };
 use indexmap::IndexMap;
@@ -197,6 +197,13 @@ pub enum TypedExpr {
         tipo: Rc<Type>,
         op: UnOp,
     },
+
+    /// A value converted to `Data`, where `Data` is expected: a call argument, a `let` or
+    /// `expect` annotation, an operand of `==` or `!=`, a trace argument or a record update.
+    Upcast {
+        location: Span,
+        value: Box<Self>,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -307,6 +314,7 @@ impl TypedExpr {
     pub fn tipo(&self) -> Rc<Type> {
         match self {
             Self::Var { constructor, .. } => constructor.tipo.clone(),
+            Self::Upcast { .. } => Type::data(),
             Self::Trace { then, .. } => then.tipo(),
             Self::Fn { tipo, .. }
             | Self::UInt { tipo, .. }
@@ -341,6 +349,7 @@ impl TypedExpr {
                 constructor.tipo = new_type;
             }
             Self::Trace { then, .. } => then.replace_type(new_type),
+            Self::Upcast { .. } => unreachable!("an upcast is always Data"),
             Self::Fn { tipo, .. }
             | Self::UInt { tipo, .. }
             | Self::ErrorTerm { tipo, .. }
@@ -367,6 +376,220 @@ impl TypedExpr {
                     .expect("trying to replace type of an empty sequence or pipeline")
                     .replace_type(new_type);
             }
+        }
+    }
+
+    /// Replaces every type the expression holds with `f` of it. The types themselves are
+    /// never mutated, so a type variable shared with other definitions is left as it is.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Self::UInt { tipo, .. }
+            | Self::String { tipo, .. }
+            | Self::Value { tipo, .. }
+            | Self::ByteArray { tipo, .. }
+            | Self::CurvePoint { tipo, .. }
+            | Self::ErrorTerm { tipo, .. } => *tipo = f(tipo),
+            Self::Sequence { expressions, .. } | Self::Pipeline { expressions, .. } => {
+                for expression in expressions {
+                    expression.map_types(f);
+                }
+            }
+            Self::Var { constructor, .. } => constructor.tipo = f(&constructor.tipo),
+            Self::Fn {
+                tipo, args, body, ..
+            } => {
+                *tipo = f(tipo);
+                for arg in args {
+                    arg.tipo = f(&arg.tipo);
+                }
+                body.map_types(f);
+            }
+            Self::List {
+                tipo,
+                elements,
+                tail,
+                ..
+            } => {
+                *tipo = f(tipo);
+                for element in elements {
+                    element.map_types(f);
+                }
+                if let Some(tail) = tail {
+                    tail.map_types(f);
+                }
+            }
+            Self::Call {
+                tipo, fun, args, ..
+            } => {
+                *tipo = f(tipo);
+                fun.map_types(f);
+                for arg in args {
+                    arg.value.map_types(f);
+                }
+            }
+            Self::BinOp {
+                tipo, left, right, ..
+            } => {
+                *tipo = f(tipo);
+                left.map_types(f);
+                right.map_types(f);
+            }
+            Self::Assignment {
+                tipo,
+                value,
+                pattern,
+                ..
+            } => {
+                *tipo = f(tipo);
+                value.map_types(f);
+                pattern.map_types(f);
+            }
+            Self::Trace {
+                tipo, then, text, ..
+            } => {
+                *tipo = f(tipo);
+                then.map_types(f);
+                text.map_types(f);
+            }
+            Self::When {
+                tipo,
+                subject,
+                clauses,
+                ..
+            } => {
+                *tipo = f(tipo);
+                subject.map_types(f);
+                for clause in clauses {
+                    clause.pattern.map_types(f);
+                    clause.then.map_types(f);
+                }
+            }
+            Self::If {
+                branches,
+                final_else,
+                tipo,
+                ..
+            } => {
+                *tipo = f(tipo);
+                for branch in branches.iter_mut() {
+                    branch.condition.map_types(f);
+                    branch.body.map_types(f);
+                    if let Some((pattern, tipo)) = &mut branch.is {
+                        pattern.map_types(f);
+                        *tipo = f(tipo);
+                    }
+                }
+                final_else.map_types(f);
+            }
+            Self::RecordAccess { tipo, record, .. } => {
+                *tipo = f(tipo);
+                record.map_types(f);
+            }
+            Self::ModuleSelect {
+                tipo, constructor, ..
+            } => {
+                *tipo = f(tipo);
+                if let ModuleValueConstructor::Record { tipo, .. } = constructor {
+                    *tipo = f(tipo);
+                }
+            }
+            Self::Tuple { tipo, elems, .. } => {
+                *tipo = f(tipo);
+                for elem in elems {
+                    elem.map_types(f);
+                }
+            }
+            Self::Pair { tipo, fst, snd, .. } => {
+                *tipo = f(tipo);
+                fst.map_types(f);
+                snd.map_types(f);
+            }
+            Self::TupleIndex { tipo, tuple, .. } => {
+                *tipo = f(tipo);
+                tuple.map_types(f);
+            }
+            Self::RecordUpdate {
+                tipo, spread, args, ..
+            } => {
+                *tipo = f(tipo);
+                spread.map_types(f);
+                for arg in args {
+                    arg.value.map_types(f);
+                }
+            }
+            Self::UnOp { tipo, value, .. } => {
+                *tipo = f(tipo);
+                value.map_types(f);
+            }
+            Self::Upcast { value, .. } => value.map_types(f),
+        }
+    }
+
+    /// Calls `f` on this expression and on every expression inside it, parents first.
+    pub fn walk<'a>(&'a self, f: &mut impl FnMut(&'a TypedExpr)) {
+        f(self);
+
+        match self {
+            Self::UInt { .. }
+            | Self::String { .. }
+            | Self::Value { .. }
+            | Self::ByteArray { .. }
+            | Self::CurvePoint { .. }
+            | Self::Var { .. }
+            | Self::ModuleSelect { .. }
+            | Self::ErrorTerm { .. } => {}
+            Self::Sequence { expressions, .. } | Self::Pipeline { expressions, .. } => {
+                expressions.iter().for_each(|expression| expression.walk(f))
+            }
+            Self::Fn { body, .. } => body.walk(f),
+            Self::List { elements, tail, .. } => {
+                elements.iter().for_each(|element| element.walk(f));
+                if let Some(tail) = tail {
+                    tail.walk(f);
+                }
+            }
+            Self::Call { fun, args, .. } => {
+                fun.walk(f);
+                args.iter().for_each(|arg| arg.value.walk(f));
+            }
+            Self::BinOp { left, right, .. } => {
+                left.walk(f);
+                right.walk(f);
+            }
+            Self::Assignment { value, .. } => value.walk(f),
+            Self::Trace { then, text, .. } => {
+                text.walk(f);
+                then.walk(f);
+            }
+            Self::When {
+                subject, clauses, ..
+            } => {
+                subject.walk(f);
+                clauses.iter().for_each(|clause| clause.then.walk(f));
+            }
+            Self::If {
+                branches,
+                final_else,
+                ..
+            } => {
+                for branch in branches {
+                    branch.condition.walk(f);
+                    branch.body.walk(f);
+                }
+                final_else.walk(f);
+            }
+            Self::RecordAccess { record, .. } => record.walk(f),
+            Self::Tuple { elems, .. } => elems.iter().for_each(|elem| elem.walk(f)),
+            Self::Pair { fst, snd, .. } => {
+                fst.walk(f);
+                snd.walk(f);
+            }
+            Self::TupleIndex { tuple, .. } => tuple.walk(f),
+            Self::RecordUpdate { spread, args, .. } => {
+                spread.walk(f);
+                args.iter().for_each(|arg| arg.value.walk(f));
+            }
+            Self::UnOp { value, .. } | Self::Upcast { value, .. } => value.walk(f),
         }
     }
 
@@ -431,6 +654,8 @@ impl TypedExpr {
 
             // TODO: test
             TypedExpr::Var { constructor, .. } => Some(constructor.definition_location()),
+
+            TypedExpr::Upcast { value, .. } => value.definition_location(),
         }
     }
 
@@ -460,6 +685,8 @@ impl TypedExpr {
             | Self::CurvePoint { location, .. } => *location,
 
             Self::If { branches, .. } => branches.first().body.type_defining_location(),
+
+            Self::Upcast { value, .. } => value.type_defining_location(),
 
             Self::Sequence {
                 expressions,
@@ -497,6 +724,7 @@ impl TypedExpr {
             | Self::ModuleSelect { location, .. }
             | Self::RecordAccess { location, .. }
             | Self::RecordUpdate { location, .. }
+            | Self::Upcast { location, .. }
             | Self::CurvePoint { location, .. } => *location,
         }
     }
@@ -517,6 +745,8 @@ impl TypedExpr {
             | TypedExpr::Value { .. }
             | TypedExpr::ModuleSelect { .. }
             | TypedExpr::CurvePoint { .. } => Some(Located::Expression(self)),
+
+            TypedExpr::Upcast { value, .. } => value.find_node(byte_index),
 
             TypedExpr::Trace { text, then, .. } => text
                 .find_node(byte_index)
@@ -865,11 +1095,11 @@ impl UntypedExpr {
     // The function performs some sanity check to ensure that the type does indeed somewhat
     // correspond to the data being given.
     pub fn reify_constant(
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
         cst: uplc::ast::Constant,
         tipo: Rc<Type>,
     ) -> Result<Self, String> {
-        UntypedExpr::do_reify_constant(data_types, cst, tipo)
+        UntypedExpr::do_reify_constant(module_types, cst, tipo)
     }
 
     pub fn is_discard(&self) -> bool {
@@ -883,27 +1113,27 @@ impl UntypedExpr {
     // The function performs some sanity check to ensure that the type does indeed somewhat
     // correspond to the data being given.
     pub fn reify_data(
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
         data: PlutusData,
         tipo: Rc<Type>,
     ) -> Result<Self, String> {
-        UntypedExpr::do_reify_data(data_types, data, tipo)
+        UntypedExpr::do_reify_data(module_types, data, tipo)
     }
 
     fn reify_with<T, F>(
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
         t: T,
         tipo: Rc<Type>,
         with: F,
     ) -> Result<Self, String>
     where
         T: Debug,
-        F: Fn(&IndexMap<&DataTypeKey, &TypedDataType>, T, Rc<Type>) -> Result<Self, String>,
+        F: Fn(&IndexMap<&str, &TypeInfo>, T, Rc<Type>) -> Result<Self, String>,
     {
         if let Type::Var { tipo: var_tipo, .. } = tipo.deref() {
             match &*var_tipo.borrow() {
                 TypeVar::Link { tipo } => {
-                    return Self::reify_with(data_types, t, tipo.clone(), with);
+                    return Self::reify_with(module_types, t, tipo.clone(), with);
                 }
                 _ => unreachable!("unbound type during reification {tipo:?} -> {t:?}"),
             }
@@ -917,13 +1147,14 @@ impl UntypedExpr {
         // wrapper. That means the underlying PlutusData has no residue of that
         // wrapper. So we have to manually reconstruct it before crawling further
         // down the type tree.
-        if check_replaceable_opaque_type(&tipo, data_types) {
-            let DataType { name, .. } = lookup_data_type_by_tipo(data_types, &tipo)
-                .expect("Type just disappeared from known types? {tipo:?}");
+        if let Some(layout) = lookup_layout(module_types, &tipo)
+            && layout.is_erased()
+        {
+            let name = layout.constructors[0].name.clone();
 
-            let inner_type = convert_opaque_type(&tipo, data_types, false);
+            let inner_type = convert_opaque_type(&tipo, module_types, false);
 
-            let value = Self::reify_with(data_types, t, inner_type, with)?;
+            let value = Self::reify_with(module_types, t, inner_type, with)?;
 
             return Ok(UntypedExpr::Call {
                 location: Span::empty(),
@@ -939,164 +1170,184 @@ impl UntypedExpr {
             });
         }
 
-        with(data_types, t, tipo)
+        with(module_types, t, tipo)
     }
 
     fn do_reify_constant(
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
         cst: uplc::ast::Constant,
         tipo: Rc<Type>,
     ) -> Result<Self, String> {
-        Self::reify_with(data_types, cst, tipo, |data_types, cst, tipo| match cst {
-            uplc::ast::Constant::Data(data) => {
-                UntypedExpr::do_reify_data(data_types, data.into(), tipo)
-            }
+        Self::reify_with(
+            module_types,
+            cst,
+            tipo,
+            |module_types, cst, tipo| match cst {
+                uplc::ast::Constant::Data(data) => {
+                    UntypedExpr::do_reify_data(module_types, data.into(), tipo)
+                }
 
-            uplc::ast::Constant::Integer(i) => {
-                UntypedExpr::do_reify_data(data_types, Data::integer(i).into(), tipo)
-            }
+                uplc::ast::Constant::Integer(i) => {
+                    UntypedExpr::do_reify_data(module_types, Data::integer(i).into(), tipo)
+                }
 
-            uplc::ast::Constant::ByteString(bytes) => {
-                UntypedExpr::do_reify_data(data_types, Data::bytestring(bytes).into(), tipo)
-            }
+                uplc::ast::Constant::ByteString(bytes) => {
+                    UntypedExpr::do_reify_data(module_types, Data::bytestring(bytes).into(), tipo)
+                }
 
-            uplc::ast::Constant::ProtoList(_, args) => match tipo.deref() {
-                Type::App {
-                    module,
-                    name,
-                    args: type_args,
-                    ..
-                } if module.is_empty() && name.as_str() == "List" => {
-                    if let [inner] = &type_args[..] {
-                        Ok(UntypedExpr::List {
-                            location: Span::empty(),
-                            elements: args
-                                .into_iter()
-                                .map(|arg| {
-                                    UntypedExpr::do_reify_constant(
-                                        data_types,
-                                        Rc::unwrap_or_clone(arg),
-                                        inner.clone(),
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?,
-                            tail: None,
-                        })
-                    } else {
-                        Err(
+                uplc::ast::Constant::ProtoList(_, args) => match tipo.deref() {
+                    Type::App {
+                        module,
+                        name,
+                        args: type_args,
+                        ..
+                    } if module.is_empty() && name.as_str() == "List" => {
+                        if let [inner] = &type_args[..] {
+                            Ok(UntypedExpr::List {
+                                location: Span::empty(),
+                                elements: args
+                                    .into_iter()
+                                    .map(|arg| {
+                                        UntypedExpr::do_reify_constant(
+                                            module_types,
+                                            Rc::unwrap_or_clone(arg),
+                                            inner.clone(),
+                                        )
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?,
+                                tail: None,
+                            })
+                        } else {
+                            Err(
                             "invalid List type annotation: the list has multiple type-parameters."
                                 .to_string(),
                         )
+                        }
                     }
-                }
-                Type::Tuple { elems, .. } => Ok(UntypedExpr::Tuple {
-                    location: Span::empty(),
-                    elems: args
-                        .into_iter()
-                        .zip(elems)
-                        .map(|(arg, arg_type)| {
-                            UntypedExpr::do_reify_constant(
-                                data_types,
-                                Rc::unwrap_or_clone(arg),
-                                arg_type.clone(),
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                }),
-                _ => Err(format!(
-                    "invalid type annotation. expected List but got: {tipo:?}"
-                )),
-            },
-
-            uplc::ast::Constant::ProtoPair(_, _, left, right) => match tipo.deref() {
-                Type::Pair { fst, snd, .. } => {
-                    let elems = [left.as_ref(), right.as_ref()]
-                        .into_iter()
-                        .zip([fst, snd])
-                        .map(|(arg, arg_type)| {
-                            UntypedExpr::do_reify_constant(
-                                data_types,
-                                arg.to_owned(),
-                                arg_type.clone(),
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    Ok(UntypedExpr::Pair {
+                    Type::Tuple { elems, .. } => Ok(UntypedExpr::Tuple {
                         location: Span::empty(),
-                        fst: elems.first().unwrap().to_owned().into(),
-                        snd: elems.last().unwrap().to_owned().into(),
-                    })
-                }
-                _ => Err(format!(
-                    "invalid type annotation. expected Pair but got: {tipo:?}"
-                )),
-            },
-
-            uplc::ast::Constant::Unit => Ok(UntypedExpr::Var {
-                location: Span::empty(),
-                name: "Void".to_string(),
-            }),
-
-            uplc::ast::Constant::Bool(is_true) => Ok(UntypedExpr::Var {
-                location: Span::empty(),
-                name: if is_true { "True" } else { "False" }.to_string(),
-            }),
-
-            uplc::ast::Constant::String(value) => Ok(UntypedExpr::String {
-                location: Span::empty(),
-                value,
-            }),
-
-            uplc::ast::Constant::Bls12_381G1Element(pt) => Ok(UntypedExpr::CurvePoint {
-                location: Span::empty(),
-                point: Curve::Bls12_381(Bls12_381Point::G1(*pt)).into(),
-                preferred_format: ByteArrayFormatPreference::HexadecimalString,
-            }),
-
-            uplc::ast::Constant::Bls12_381G2Element(pt) => Ok(UntypedExpr::CurvePoint {
-                location: Span::empty(),
-                point: Curve::Bls12_381(Bls12_381Point::G2(*pt)).into(),
-                preferred_format: ByteArrayFormatPreference::HexadecimalString,
-            }),
-
-            uplc::ast::Constant::Bls12_381MlResult(ml) => {
-                let mut bytes = Vec::new();
-
-                bytes.extend((*ml).to_bendian());
-
-                // NOTE: We don't actually have a syntax for representing MillerLoop results, so we
-                // just fake it as a constructor with a bytearray. Note also that the bytearray is
-                // *large*.
-                Ok(UntypedExpr::Call {
-                    location: Span::empty(),
-                    arguments: vec![CallArg {
-                        label: None,
-                        location: Span::empty(),
-                        value: UntypedExpr::ByteArray {
-                            location: Span::empty(),
-                            bytes: bytes.into_iter().map(|b| (b, Span::empty())).collect(),
-                            preferred_format: ByteArrayFormatPreference::HexadecimalString,
-                        },
-                    }],
-                    fun: Box::new(UntypedExpr::Var {
-                        name: "MillerLoopResult".to_string(),
-                        location: Span::empty(),
+                        elems: args
+                            .into_iter()
+                            .zip(elems)
+                            .map(|(arg, arg_type)| {
+                                UntypedExpr::do_reify_constant(
+                                    module_types,
+                                    Rc::unwrap_or_clone(arg),
+                                    arg_type.clone(),
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
                     }),
-                })
-            }
+                    Type::App { .. }
+                        if lookup_layout(module_types, &tipo).is_some_and(DataLayout::is_list) =>
+                    {
+                        let fields = args
+                            .iter()
+                            .map(|arg| match arg.as_ref() {
+                                uplc::ast::Constant::Data(data) => Ok(data.clone()),
+                                other => {
+                                    Err(format!("unexpected field {other:?} in a @list record"))
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
 
-            uplc::ast::Constant::Value(value) => {
-                let value = Arc::new(value.into_entries());
-                let spans = ValueLiteralSpans::empty(value.as_ref());
+                        UntypedExpr::do_reify_data(module_types, (&Data::list(fields)).into(), tipo)
+                    }
+                    _ => Err(format!(
+                        "invalid type annotation. expected List but got: {tipo:?}"
+                    )),
+                },
 
-                Ok(UntypedExpr::Value {
+                uplc::ast::Constant::ProtoPair(_, _, left, right) => match tipo.deref() {
+                    Type::Pair { fst, snd, .. } => {
+                        let elems = [left.as_ref(), right.as_ref()]
+                            .into_iter()
+                            .zip([fst, snd])
+                            .map(|(arg, arg_type)| {
+                                UntypedExpr::do_reify_constant(
+                                    module_types,
+                                    arg.to_owned(),
+                                    arg_type.clone(),
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        Ok(UntypedExpr::Pair {
+                            location: Span::empty(),
+                            fst: elems.first().unwrap().to_owned().into(),
+                            snd: elems.last().unwrap().to_owned().into(),
+                        })
+                    }
+                    _ => Err(format!(
+                        "invalid type annotation. expected Pair but got: {tipo:?}"
+                    )),
+                },
+
+                uplc::ast::Constant::Unit => Ok(UntypedExpr::Var {
+                    location: Span::empty(),
+                    name: "Void".to_string(),
+                }),
+
+                uplc::ast::Constant::Bool(is_true) => Ok(UntypedExpr::Var {
+                    location: Span::empty(),
+                    name: if is_true { "True" } else { "False" }.to_string(),
+                }),
+
+                uplc::ast::Constant::String(value) => Ok(UntypedExpr::String {
                     location: Span::empty(),
                     value,
-                    spans,
-                })
-            }
-        })
+                }),
+
+                uplc::ast::Constant::Bls12_381G1Element(pt) => Ok(UntypedExpr::CurvePoint {
+                    location: Span::empty(),
+                    point: Curve::Bls12_381(Bls12_381Point::G1(*pt)).into(),
+                    preferred_format: ByteArrayFormatPreference::HexadecimalString,
+                }),
+
+                uplc::ast::Constant::Bls12_381G2Element(pt) => Ok(UntypedExpr::CurvePoint {
+                    location: Span::empty(),
+                    point: Curve::Bls12_381(Bls12_381Point::G2(*pt)).into(),
+                    preferred_format: ByteArrayFormatPreference::HexadecimalString,
+                }),
+
+                uplc::ast::Constant::Bls12_381MlResult(ml) => {
+                    let mut bytes = Vec::new();
+
+                    bytes.extend((*ml).to_bendian());
+
+                    // NOTE: We don't actually have a syntax for representing MillerLoop results, so we
+                    // just fake it as a constructor with a bytearray. Note also that the bytearray is
+                    // *large*.
+                    Ok(UntypedExpr::Call {
+                        location: Span::empty(),
+                        arguments: vec![CallArg {
+                            label: None,
+                            location: Span::empty(),
+                            value: UntypedExpr::ByteArray {
+                                location: Span::empty(),
+                                bytes: bytes.into_iter().map(|b| (b, Span::empty())).collect(),
+                                preferred_format: ByteArrayFormatPreference::HexadecimalString,
+                            },
+                        }],
+                        fun: Box::new(UntypedExpr::Var {
+                            name: "MillerLoopResult".to_string(),
+                            location: Span::empty(),
+                        }),
+                    })
+                }
+
+                uplc::ast::Constant::Value(value) => {
+                    let value = Arc::new(value.into_entries());
+                    let spans = ValueLiteralSpans::empty(value.as_ref());
+
+                    Ok(UntypedExpr::Value {
+                        location: Span::empty(),
+                        value,
+                        spans,
+                    })
+                }
+            },
+        )
     }
 
     fn reify_blind(data: PlutusData) -> Self {
@@ -1193,7 +1444,7 @@ impl UntypedExpr {
     }
 
     fn do_reify_data(
-        data_types: &IndexMap<&DataTypeKey, &TypedDataType>,
+        module_types: &IndexMap<&str, &TypeInfo>,
         data: PlutusData,
         tipo: Rc<Type>,
     ) -> Result<Self, String> {
@@ -1207,10 +1458,10 @@ impl UntypedExpr {
         }
 
         Self::reify_with(
-            data_types,
+            module_types,
             data,
             tipo,
-            |data_types, data, tipo| match data {
+            |module_types, data, tipo| match data {
                 PlutusData::BigInt(ref i) => Ok(UntypedExpr::UInt {
                     location: Span::empty(),
                     base: Base::Decimal {
@@ -1249,7 +1500,7 @@ impl UntypedExpr {
                                     .to_vec()
                                     .into_iter()
                                     .map(|arg| {
-                                        UntypedExpr::do_reify_data(data_types, arg, inner.clone())
+                                        UntypedExpr::do_reify_data(module_types, arg, inner.clone())
                                     })
                                     .collect::<Result<Vec<_>, _>>()?,
                                 tail: None,
@@ -1274,7 +1525,7 @@ impl UntypedExpr {
                                 .into_iter()
                                 .map(|arg| {
                                     UntypedExpr::do_reify_data(
-                                        data_types,
+                                        module_types,
                                         arg,
                                         Type::pair(
                                             Type::byte_array(),
@@ -1293,7 +1544,7 @@ impl UntypedExpr {
                             .into_iter()
                             .zip(elems)
                             .map(|(arg, arg_type)| {
-                                UntypedExpr::do_reify_data(data_types, arg, arg_type.clone())
+                                UntypedExpr::do_reify_data(module_types, arg, arg_type.clone())
                             })
                             .collect::<Result<Vec<_>, _>>()?,
                     }),
@@ -1303,7 +1554,7 @@ impl UntypedExpr {
                             .into_iter()
                             .zip([fst, snd])
                             .map(|(arg, arg_type)| {
-                                UntypedExpr::do_reify_data(data_types, arg, arg_type.clone())
+                                UntypedExpr::do_reify_data(module_types, arg, arg_type.clone())
                             })
                             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1313,6 +1564,20 @@ impl UntypedExpr {
                             snd: elems.remove(0).into(),
                         })
                     }
+                    Type::App {
+                        args: type_args, ..
+                    } => match lookup_layout(module_types, &tipo) {
+                        Some(layout) if layout.is_list() => Self::reify_constructor(
+                            module_types,
+                            layout,
+                            &layout.constructors[0],
+                            type_args,
+                            args.to_vec(),
+                        ),
+                        _ => Err(format!(
+                            "invalid type annotation. expected List but got: {tipo:?}"
+                        )),
+                    },
                     _ => Err(format!(
                         "invalid type annotation. expected List but got: {tipo:?}"
                     )),
@@ -1326,73 +1591,16 @@ impl UntypedExpr {
                     let ix = convert_tag_to_constr(tag).or(any_constructor).unwrap() as usize;
 
                     if let Type::App { args, .. } = tipo.deref()
-                        && let Some(DataType {
-                            constructors,
-                            typed_parameters,
-                            ..
-                        }) = lookup_data_type_by_tipo(data_types, &tipo)
+                        && let Some(layout) = lookup_layout(module_types, &tipo)
+                        && let Some(constructor) = layout.constructor_at(ix)
                     {
-                        if constructors.is_empty() {
-                            return Ok(UntypedExpr::Var {
-                                location: Span::empty(),
-                                name: "Data".to_string(),
-                            });
-                        }
-
-                        let constructor = &constructors[ix];
-
-                        let generics = typed_parameters.iter().zip(args).fold(
-                            IndexMap::new(),
-                            |mut generics, (generic, arg)| {
-                                if let Some(ix) = generic.get_generic_id() {
-                                    generics.insert(ix, arg.clone());
-                                }
-
-                                generics
-                            },
+                        return Self::reify_constructor(
+                            module_types,
+                            layout,
+                            constructor,
+                            args,
+                            fields.to_vec(),
                         );
-
-                        return if fields.is_empty() {
-                            Ok(UntypedExpr::Var {
-                                location: Span::empty(),
-                                name: constructor.name.to_string(),
-                            })
-                        } else {
-                            let arguments = fields
-                                .to_vec()
-                                .into_iter()
-                                .zip(constructor.arguments.iter())
-                                .map(|(field, RecordConstructorArg { label, tipo, .. })| {
-                                    let mut tipo = tipo;
-
-                                    // Replace any generic with their specialised definitions
-                                    // for this type instance.
-                                    if let Type::Var { tipo: var, .. } =
-                                        Type::collapse_links(tipo.clone()).as_ref()
-                                        && let TypeVar::Generic { id, .. } = &*var.borrow()
-                                    {
-                                        tipo = generics.get(id).expect("unknown generic?");
-                                    }
-
-                                    UntypedExpr::do_reify_data(data_types, field, tipo.clone()).map(
-                                        |value| CallArg {
-                                            label: label.clone(),
-                                            location: Span::empty(),
-                                            value,
-                                        },
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-
-                            Ok(UntypedExpr::Call {
-                                location: Span::empty(),
-                                arguments,
-                                fun: Box::new(UntypedExpr::Var {
-                                    name: constructor.name.to_string(),
-                                    location: Span::empty(),
-                                }),
-                            })
-                        };
                     }
 
                     Err(format!(
@@ -1403,12 +1611,14 @@ impl UntypedExpr {
                 }
 
                 PlutusData::Map(kvs) => {
-                    if let Some(value_like) = Self::reify_value_like(kvs.iter(), tipo.deref()) {
+                    if tipo.is_value()
+                        && let Some(value_like) = Self::reify_value_like(kvs.iter())
+                    {
                         return Ok(value_like);
                     }
 
                     UntypedExpr::do_reify_data(
-                        data_types,
+                        module_types,
                         Data::list(
                             kvs.iter()
                                 .map(|(k, v)| Data::list(vec![k.into(), v.into()]))
@@ -1422,49 +1632,79 @@ impl UntypedExpr {
         )
     }
 
-    fn reify_value_like<'iter>(
-        mut kvs: impl Iterator<Item = &'iter (PlutusData, PlutusData)>,
-        tipo: &Type,
-    ) -> Option<Self> {
-        if let Type::App { .. } = tipo {
-            let value_entries: ValueEntries =
-                kvs.try_fold(vec![], |mut outer_entries, (k, v)| {
-                    if let PlutusData::BoundedBytes(bytes) = k
-                        && let PlutusData::Map(assets) = v
-                    {
-                        outer_entries.push((
-                            bytes.to_vec(),
-                            assets
-                                .iter()
-                                .try_fold(vec![], |mut inner_entries, (k, v)| {
-                                    if let PlutusData::BoundedBytes(bytes) = k
-                                        && let PlutusData::BigInt(BigInt::Int(i)) = v
-                                    {
-                                        inner_entries.push((bytes.to_vec(), i128::from(*i)))
-                                    } else {
-                                        return None;
-                                    }
+    fn reify_constructor(
+        module_types: &IndexMap<&str, &TypeInfo>,
+        layout: &DataLayout,
+        constructor: &ConstructorLayout,
+        type_args: &[Rc<Type>],
+        fields: Vec<PlutusData>,
+    ) -> Result<Self, String> {
+        let name = UntypedExpr::Var {
+            location: Span::empty(),
+            name: constructor.name.to_string(),
+        };
 
-                                    Some(inner_entries)
-                                })?,
-                        ))
-                    } else {
-                        return None;
-                    }
-
-                    Some(outer_entries)
-                })?;
-
-            let spans = ValueLiteralSpans::empty(&value_entries);
-
-            return Some(UntypedExpr::Value {
-                location: Span::empty(),
-                value: Arc::new(value_entries),
-                spans,
-            });
+        if fields.is_empty() {
+            return Ok(name);
         }
 
-        None
+        let arguments = fields
+            .into_iter()
+            .zip(layout.field_types(constructor, type_args))
+            .zip(&constructor.labels)
+            .map(|((field, tipo), label)| {
+                UntypedExpr::do_reify_data(module_types, field, tipo).map(|value| CallArg {
+                    label: label.clone(),
+                    location: Span::empty(),
+                    value,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(UntypedExpr::Call {
+            location: Span::empty(),
+            arguments,
+            fun: Box::new(name),
+        })
+    }
+
+    fn reify_value_like<'iter>(
+        mut kvs: impl Iterator<Item = &'iter (PlutusData, PlutusData)>,
+    ) -> Option<Self> {
+        let value_entries: ValueEntries = kvs.try_fold(vec![], |mut outer_entries, (k, v)| {
+            if let PlutusData::BoundedBytes(bytes) = k
+                && let PlutusData::Map(assets) = v
+            {
+                outer_entries.push((
+                    bytes.to_vec(),
+                    assets
+                        .iter()
+                        .try_fold(vec![], |mut inner_entries, (k, v)| {
+                            if let PlutusData::BoundedBytes(bytes) = k
+                                && let PlutusData::BigInt(BigInt::Int(i)) = v
+                            {
+                                inner_entries.push((bytes.to_vec(), i128::from(*i)))
+                            } else {
+                                return None;
+                            }
+
+                            Some(inner_entries)
+                        })?,
+                ))
+            } else {
+                return None;
+            }
+
+            Some(outer_entries)
+        })?;
+
+        let spans = ValueLiteralSpans::empty(&value_entries);
+
+        Some(UntypedExpr::Value {
+            location: Span::empty(),
+            value: Arc::new(value_entries),
+            spans,
+        })
     }
 
     pub fn todo(reason: Option<Self>, location: Span) -> Self {

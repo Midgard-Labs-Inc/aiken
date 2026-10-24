@@ -33,8 +33,7 @@ use crate::{
 use aiken_lang::{
     IdGenerator,
     ast::{
-        self, DataTypeKey, Definition, FunctionAccessKey, ModuleKind, Tracing, TypedDataType,
-        TypedFunction, UntypedDefinition,
+        self, Definition, FunctionAccessKey, ModuleKind, Tracing, TypedFunction, UntypedDefinition,
     },
     builtins,
     expr::{TypedExpr, UntypedExpr},
@@ -42,7 +41,7 @@ use aiken_lang::{
     gen_uplc::CodeGenerator,
     line_numbers::LineNumbers,
     test_framework::{RunnableKind, Test, TestResult},
-    tipo::{Type, TypeInfo},
+    tipo::{Type, TypeInfo, requirement},
     utils,
 };
 use export::Export;
@@ -100,7 +99,6 @@ where
     event_listener: T,
     functions: IndexMap<FunctionAccessKey, TypedFunction>,
     constants: IndexMap<FunctionAccessKey, TypedExpr>,
-    data_types: IndexMap<DataTypeKey, TypedDataType>,
     module_sources: HashMap<String, (String, LineNumbers)>,
     glossary: Glossary,
 }
@@ -139,8 +137,6 @@ where
 
         let functions = builtins::prelude_functions(&id_gen, &module_types);
 
-        let data_types = builtins::prelude_data_types(&id_gen);
-
         Project {
             config,
             checked_modules: CheckedModules::default(),
@@ -154,7 +150,6 @@ where
             event_listener,
             functions,
             constants: IndexMap::new(),
-            data_types,
             module_sources: HashMap::new(),
             glossary: Glossary::default(),
         }
@@ -165,7 +160,6 @@ where
             self.config.plutus,
             utils::indexmap::as_ref_values(&self.functions),
             utils::indexmap::as_ref_values(&self.constants),
-            utils::indexmap::as_ref_values(&self.data_types),
             utils::indexmap::as_str_ref_values(&self.module_types),
             utils::indexmap::as_str_ref_values(&self.module_sources),
             tracing,
@@ -958,7 +952,6 @@ where
                     &mut self.module_types,
                     &mut self.functions,
                     &mut self.constants,
-                    &mut self.data_types,
                 )?;
 
                 if our_modules.contains(checked_module.name.as_str())
@@ -970,6 +963,15 @@ where
                 self.checked_modules
                     .insert(checked_module.name.clone(), checked_module);
             }
+        }
+
+        // Every module has type-checked: settle the types that nothing fixed.
+        for module in self.checked_modules.values_mut() {
+            requirement::default_unknown_types(&mut module.ast);
+        }
+
+        for module in self.checked_modules.values() {
+            requirement::recheck_casts(&module.ast, &self.module_types);
         }
 
         Ok(())
@@ -1178,7 +1180,7 @@ where
     ) -> Vec<TestResult<UntypedExpr, UntypedExpr>> {
         use rayon::prelude::*;
 
-        let data_types = utils::indexmap::as_ref_values(&self.data_types);
+        let module_types = utils::indexmap::as_str_ref_values(&self.module_types);
 
         let plutus_version = &self.config.plutus;
 
@@ -1217,7 +1219,7 @@ where
 
         results
             .into_iter()
-            .map(|test| test.reify(&data_types))
+            .map(|test| test.reify(&module_types))
             .collect()
     }
 

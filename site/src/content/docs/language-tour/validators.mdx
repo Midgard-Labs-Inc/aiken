@@ -101,6 +101,10 @@ enforce that the datum is present (you cannot prevent anyone from sending/lockin
 to/in your validator), it always produces an `Option<T>` where `T` is a
 user-defined type that depends on the contract.
 
+A datum that is present is checked like the redeemer: if it isn't a `T`, the
+validator fails. An `Option<Data>` datum isn't checked. [Casts through
+Data](/casts/#validators) describes what a validator checks.
+
 Nevertheless, should your contract require a datum to be present, then it is
 straightforward to enforce this constraint using [`expect`](/language-tour/control-flow/#non-exhaustive-pattern-matching)
 and halt the execution of the validator when the datum is missing.
@@ -185,7 +189,10 @@ generated code. Hence they must be provided before any address can be
 calculated for the corresponding validator.
 
 Parameters are accessible to all handlers from within the validator and can be
-any serialisable (non-opaque) data-type. For example, it is common to parameterize the validator with
+any serialisable data-type whose values can't hold a value of an opaque type:
+`Option<Thing>`, for an opaque `Thing`, is refused. A phantom argument holds no
+value, so `Hash<Blake2b_224, VerificationKey>` is accepted even though
+`Blake2b_224` is opaque. For example, it is common to parameterize the validator with
 a UTxO reference, in order to ensure the
 uniqueness of execution of a minting policy . In the mint handler, one can then check that the referenced
 UTxO is spent, which ensures the 

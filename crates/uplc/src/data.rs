@@ -629,21 +629,18 @@ fn encode_array<W: Write>(
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::{
-        ast::{NamedDeBruijn, Program, Term},
-        builtins::DefaultFunction,
-        machine::cost_model::ExBudget,
+/// Generators for property tests, here and in the crates that depend on `uplc` with its
+/// `proptest` feature.
+#[cfg(any(test, feature = "proptest"))]
+pub mod arbitrary {
+    use pallas_codec::minicbor;
+    use pallas_primitives::{
+        BigInt, Constr as PallasConstr, KeyValuePairs, MaybeIndefArray, PlutusData,
     };
-    use pallas_crypto::hash::Hasher;
-    use pallas_primitives::{Constr as PallasConstr, Fragment};
     use proptest::{collection::vec, prelude::*};
-    use std::collections::HashSet;
 
     /// Any `PlutusData`, with every encoding variant pallas keeps.
-    pub(crate) fn arb_plutus_data() -> impl Strategy<Value = PlutusData> {
+    pub fn arb_plutus_data() -> impl Strategy<Value = PlutusData> {
         let int = prop_oneof![
             any::<i64>().prop_map(minicbor::data::Int::from),
             any::<u64>().prop_map(minicbor::data::Int::from),
@@ -698,6 +695,20 @@ pub(crate) mod tests {
             ]
         })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{arbitrary::arb_plutus_data, *};
+    use crate::{
+        ast::{NamedDeBruijn, Program, Term},
+        builtins::DefaultFunction,
+        machine::cost_model::ExBudget,
+    };
+    use pallas_crypto::hash::Hasher;
+    use pallas_primitives::Fragment;
+    use proptest::prelude::*;
+    use std::collections::HashSet;
 
     /// The `serialiseData` encoding as it was computed from `PlutusData`
     /// before `Data` existed.

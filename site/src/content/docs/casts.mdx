@@ -1,0 +1,116 @@
+---
+title: Casts through Data
+description: How values convert to and from Data, which types each cast accepts, and what each cast checks.
+---
+
+A datum, a redeemer, and any value a validator stores or compares as `Data` cross the boundary between a value's own runtime form and `Data`. Aiken has four casts for that:
+
+- an **upcast** converts a value to `Data`. It happens implicitly in the positions listed below.
+- `expect x: T = d` converts `d: Data` to a `T`, and fails if `d` doesn't have the shape of a `T`.
+- `if d is x: T { … } else { … }` converts `d: Data` to a `T`, and takes `else` if `d` doesn't have the shape of a `T`.
+- `coerce x: T = v` converts `v` to a `T` through `Data`, and checks nothing.
+
+In a validator, failing is how the script rejects a transaction. A cast that can fail is a check.
+
+## Where upcasts happen
+
+An expression of type `T` is accepted where `Data` is expected, and is upcast, only in these positions:
+
+- a call argument, including a record constructor's field. `a |> f(b)` is typed as `f(a, b)`, and the capture `f(x, _)` as `fn(y) { f(x, y) }`.
+- the value of a `let`, an `expect`, an `if … is` or a module `const` annotated `Data`.
+- an operand of `==` or `!=` whose other operand is `Data`. Both sides are then compared as `Data`.
+- a trace argument.
+- a field of a record update.
+
+Everywhere else, types must match exactly:
+
+- An upcast never applies inside a type. A `List<Int>` isn't a `List<Data>`, and a `fn(Int) -> Bool` isn't a `fn(Data) -> Bool`.
+- A return annotation doesn't upcast. A function annotated `-> Data` returns a `Data` value. Write `as_data(x)` to return a converted `x`.
+- The elements of a list, tuple, or `Pair` literal aren't upcast. Write `[as_data(1), as_data(#"aa")]` to build a `List<Data>`.
+
+## Data forms
+
+Each type that can cross the boundary has one `Data` form. `expect` rejects every `Data` value that isn't the form of some value of the type.
+
+| Type | `Data` form of a value | `expect` rejects |
+| --- | --- | --- |
+| `Int` | `I n` | anything but an `I` |
+| `ByteArray` | `B bytes` | anything but a `B` |
+| `String` | `B` of the UTF-8 bytes | anything but a `B`, and bytes that aren't valid UTF-8 |
+| `Bool` | `Constr 1 []` for `True`, `Constr 0 []` for `False` | anything else |
+| `Void` | `Constr 0 []` | anything else |
+| `Data` | the value itself | nothing |
+| `List<a>` | `List` of the elements' forms | anything but a `List`, and a `List` with an element `expect` rejects as an `a` |
+| `Pairs<k, v>` | `Map` of the keys' and values' forms | anything but a `Map`, and a `Map` with a key or value rejected as a `k` or a `v`. Keys may repeat, in any order. |
+| `Pair<a, b>` | `List [a, b]` | anything but a `List` of exactly two elements, or a rejected element |
+| tuple `(a, …)` | `List` of the elements' forms | anything but a `List` of exactly the tuple's length, or a rejected element |
+| record or sum type | `Constr index [fields…]` | anything but a `Constr` with the index of one of the type's constructors, exactly that constructor's number of fields, and fields `expect` accepts |
+| record with `@list` | `List [fields…]` | anything but a `List` of exactly the record's number of fields, or a rejected field |
+| `Value` | the `Map` that `value_data` builds | anything `un_value_data` fails on |
+| `G1Element`, `G2Element` | `B` of the compressed point | anything but a `B` that uncompresses to a point of the group |
+| `MillerLoopResult`, functions | none | |
+
+A constructor's index is its `@tag`, else its type's `@tag`, else its position in the type's definition.
+
+An opaque type with one constructor, one field, and no decorator on the type or the constructor has its field's form. Every other opaque type has the form its definition gives it.
+
+`un_value_data` fails unless the `Data` is a `Map` whose keys are byte strings of at most 32 bytes in strictly ascending order, each mapped to a non-empty `Map` with the same kind of keys, each mapped to a non-zero integer from `-2^127` to `2^127 - 1`.
+
+:::note
+`value_data` itself fails on a `Value` that holds more than 40,000 tokens. So an upcast of such a `Value`, a comparison with `Data`, or storing it in a list, tuple, or record fails at runtime.
+:::
+
+## Which casts accept which types
+
+A cast checks the types it converts, including the types they contain:
+
+- **Every cast** refuses `MillerLoopResult` and functions, and any type that holds one. No data type can store one either, in a field or through a type parameter.
+- **A module constant** can't be a `MillerLoopResult`: it has no `Data` form, so such a constant is refused.
+- **`expect` and `if … is`** also refuse an opaque type where they convert from `Data`, since `Data` can't be trusted to respect the type's invariants. `coerce` converts into opaque types. The caller is responsible for the value's validity.
+- **`if … is`** also refuses `String`, `Value`, `G1Element`, and `G2Element`. Their conversion from `Data` is also their check, and it fails instead of taking `else`. Use `expect`, or test for a `ByteArray` and convert it.
+
+A type argument that no field of the type uses, such as `a` in `type Tagged<a> { Tagged(Int) }`, never appears in a value. Such a phantom argument doesn't count for any cast, for storage, or for `==`.
+
+When the value isn't `Data`, `expect` and `if … is` don't convert anything: they match a pattern against the value's own type. Annotated `Data`, they upcast the value instead.
+
+## Casts on type variables
+
+A cast on a type that mentions a type variable is allowed. The function's signature records what the cast needs, and each call checks the type it picks. For example, `fn decode(d: Data) -> a { expect x: a = d  x }` can be called at any type `expect` accepts, and is compiled once for each.
+
+A type that nothing fixes is `Data`. So an empty list whose element type nothing fixes is a `List<Data>`, and upcasts to `List []`. To get `Map []`, give the list a `Pairs` type, as in `let p: Pairs<Int, Int> = []`.
+
+## Validators
+
+- A validator's parameters are applied off-chain, before the script is hashed. They're converted from `Data` without a check. So a parameter can't hold a value of an opaque type, as in `Option<Thing>` for an opaque `Thing`. A phantom argument holds no value: `Hash<Blake2b_224, VerificationKey>` is accepted. An exported function's arguments and return type follow the same rule.
+- The redeemer is checked like an `expect`. So is the datum of a spend handler, unless it's an `Option<Data>`.
+- A datum's or a redeemer's type can't mention an opaque type at all, phantom arguments included, as written in its annotation: `Hash<Blake2b_224, VerificationKey>` is refused there, unlike for a parameter. An alias that names no opaque type in its arguments, such as `VerificationKeyHash`, is accepted.
+
+## What isn't a check
+
+- `builtin.un_i_data`, `un_b_data`, `un_list_data`, and `un_map_data` convert, but aren't checks. When their result goes straight back to `Data`, the optimizer may remove the conversion.
+- At `-t silent`, the optimizer also removes the conversion of an `expect` whose result goes straight back to `Data`, as in `expect n: Int = d` followed by `as_data(n)`. Such a `d` isn't checked.
+- At `-t silent`, the optimizer may move the conversion of an `expect` whose result only one branch of an `if` or `when` uses into that branch, as in `expect n: Int = d` followed by `if c { n == 1 } else { True }`. Such a `d` isn't checked when another branch runs.
+- `coerce` checks nothing. On `Data` that isn't the form of a `T`, a conversion builtin may fail, or the result may be a wrong value.
+
+For example, `coerce` doesn't check a constructor index. A `when` that lists every constructor tests every index but the last one listed, which it takes for any other index:
+
+```aiken
+use aiken/builtin
+
+type Three {
+  One
+  Two
+  Three
+}
+
+test out_of_range() {
+  coerce t: Three = builtin.constr_data(7, [])
+  when t is {
+    One -> False
+    Two -> False
+    Three -> True
+  }
+}
+```
+
+The test passes: `when` takes `Three` for index 7. `expect t: Three = builtin.constr_data(7, [])` fails instead.

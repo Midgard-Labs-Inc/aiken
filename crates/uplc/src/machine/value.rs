@@ -653,7 +653,7 @@ pub fn to_pallas_bigint(n: &BigInt) -> conway::BigInt {
 mod tests {
     use crate::{
         ast::{Constant, Data, Type},
-        data::tests::arb_plutus_data,
+        data::arbitrary::arb_plutus_data,
         machine::{
             runtime::BuiltinSemantics,
             value::{

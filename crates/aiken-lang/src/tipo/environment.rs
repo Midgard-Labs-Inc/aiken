@@ -1,26 +1,39 @@
 use super::{
-    AccessorsMap, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar, ValueConstructor,
-    ValueConstructorVariant,
-    error::{Error, Warning},
+    AccessorsMap, DataLayout, RecordAccessor, Type, TypeConstructor, TypeInfo, TypeVar,
+    ValueConstructor, ValueConstructorVariant,
+    error::{Error, UnifyErrorSituation, Warning},
     exhaustive::{Matrix, PatternStack, simplify},
+    generalise,
     hydrator::Hydrator,
+    layout,
+    requirement::{self, Cast, Level, Requirement},
 };
 use crate::{
     IdGenerator,
     ast::{
-        self, Annotation, CallArg, DataType, Definition, Function, ModuleConstant, ModuleKind,
-        Namespace, PIPE_VARIABLE, RecordConstructor, RecordConstructorArg, Span, TypeAlias,
-        TypedDefinition, TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport,
-        UntypedArg, UntypedDefinition, UntypedFunction, Use, Validator,
+        self, Annotation, CallArg, DataType, Definition, ModuleConstant, ModuleKind, Namespace,
+        PIPE_VARIABLE, RecordConstructor, RecordConstructorArg, Span, TypeAlias, TypedDefinition,
+        TypedFunction, TypedPattern, TypedValidator, UnqualifiedImport, UntypedArg,
+        UntypedDefinition, UntypedFunction, Use, Validator,
     },
-    expr::AssignmentKind,
-    tipo::{TypeAliasAnnotation, fields::FieldMap, well_known},
+    tipo::{TypeAliasAnnotation, fields::FieldMap},
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::Deref,
     rc::Rc,
 };
+
+/// A type variable of a definition's annotations that no call can choose.
+#[derive(Debug)]
+pub struct UnreachableVariable {
+    pub id: u64,
+    pub name: String,
+    pub function: String,
+    /// The function's type, which doesn't mention the variable; `None` for a module constant,
+    /// which no call instantiates.
+    pub tipo: Option<Rc<Type>>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ScopeResetData {
@@ -53,14 +66,30 @@ pub struct Environment<'a> {
     /// Mapping from types to constructor names in the current module (or the prelude)
     pub module_types_constructors: HashMap<String, Vec<String>>,
 
-    /// Nominal types whose values may contain opaque data.
-    pub opaque_types: HashSet<(String, String)>,
+    /// Layouts of the data types defined in the current module.
+    pub layouts: HashMap<String, DataLayout>,
+
+    /// What the eventual type of each type variable must allow, by variable id: the
+    /// strongest cast the variable met.
+    pub requirements: HashMap<u64, Requirement>,
+
+    /// Each generic variable instantiated in this module, with the variable that replaced it
+    /// and where. A requirement the generic learns later passes on to that variable.
+    instantiations: Vec<(u64, Rc<Type>, Span)>,
+
+    /// The type variables of functions' annotations that the functions' types don't mention, as
+    /// `a` in `fn f(_tag: Tag<a>, d: Data)` with `type Tag<a> = Int`: no call chooses them.
+    pub unreachable_variables: Vec<UnreachableVariable>,
 
     /// Values defined in the current module (or the prelude)
     pub module_values: HashMap<String, ValueConstructor>,
 
-    /// Top-level function definitions from the module
+    /// Top-level function definitions from the module, removed once a reference to them is
+    /// inferred
     pub module_functions: HashMap<String, &'a UntypedFunction>,
+
+    /// Names of the module's top-level functions, the only definitions generalised
+    pub function_names: HashSet<String>,
 
     /// Top-level validator definitions from the module
     pub module_validators: HashMap<String, (Span, Vec<String>)>,
@@ -77,6 +106,19 @@ pub struct Environment<'a> {
     /// We use this to determine whether functions that call this one
     /// can safely be generalised.
     pub ungeneralised_functions: HashSet<String>,
+
+    /// The module's functions generalised so far, with the variable each is bound to, which
+    /// survives restoring a scope saved before.
+    generalised_functions: HashMap<String, (ValueConstructorVariant, Rc<Type>)>,
+
+    /// The module's functions inferred but not generalised yet, with the functions not
+    /// generalised yet that each uses: a recursive group is generalised once complete.
+    waiting_functions: HashMap<String, BTreeSet<String>>,
+
+    /// Types whose unknown type variables other definitions share, so that no function
+    /// generalises them: the module's constants, and the values of other modules that still
+    /// mention unknown types.
+    pub shared_types: Vec<Rc<Type>>,
 
     /// Names of types or values that have been imported an unqualified fashion
     /// from other modules. Used to prevent multiple imports using the same name.
@@ -149,6 +191,104 @@ impl<'a> Environment<'a> {
         self.handle_unused(unused);
 
         self.scope = data.local_values;
+
+        // A function generalised while the scope was open keeps its generalised type.
+        for (name, (variant, tipo)) in &self.generalised_functions {
+            if let Some(value) = self.scope.get_mut(name)
+                && &value.variant == variant
+            {
+                value.tipo = tipo.clone();
+            }
+        }
+    }
+
+    /// Generalises inferred functions that form a recursive group: the type variables still
+    /// unknown in their signatures, apart from those other definitions share, become generic
+    /// variables, in copies of their signatures and bodies. Binds each function to its
+    /// generalised type.
+    fn generalise_functions(&mut self, functions: Vec<TypedFunction>) -> Vec<TypedFunction> {
+        let mut variables = HashSet::new();
+        for function in &functions {
+            for argument in &function.arguments {
+                argument.tipo.collect_unbound(&mut variables);
+            }
+            function.return_type.collect_unbound(&mut variables);
+        }
+
+        // The shared types' variables now, including through links made since.
+        let mut shared = HashSet::new();
+        for tipo in &self.shared_types {
+            tipo.collect_unbound(&mut shared);
+        }
+        variables.retain(|id| !shared.contains(id));
+
+        functions
+            .into_iter()
+            .map(|mut function| {
+                function.map_types(&mut |tipo| generalise(tipo, &variables));
+
+                let tipo = Type::function(
+                    function
+                        .arguments
+                        .iter()
+                        .map(|arg| arg.tipo.clone())
+                        .collect(),
+                    function.return_type.clone(),
+                );
+
+                if let Some(value) = self.scope.get_mut(&function.name) {
+                    value.tipo = tipo.clone();
+                    self.generalised_functions
+                        .insert(function.name.clone(), (value.variant.clone(), tipo));
+                }
+
+                function
+            })
+            .collect()
+    }
+
+    /// Records that the module function `name` is inferred, and calls the functions `used`,
+    /// which weren't generalised then. Then generalises every recursive group that is now
+    /// inferred: the waiting functions that call no function still waiting outside them.
+    pub fn generalise_inferred_groups(&mut self, name: &str, used: BTreeSet<String>) {
+        self.waiting_functions.insert(name.to_string(), used);
+
+        let mut group: BTreeSet<String> = self.waiting_functions.keys().cloned().collect();
+        loop {
+            let blocked: Vec<String> = group
+                .iter()
+                .filter(|function| {
+                    self.waiting_functions[*function].iter().any(|callee| {
+                        !group.contains(callee) && self.ungeneralised_functions.contains(callee)
+                    })
+                })
+                .cloned()
+                .collect();
+
+            if blocked.is_empty() {
+                break;
+            }
+
+            for function in &blocked {
+                group.remove(function);
+            }
+        }
+
+        let functions = group
+            .iter()
+            .map(|function| {
+                self.waiting_functions.remove(function);
+                self.ungeneralised_functions.remove(function);
+                self.inferred_functions
+                    .remove(function)
+                    .expect("a waiting function is inferred")
+            })
+            .collect();
+
+        for function in self.generalise_functions(functions) {
+            self.inferred_functions
+                .insert(function.name.clone(), function);
+        }
     }
 
     pub fn annotate(&mut self, return_type: Rc<Type>, annotation: &Annotation) -> Rc<Type> {
@@ -188,21 +328,23 @@ impl<'a> Environment<'a> {
                     return Ok((args, Type::with_alias(ret, alias.clone())));
                 }
 
-                TypeVar::Unbound { .. } => {
+                TypeVar::Unbound { id } => {
                     let args: Vec<_> = (0..arity).map(|_| self.new_unbound_var()).collect();
 
                     let ret = Type::with_alias(self.new_unbound_var(), alias.clone());
 
-                    Some((args, ret))
+                    Some((*id, args, ret))
                 }
 
                 TypeVar::Generic { .. } => None,
             };
 
-            if let Some((args, ret)) = new_value {
+            if let Some((id, args, ret)) = new_value {
+                let function = Type::function(args.clone(), ret.clone());
                 *tipo.borrow_mut() = TypeVar::Link {
-                    tipo: Type::function(args.clone(), ret.clone()),
+                    tipo: function.clone(),
                 };
+                self.meet_linked(id, &function, call_location)?;
 
                 return Ok((args, Type::with_alias(ret, alias.clone())));
             }
@@ -259,69 +401,51 @@ impl<'a> Environment<'a> {
         Ok(Some(fields))
     }
 
-    pub fn generalise_definition(
+    /// Puts a definition in its final form once the whole module is inferred, and adds it to the
+    /// module's interface.
+    pub fn finish_definition(
         &mut self,
         s: TypedDefinition,
         module_name: &String,
     ) -> TypedDefinition {
         match s {
-            Definition::Fn(Function {
-                doc,
-                location,
-                name,
-                public,
-                arguments: args,
-                body,
-                return_annotation,
-                return_type,
-                end_position,
-                on_test_failure,
-            }) => {
-                // Lookup the inferred function information
-                let function = self
-                    .get_variable(&name)
+            Definition::Fn(function) => {
+                // A module function's recursive group can be generalised after the function was
+                // inferred: take the generalised copy. A validator's handlers keep the types they
+                // were registered with.
+                let function = if self.function_names.contains(&function.name) {
+                    self.inferred_functions
+                        .remove(&function.name)
+                        .expect("a module function is inferred")
+                } else {
+                    function
+                };
+
+                let variable = self
+                    .get_variable(&function.name)
                     .expect("Could not find preregistered type for function");
 
-                let field_map = function.field_map().cloned();
-
-                let tipo = function.tipo.clone();
-
-                // Generalise the function if not already done so
-                let tipo = if self.ungeneralised_functions.remove(&name) {
-                    generalise(tipo, 0)
-                } else {
-                    tipo
-                };
+                let field_map = variable.field_map().cloned();
+                let tipo = variable.tipo.clone();
 
                 // Insert the function into the module's interface
                 self.insert_module_value(
-                    &name,
+                    &function.name,
                     ValueConstructor {
-                        public,
+                        public: function.public,
                         tipo,
                         variant: ValueConstructorVariant::ModuleFn {
-                            name: name.clone(),
+                            name: function.name.clone(),
                             field_map,
                             module: module_name.to_owned(),
-                            arity: args.len(),
-                            location,
+                            arity: function.arguments.len(),
+                            location: function.location,
                             builtin: None,
                         },
                     },
                 );
 
-                Definition::Fn(Function {
-                    doc,
-                    location,
-                    name,
-                    public,
-                    arguments: args,
-                    return_annotation,
-                    return_type,
-                    body,
-                    end_position,
-                    on_test_failure,
-                })
+                Definition::Fn(function)
             }
             Definition::Validator(Validator {
                 doc,
@@ -341,7 +465,7 @@ impl<'a> Environment<'a> {
                         fun.name = handler_name;
 
                         let Definition::Fn(mut fun) =
-                            self.generalise_definition(Definition::Fn(fun), module_name)
+                            self.finish_definition(Definition::Fn(fun), module_name)
                         else {
                             unreachable!()
                         };
@@ -358,7 +482,7 @@ impl<'a> Environment<'a> {
                 fallback.name = fallback_name;
 
                 let Definition::Fn(mut fallback) =
-                    self.generalise_definition(Definition::Fn(fallback), module_name)
+                    self.finish_definition(Definition::Fn(fallback), module_name)
                 else {
                     unreachable!()
                 };
@@ -743,333 +867,237 @@ impl<'a> Environment<'a> {
         );
     }
 
-    fn register_opaque_type(&mut self, module: &str, name: &str) {
-        self.opaque_types
-            .insert((module.to_string(), name.to_string()));
+    /// The layout of the data type `module.name`, where the prelude's module is `""`.
+    pub fn layout(&self, module: &str, name: &str) -> Option<&DataLayout> {
+        if module == self.current_module.as_str() {
+            self.layouts.get(name)
+        } else {
+            layout::find_layout(self.importable_modules, module, name)
+        }
     }
 
-    fn is_known_opaque(&self, qualifier: &(String, String)) -> bool {
-        self.opaque_types.contains(qualifier)
-            || self
-                .importable_modules
-                .values()
-                .any(|module| module.opaque_types.contains(qualifier))
-    }
-
-    pub(crate) fn is_data_like(&mut self, tipo: &Type) -> bool {
-        self.assert_known_data_type(
-            tipo,
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-            false,
-            &[
-                well_known::VALUE,
-                well_known::G1_ELEMENT,
-                well_known::G2_ELEMENT,
-                well_known::MILLER_LOOP_RESULT,
-            ],
+    /// The strongest requirement recorded on the type variable `id`, here or by any module that
+    /// shares it.
+    pub fn requirement(&self, id: u64) -> Option<Requirement> {
+        requirement::strongest(
+            std::iter::once(&self.requirements).chain(
+                self.importable_modules
+                    .values()
+                    .map(|module| &module.requirements),
+            ),
+            id,
         )
     }
 
-    pub fn ensure_serialisable(&mut self, tipo: Rc<Type>, location: Span) -> Result<(), Error> {
-        if !self.assert_known_data_type(
-            tipo.as_ref(),
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-            true,
-            &[well_known::MILLER_LOOP_RESULT],
-        ) {
-            return Err(Error::IllegalTypeInData {
-                tipo: tipo.clone(),
+    /// Records `requirement` on the type variable `id`, unless it has one at least as strong.
+    /// Returns whether it changed.
+    fn attach(&mut self, id: u64, requirement: Requirement) -> bool {
+        match self.requirement(id) {
+            Some(current) if current.cast >= requirement.cast => false,
+            _ => {
+                self.requirements.insert(id, requirement);
+                true
+            }
+        }
+    }
+
+    /// Checks that `tipo` allows `cast` at `location`, and records the cast on the type
+    /// variables it holds, which must allow it once known.
+    #[allow(clippy::result_large_err)]
+    pub fn require(&mut self, tipo: &Rc<Type>, cast: Cast, location: Span) -> Result<(), Error> {
+        self.meet(tipo, Requirement { cast, location }).map(|_| ())
+    }
+
+    /// Like `require`. Returns whether a type variable's requirement changed.
+    #[allow(clippy::result_large_err)]
+    fn meet(&mut self, tipo: &Rc<Type>, requirement: Requirement) -> Result<bool, Error> {
+        let mut variables = vec![];
+
+        requirement::check(
+            tipo,
+            requirement.cast.level(),
+            &|module, name| self.layout(module, name),
+            &mut variables,
+        )
+        .map_err(|violation| {
+            requirement
+                .cast
+                .error(violation, tipo.clone(), requirement.location)
+        })?;
+
+        let mut changed = false;
+        for id in variables {
+            changed |= self.attach(id, requirement);
+        }
+
+        Ok(changed)
+    }
+
+    /// Checks that `tipo`, which the type variable `id` was just linked to at `location`,
+    /// allows the cast the variable requires. A requirement recorded by another module points
+    /// into that module's source, so the error is reported at the link instead.
+    #[allow(clippy::result_large_err)]
+    fn meet_linked(&mut self, id: u64, tipo: &Rc<Type>, location: Span) -> Result<(), Error> {
+        let Some(requirement) = self.requirement(id) else {
+            return Ok(());
+        };
+
+        let location = if self.requirements.get(&id) == Some(&requirement) {
+            requirement.location
+        } else {
+            location
+        };
+
+        self.meet(
+            tipo,
+            Requirement {
                 location,
-            });
+                ..requirement
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// Checks that whatever a value of `tipo` stores, in lists, tuples, pairs and data types,
+    /// has a Data form.
+    #[allow(clippy::result_large_err)]
+    pub fn require_stored(&mut self, tipo: &Rc<Type>, location: Span) -> Result<(), Error> {
+        let mut variables = vec![];
+
+        requirement::check_stored(
+            tipo,
+            &|module, name| self.layout(module, name),
+            &mut variables,
+        )
+        .map_err(|violation| Cast::Store.error(violation, tipo.clone(), location))?;
+
+        let requirement = Requirement {
+            cast: Cast::Store,
+            location,
+        };
+
+        for id in variables {
+            self.attach(id, requirement);
         }
 
         Ok(())
     }
 
-    pub fn ensure_serialisable_at_top_level(
+    /// Passes the requirements of the generic variables `ids` maps on to the variables that
+    /// replace them in an instantiation at `location`.
+    #[allow(clippy::result_large_err)]
+    pub fn require_instantiated(
         &mut self,
-        tipo: Rc<Type>,
+        ids: &HashMap<u64, Rc<Type>>,
         location: Span,
     ) -> Result<(), Error> {
-        if !self.assert_serialisable_type(
-            tipo.as_ref(),
-            true,
-            &mut HashMap::new(),
-            &mut HashSet::new(),
-        ) {
-            return Err(Error::IllegalTypeInData { tipo, location });
+        // In id order, so the first error reported doesn't depend on the map's order.
+        let mut ids: Vec<_> = ids.iter().collect();
+        ids.sort_by_key(|(generic, _)| **generic);
+
+        for (generic, tipo) in ids {
+            self.instantiations.push((*generic, tipo.clone(), location));
+            self.pass_on(*generic, tipo, location)?;
         }
 
         Ok(())
     }
 
-    fn assert_serialisable_type(
-        &mut self,
-        tipo: &Type,
-        is_top_level: bool,
-        ids: &mut HashMap<u64, Rc<Type>>,
-        active_types: &mut HashSet<(String, String)>,
-    ) -> bool {
-        match tipo {
-            Type::Fn { args, ret, .. } if is_top_level => {
-                args.iter()
-                    .all(|arg| self.assert_serialisable_type(arg, true, ids, active_types))
-                    && self.assert_serialisable_type(ret, true, ids, active_types)
-            }
-
-            Type::App { .. } if is_top_level && tipo.is_ml_result() => true,
-
-            Type::Var { tipo, .. } => match tipo.borrow().deref() {
-                TypeVar::Link { tipo } => {
-                    self.assert_serialisable_type(tipo, is_top_level, ids, active_types)
-                }
-                TypeVar::Generic { .. } | TypeVar::Unbound { .. } => true,
-            },
-
-            _ => self.assert_known_data_type(
+    /// Passes the requirement of the generic variable `generic` on to `tipo`, which replaces
+    /// it in an instantiation at `location`. Returns whether a type variable's requirement
+    /// changed.
+    #[allow(clippy::result_large_err)]
+    fn pass_on(&mut self, generic: u64, tipo: &Rc<Type>, location: Span) -> Result<bool, Error> {
+        match self.requirement(generic) {
+            Some(requirement) => self.meet(
                 tipo,
-                ids,
-                active_types,
-                true,
-                &[well_known::MILLER_LOOP_RESULT],
+                Requirement {
+                    location,
+                    ..requirement
+                },
             ),
+            None => Ok(false),
         }
     }
 
-    fn assert_known_data_type(
-        &mut self,
-        tipo: &Type,
-        ids: &mut HashMap<u64, Rc<Type>>,
-        active_types: &mut HashSet<(String, String)>,
-        allow_unmapped_generics: bool,
-        forbidden_known_types: &[&str],
-    ) -> bool {
-        match tipo {
-            Type::App {
-                module, name, args, ..
-            } => {
-                if module.is_empty() && forbidden_known_types.contains(&name.as_str()) {
-                    return false;
-                }
-
-                let qualifier = (module.clone(), name.clone());
-
-                if !active_types.insert(qualifier.clone()) {
-                    return args.iter().all(|arg| {
-                        self.assert_known_data_type(
-                            arg,
-                            ids,
-                            active_types,
-                            allow_unmapped_generics,
-                            forbidden_known_types,
-                        )
-                    });
-                }
-
-                let type_constructor = if module.is_empty() || module == self.current_module {
-                    self.module_types.get(name)
-                } else {
-                    self.imported_modules
-                        .get(module)
-                        .and_then(|(_, module)| module.types.get(name))
-                };
-
-                if let Some(type_constructor) = type_constructor {
-                    for (arg, param) in args.iter().zip(type_constructor.parameters.iter()) {
-                        if let Some(id) = param.get_generic_id() {
-                            ids.insert(id, arg.clone());
-                        }
-                    }
-                }
-
-                for constructor in self
-                    .get_constructors_for_type(module, name, Span::empty())
-                    .unwrap_or_default()
-                {
-                    if let Type::Fn {
-                        args: constructor_args,
-                        ret,
-                        ..
-                    } = constructor.tipo.as_ref()
-                    {
-                        if let Type::App {
-                            args: constructor_type_args,
-                            ..
-                        } = ret.as_ref()
-                        {
-                            for (arg, param) in args.iter().zip(constructor_type_args) {
-                                if let Some(id) = param.get_generic_id() {
-                                    ids.insert(id, arg.clone());
-                                }
-                            }
-                        }
-
-                        if constructor_args.iter().any(|arg| {
-                            !self.assert_known_data_type(
-                                arg,
-                                ids,
-                                active_types,
-                                allow_unmapped_generics,
-                                forbidden_known_types,
-                            )
-                        }) {
-                            active_types.remove(&qualifier);
-                            return false;
-                        }
-                    }
-                }
-
-                let result = args.iter().all(|arg| {
-                    self.assert_known_data_type(
-                        arg,
-                        ids,
-                        active_types,
-                        allow_unmapped_generics,
-                        forbidden_known_types,
-                    )
-                });
-
-                active_types.remove(&qualifier);
-
-                result
-            }
-
-            Type::Var { tipo, .. } => match tipo.borrow().deref() {
-                TypeVar::Link { tipo } => self.assert_known_data_type(
-                    tipo,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                ),
-                TypeVar::Generic { id } => {
-                    if let Some(tipo) = ids.get(id) {
-                        self.assert_known_data_type(
-                            &tipo.clone(),
-                            ids,
-                            active_types,
-                            allow_unmapped_generics,
-                            forbidden_known_types,
-                        )
-                    } else {
-                        allow_unmapped_generics
-                    }
-                }
-                TypeVar::Unbound { .. } => true,
-            },
-
-            Type::Tuple { elems, .. } => elems.iter().all(|elem| {
-                self.assert_known_data_type(
-                    elem,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                )
-            }),
-
-            Type::Pair { fst, snd, .. } => {
-                self.assert_known_data_type(
-                    fst,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                ) && self.assert_known_data_type(
-                    snd,
-                    ids,
-                    active_types,
-                    allow_unmapped_generics,
-                    forbidden_known_types,
-                )
-            }
-
-            Type::Fn { .. } => false,
-        }
-    }
-
-    pub(crate) fn contains_opaque(&self, tipo: &Type) -> bool {
-        match tipo {
-            Type::App {
-                module, name, args, ..
-            } => {
-                self.is_known_opaque(&(module.clone(), name.clone()))
-                    || args.iter().any(|arg| self.contains_opaque(arg))
-            }
-
-            Type::Var { tipo, .. } => {
-                if let TypeVar::Link { tipo } = tipo.borrow().deref() {
-                    self.contains_opaque(tipo)
-                } else {
-                    false
-                }
-            }
-
-            Type::Tuple { elems, .. } => elems.iter().any(|elem| self.contains_opaque(elem)),
-
-            Type::Pair { fst, snd, .. } => self.contains_opaque(fst) || self.contains_opaque(snd),
-
-            Type::Fn { .. } => false,
-        }
-    }
-
-    // Data constructor fields are hydrated after type aliases and function
-    // signatures are registered, so opaque containment is derived from the
-    // fully registered type/value metadata rather than cached Type flags.
-    pub fn collect_opaque_types(&mut self) {
+    /// Passes requirements along instantiations until nothing changes: a generic of this
+    /// module can learn a requirement after a call instantiated it, as in a recursive group.
+    #[allow(clippy::result_large_err)]
+    pub fn propagate_requirements(&mut self) -> Result<(), Error> {
         loop {
-            let initial_len = self.opaque_types.len();
+            let mut changed = false;
 
-            let mut opaque_types = HashSet::new();
-
-            self.collect_opaque_types_from_constructors(&self.module_values, &mut opaque_types);
-            self.collect_opaque_types_from_constructors(&self.scope, &mut opaque_types);
-
-            for (module, name) in opaque_types {
-                self.register_opaque_type(&module, &name);
+            for (generic, tipo, location) in self.instantiations.clone() {
+                changed |= self.pass_on(generic, &tipo, location)?;
             }
 
-            if self.opaque_types.len() == initial_len {
-                break;
+            if !changed {
+                return Ok(());
             }
         }
     }
 
-    fn collect_opaque_types_from_constructors(
-        &self,
-        values: &HashMap<String, ValueConstructor>,
-        opaque_types: &mut HashSet<(String, String)>,
+    /// Records the rigid type variables of `definition`'s annotations, in its signature or its
+    /// body, that no call can choose: those that a function's type, `tipo`, doesn't mention, or
+    /// all of them for a module constant (`tipo` is `None`). A cast's requirement on such a
+    /// variable can arrive after the definition is inferred, so they're checked once the module
+    /// is.
+    pub fn note_unreachable_variables(
+        &mut self,
+        definition: &str,
+        tipo: Option<&Rc<Type>>,
+        variables: HashMap<u64, String>,
     ) {
-        for value in values.values() {
-            let ValueConstructorVariant::Record { module, .. } = &value.variant else {
-                continue;
-            };
-
-            if module.as_str() != self.current_module.as_str() {
-                continue;
-            }
-
-            match value.tipo.as_ref() {
-                Type::Fn { args, ret, .. } => {
-                    if let Some(qualifier) = ret.qualifier() {
-                        if qualifier.0.as_str() != self.current_module.as_str()
-                            || self.opaque_types.contains(&qualifier)
-                        {
-                            continue;
-                        }
-
-                        if args.iter().any(|arg| self.contains_opaque(arg)) {
-                            opaque_types.insert(qualifier);
-                        }
-                    }
-                }
-
-                Type::App { .. } => {}
-                Type::Var { .. } | Type::Tuple { .. } | Type::Pair { .. } => {}
+        let mut variables: Vec<_> = variables.into_iter().collect();
+        variables.sort();
+        for (id, name) in variables {
+            if !tipo.is_some_and(|tipo| tipo.mentions_generic(id)) {
+                self.unreachable_variables.push(UnreachableVariable {
+                    id,
+                    name,
+                    function: definition.to_string(),
+                    tipo: tipo.cloned(),
+                });
             }
         }
+    }
+
+    /// Refuses decoding `Data` to a type variable that no call chooses, once every requirement
+    /// is known: there is no type to decode to. Other casts don't need the type.
+    #[allow(clippy::result_large_err)]
+    pub fn check_unreachable_variables(&self) -> Result<(), Error> {
+        for variable in &self.unreachable_variables {
+            if let Some(requirement) = self.requirement(variable.id)
+                && requirement.cast.level() >= Level::Decodable
+            {
+                return Err(match &variable.tipo {
+                    Some(tipo) => Error::UnreachableTypeVariable {
+                        location: requirement.location,
+                        name: variable.name.clone(),
+                        function: variable.function.clone(),
+                        tipo: tipo.clone(),
+                    },
+                    None => Error::UnreachableTypeVariableInConstant {
+                        location: requirement.location,
+                        name: variable.name.clone(),
+                        constant: variable.function.clone(),
+                    },
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Whether `tipo` mentions an opaque type anywhere, phantom arguments included.
+    pub fn mentions_opaque(&self, tipo: &Type) -> bool {
+        requirement::mentions_opaque(tipo, &|module, name| self.layout(module, name))
+    }
+
+    /// Whether a value of `tipo` can hold a value of an opaque type; a phantom argument holds
+    /// none.
+    pub fn holds_opaque(&self, tipo: &Type) -> bool {
+        requirement::holds_opaque(tipo, &|module, name| self.layout(module, name))
     }
 
     /// Instantiate converts generic variables into unbound ones.
@@ -1241,12 +1269,24 @@ impl<'a> Environment<'a> {
             previous_id: id_gen.next(),
             id_gen,
             ungeneralised_functions: HashSet::new(),
+            generalised_functions: HashMap::new(),
+            waiting_functions: HashMap::new(),
+            shared_types: importable_modules
+                .values()
+                .flat_map(|module| module.values.values())
+                .map(|value| value.tipo.clone())
+                .filter(|tipo| tipo.contains_unbound())
+                .collect(),
             inferred_functions: HashMap::new(),
             module_types: prelude.types.clone(),
             module_types_constructors: prelude.types_constructors.clone(),
-            opaque_types: HashSet::new(),
+            layouts: HashMap::new(),
+            requirements: HashMap::new(),
+            instantiations: Vec::new(),
+            unreachable_variables: Vec::new(),
             module_values: HashMap::new(),
             module_functions: HashMap::new(),
+            function_names: HashSet::new(),
             module_validators: HashMap::new(),
             imported_modules: HashMap::new(),
             unused_modules: HashMap::new(),
@@ -1547,7 +1587,7 @@ impl<'a> Environment<'a> {
             Definition::DataType(DataType {
                 name,
                 public,
-                opaque,
+                opaque: _,
                 parameters,
                 location,
                 constructors,
@@ -1561,10 +1601,6 @@ impl<'a> Environment<'a> {
                 let mut hydrator = Hydrator::new();
 
                 let parameters = self.make_type_vars(parameters, location, &mut hydrator)?;
-
-                if *opaque {
-                    self.register_opaque_type(module, name);
-                }
 
                 let tipo = Type::App {
                     public: *public,
@@ -1737,6 +1773,7 @@ impl<'a> Environment<'a> {
                 )?;
 
                 self.module_functions.insert(fun.name.clone(), fun);
+                self.function_names.insert(fun.name.clone());
 
                 if !fun.public {
                     self.init_usage(fun.name.clone(), EntityKind::PrivateFunction, fun.location);
@@ -2001,59 +2038,23 @@ impl<'a> Environment<'a> {
         Ok(())
     }
 
-    #[allow(clippy::only_used_in_recursion)]
-    #[allow(clippy::result_large_err)]
-    pub fn unify(&mut self, lhs: Rc<Type>, rhs: Rc<Type>, location: Span) -> Result<(), Error> {
-        self.unify_with(lhs, rhs, location, UnifyMode::Strict)
-    }
-
     /// Unify two types that should be the same.
     /// Any unbound type variables will be linked to the other type as they are the same.
     ///
     /// It two types are found to not be the same an error is returned.
     #[allow(clippy::only_used_in_recursion)]
     #[allow(clippy::result_large_err)]
-    pub fn unify_with(
-        &mut self,
-        lhs: Rc<Type>,
-        rhs: Rc<Type>,
-        location: Span,
-        unify_mode: UnifyMode,
-    ) -> Result<(), Error> {
+    pub fn unify(&mut self, lhs: Rc<Type>, rhs: Rc<Type>, location: Span) -> Result<(), Error> {
         if lhs == rhs {
             return Ok(());
         }
 
-        match unify_mode {
-            UnifyMode::Strict => {}
-            UnifyMode::AllowUpCast => {
-                if lhs.is_data() && self.is_data_like(&rhs) {
-                    return assert_no_unbounded_empty_list(&rhs, location);
-                }
-            }
-            UnifyMode::AllowDownCast => {
-                if self.contains_opaque(&lhs) {
-                    return Err(Error::ExpectOnOpaqueType { location });
-                }
-
-                if (lhs.is_data() && self.is_data_like(&rhs))
-                    || (self.is_data_like(&lhs) && rhs.is_data())
-                {
-                    return assert_no_unbounded_empty_list(&rhs, location);
-                }
-            }
-        };
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
             // Collapse right hand side type links. Left hand side will be collapsed in the next block.
             if let Type::Var { tipo, alias } = rhs.deref()
                 && let TypeVar::Link { tipo } = tipo.borrow().deref()
             {
-                return self.unify_with(
-                    lhs,
-                    Type::with_alias(tipo.clone(), alias.clone()),
-                    location,
-                    unify_mode,
-                );
+                return self.unify(lhs, Type::with_alias(tipo.clone(), alias.clone()), location);
             }
 
             let could_not_unify = || Error::CouldNotUnify {
@@ -2068,7 +2069,7 @@ impl<'a> Environment<'a> {
                 enum Action {
                     Unify(Rc<Type>),
                     CouldNotUnify,
-                    Link,
+                    Link(u64),
                 }
 
                 let action = match tipo.borrow().deref() {
@@ -2078,13 +2079,23 @@ impl<'a> Environment<'a> {
 
                     TypeVar::Unbound { id } => {
                         unify_unbound_type(rhs.clone(), *id, location)?;
-                        Action::Link
+                        Action::Link(*id)
                     }
 
                     TypeVar::Generic { id } => {
-                        if let Type::Var { tipo, alias: _ } = rhs.deref()
-                            && tipo.borrow().is_unbound()
-                        {
+                        let unbound = match rhs.deref() {
+                            Type::Var { tipo, .. } => match *tipo.borrow() {
+                                TypeVar::Unbound { id } => Some(id),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+
+                        if let (Some(unbound), Type::Var { tipo, .. }) = (unbound, rhs.deref()) {
+                            // The variable becomes this generic, and so do its requirements.
+                            if let Some(requirement) = self.requirement(unbound) {
+                                self.attach(*id, requirement);
+                            }
                             *tipo.borrow_mut() = TypeVar::Generic { id: *id };
                             return Ok(());
                         }
@@ -2093,11 +2104,11 @@ impl<'a> Environment<'a> {
                 };
 
                 return match action {
-                    Action::Link => {
-                        *tipo.borrow_mut() = TypeVar::Link { tipo: rhs };
-                        Ok(())
+                    Action::Link(id) => {
+                        *tipo.borrow_mut() = TypeVar::Link { tipo: rhs.clone() };
+                        self.meet_linked(id, &rhs, location)
                     }
-                    Action::Unify(t) => self.unify_with(t, rhs, location, unify_mode),
+                    Action::Unify(t) => self.unify(t, rhs, location),
                     Action::CouldNotUnify => Err(could_not_unify()),
                 };
             }
@@ -2187,12 +2198,21 @@ impl<'a> Environment<'a> {
                         alias: _,
                     },
                 ) if args1.len() == args2.len() => {
+                    // A cast's error on a type variable linked here says more than the mismatch.
+                    let mismatch = |e: Error| {
+                        if e.is_cast_error() {
+                            e
+                        } else {
+                            could_not_unify()
+                        }
+                    };
+
                     for (a, b) in args1.iter().zip(args2) {
-                        self.unify_with(a.clone(), b.clone(), location, unify_mode)
-                            .map_err(|_| could_not_unify())?;
+                        self.unify(a.clone(), b.clone(), location)
+                            .map_err(mismatch)?;
                     }
                     self.unify(retrn1.clone(), retrn2.clone(), location)
-                        .map_err(|_| could_not_unify())
+                        .map_err(mismatch)
                 }
 
                 _ => Err(could_not_unify()),
@@ -2325,29 +2345,6 @@ impl<'a> Environment<'a> {
     }
 }
 
-/// Captures unification policy rules, influenced by let/expect/if-is
-#[derive(Debug, Clone, Copy)]
-pub enum UnifyMode {
-    // A strict unification, no casting allowed whatsoever.
-    Strict,
-    // Direct assignations or function calls, allow implicit upcast to `Data`
-    AllowUpCast,
-    // Via `if/is` or `expect`, only allow non-opaque Data-like types on the left-hand side
-    AllowDownCast,
-}
-
-impl<T> From<AssignmentKind<T>> for UnifyMode {
-    fn from(kind: AssignmentKind<T>) -> Self {
-        match kind {
-            AssignmentKind::Let { .. } => Self::AllowUpCast,
-            AssignmentKind::Is => Self::AllowDownCast,
-            AssignmentKind::Expect { .. } => Self::AllowDownCast,
-            // A coerce never unifies its value with its annotation; see `infer_coerce`.
-            AssignmentKind::Coerce => Self::Strict,
-        }
-    }
-}
-
 /// For Keeping track of entity usages and knowing which error to display.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityKind {
@@ -2443,15 +2440,6 @@ fn unify_unbound_type(tipo: Rc<Type>, own_id: u64, location: Span) -> Result<(),
 }
 
 #[allow(clippy::result_large_err)]
-fn assert_no_unbounded_empty_list(rhs: &Type, location: Span) -> Result<(), Error> {
-    if rhs.is_unbounded_list() {
-        return Err(Error::AmbiguousEmptyList { location });
-    }
-
-    Ok(())
-}
-
-#[allow(clippy::result_large_err)]
 fn unify_enclosed_type(e1: Rc<Type>, e2: Rc<Type>, result: Result<(), Error>) -> Result<(), Error> {
     // If types cannot unify, show the type error with the enclosing types, e1 and e2.
     match result {
@@ -2460,7 +2448,7 @@ fn unify_enclosed_type(e1: Rc<Type>, e2: Rc<Type>, result: Result<(), Error>) ->
             location,
             rigid_type_names,
             ..
-        }) => Err(Error::CouldNotUnify {
+        }) if situation != Some(UnifyErrorSituation::NoDataForm) => Err(Error::CouldNotUnify {
             expected: e1,
             given: e2,
             situation,
@@ -2556,71 +2544,4 @@ fn get_compatible_record_fields<A>(
     }
 
     compatible
-}
-
-/// Takes a level and a type and turns all type variables within the type that have
-/// level higher than the input level into generalized (polymorphic) type variables.
-#[allow(clippy::only_used_in_recursion)]
-pub(crate) fn generalise(t: Rc<Type>, ctx_level: usize) -> Rc<Type> {
-    match t.deref() {
-        Type::Var { tipo, alias } => Type::with_alias(
-            match tipo.borrow().deref() {
-                TypeVar::Unbound { id } => Type::generic_var(*id),
-                TypeVar::Link { tipo } => generalise(tipo.clone(), ctx_level),
-                TypeVar::Generic { .. } => Rc::new(Type::Var {
-                    tipo: tipo.clone(),
-                    alias: None,
-                }),
-            },
-            alias.clone(),
-        ),
-
-        Type::App {
-            public,
-            module,
-            name,
-            args,
-            alias,
-        } => {
-            let args: Vec<Rc<Type>> = args
-                .iter()
-                .map(|t| generalise(t.clone(), ctx_level))
-                .collect();
-
-            Rc::new(Type::App {
-                public: *public,
-                module: module.clone(),
-                name: name.clone(),
-                args,
-                alias: alias.clone(),
-            })
-        }
-
-        Type::Fn { args, ret, alias } => Type::with_alias(
-            Type::function(
-                args.iter()
-                    .map(|t| generalise(t.clone(), ctx_level))
-                    .collect(),
-                generalise(ret.clone(), ctx_level),
-            ),
-            alias.clone(),
-        ),
-
-        Type::Tuple { elems, alias } => Type::with_alias(
-            Type::tuple(
-                elems
-                    .iter()
-                    .map(|t| generalise(t.clone(), ctx_level))
-                    .collect(),
-            ),
-            alias.clone(),
-        ),
-        Type::Pair { fst, snd, alias } => Type::with_alias(
-            Type::pair(
-                generalise(fst.clone(), ctx_level),
-                generalise(snd.clone(), ctx_level),
-            ),
-            alias.clone(),
-        ),
-    }
 }

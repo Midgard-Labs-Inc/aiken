@@ -1,20 +1,17 @@
 use super::{
-    Type, ValueConstructor, ValueConstructorVariant,
+    ValueConstructorVariant,
     error::{Error, UnifyErrorSituation},
     expr::ExprTyper,
 };
 use crate::{
     ast::{AssignmentKind, CallArg, PIPE_VARIABLE, Pattern, Span},
     expr::{TypedExpr, UntypedExpr},
-    tipo::environment::UnifyMode,
 };
-use std::rc::Rc;
 use vec1::Vec1;
 
 #[derive(Debug)]
 pub(crate) struct PipeTyper<'a, 'b, 'c> {
     size: usize,
-    argument_type: Rc<Type>,
     argument_location: Span,
     location: Span,
     expressions: Vec<TypedExpr>,
@@ -43,7 +40,6 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
         let mut typer = Self {
             size,
             expr_typer,
-            argument_type: first.tipo(),
             argument_location: first.location(),
             location: Span {
                 start: first.location().start,
@@ -120,37 +116,11 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
 
     /// Create a call argument that can be used to refer to the value on the
     /// left hand side of the pipe
-    fn typed_left_hand_value_variable_call_argument(&self) -> CallArg<TypedExpr> {
-        CallArg {
-            label: None,
-            location: self.argument_location,
-            value: self.typed_left_hand_value_variable(),
-        }
-    }
-
-    /// Create a call argument that can be used to refer to the value on the
-    /// left hand side of the pipe
     fn untyped_left_hand_value_variable_call_argument(&self) -> CallArg<UntypedExpr> {
         CallArg {
             label: None,
             location: self.argument_location,
             value: self.untyped_left_hand_value_variable(),
-        }
-    }
-
-    /// Create a variable that can be used to refer to the value on the left
-    /// hand side of the pipe
-    fn typed_left_hand_value_variable(&self) -> TypedExpr {
-        TypedExpr::Var {
-            location: self.argument_location,
-            name: PIPE_VARIABLE.to_string(),
-            constructor: ValueConstructor {
-                public: true,
-                tipo: self.argument_type.clone(),
-                variant: ValueConstructorVariant::LocalVariable {
-                    location: self.argument_location,
-                },
-            },
         }
     }
 
@@ -165,7 +135,6 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
 
     /// Push an assignment for the value on the left hand side of the pipe
     fn push_assignment(&mut self, expression: TypedExpr) {
-        self.argument_type = expression.tipo();
         self.argument_location = expression.location();
         self.push_assignment_no_update(expression)
     }
@@ -253,58 +222,12 @@ impl<'a, 'b, 'c> PipeTyper<'a, 'b, 'c> {
         })
     }
 
-    /// Attempt to infer a |> b as b(a)
+    /// Infer a |> b as b(a)
     #[allow(clippy::result_large_err)]
     fn infer_apply_pipe(&mut self, func: UntypedExpr) -> Result<TypedExpr, Error> {
-        let func = Box::new(self.expr_typer.infer(func)?);
-        let return_type = self.expr_typer.new_unbound_var();
+        let location = func.location();
+        let func = self.expr_typer.infer(func)?;
 
-        // Ensure that the function accepts one argument of the correct type
-        self.expr_typer
-            .unify_with(
-                func.tipo(),
-                Type::function(vec![self.argument_type.clone()], return_type.clone()),
-                func.location(),
-                UnifyMode::AllowUpCast,
-            )
-            .map_err(|e| {
-                let is_pipe_mismatch = self.check_if_pipe_type_mismatch(&e, func.location());
-
-                if is_pipe_mismatch {
-                    e.with_unify_error_situation(UnifyErrorSituation::PipeTypeMismatch)
-                } else {
-                    e
-                }
-            })?;
-
-        Ok(TypedExpr::Call {
-            location: func.location(),
-            tipo: return_type,
-            fun: func,
-            args: vec![self.typed_left_hand_value_variable_call_argument()],
-        })
-    }
-
-    fn check_if_pipe_type_mismatch(&mut self, error: &Error, location: Span) -> bool {
-        let types = match error {
-            Error::CouldNotUnify {
-                expected, given, ..
-            } => (expected.as_ref(), given.as_ref()),
-            _ => return false,
-        };
-
-        match types {
-            (Type::Fn { args: a, .. }, Type::Fn { args: b, .. }) if a.len() == b.len() => {
-                match (a.first(), b.first()) {
-                    (Some(a), Some(b)) => self
-                        .expr_typer
-                        .environment
-                        .unify_with(a.clone(), b.clone(), location, UnifyMode::AllowUpCast)
-                        .is_err(),
-                    _ => false,
-                }
-            }
-            _ => false,
-        }
+        self.infer_insert_pipe(func, vec![], location)
     }
 }

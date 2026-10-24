@@ -7,16 +7,13 @@ use crate::{
 };
 use aiken_lang::{
     IdGenerator,
-    ast::{
-        DataTypeKey, FunctionAccessKey, ModuleKind, TraceLevel, Tracing, TypedDataType,
-        TypedFunction,
-    },
+    ast::{FunctionAccessKey, ModuleKind, TraceLevel, Tracing, TypedFunction},
     expr::TypedExpr,
     gen_uplc::CodeGenerator,
     line_numbers::LineNumbers,
     parser,
     plutus_version::PlutusVersion,
-    tipo::TypeInfo,
+    tipo::{TypeInfo, requirement},
 };
 use indexmap::IndexMap;
 use std::{
@@ -26,6 +23,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod casts;
 mod gen_uplc;
 
 // TODO: Possible refactor this out of the module and have it used by `Project`. The idea would
@@ -36,7 +34,6 @@ pub struct TestProject {
     pub id_gen: IdGenerator,
     pub functions: IndexMap<FunctionAccessKey, TypedFunction>,
     pub constants: IndexMap<FunctionAccessKey, TypedExpr>,
-    pub data_types: IndexMap<DataTypeKey, TypedDataType>,
     pub module_types: HashMap<String, TypeInfo>,
     pub module_sources: HashMap<String, (String, LineNumbers)>,
 }
@@ -55,7 +52,6 @@ impl TestProject {
         module_types.insert("aiken/builtin".to_string(), builtins::plutus(&id_gen));
 
         let functions = builtins::prelude_functions(&id_gen, &module_types);
-        let data_types = builtins::prelude_data_types(&id_gen);
         let constants = IndexMap::new();
 
         TestProject {
@@ -64,7 +60,6 @@ impl TestProject {
             module_types,
             functions,
             constants,
-            data_types,
             module_sources: HashMap::new(),
         }
     }
@@ -74,7 +69,6 @@ impl TestProject {
             PlutusVersion::default(),
             utils::indexmap::as_ref_values(&self.functions),
             utils::indexmap::as_ref_values(&self.constants),
-            utils::indexmap::as_ref_values(&self.data_types),
             utils::indexmap::as_str_ref_values(&self.module_types),
             utils::indexmap::as_str_ref_values(&self.module_sources),
             tracing,
@@ -101,7 +95,7 @@ impl TestProject {
     pub fn check(&mut self, module: ParsedModule) -> CheckedModule {
         let mut warnings = vec![];
 
-        let ast = module
+        let mut ast = module
             .ast
             .infer(
                 &self.id_gen,
@@ -114,12 +108,12 @@ impl TestProject {
             )
             .expect("Failed to type-check module");
 
-        // Register function definitions & data-types for easier access later.
-        ast.register_definitions(
-            &mut self.functions,
-            &mut self.constants,
-            &mut self.data_types,
-        );
+        // These tests check one module at a time: settle its types as a project does once every
+        // module has type-checked.
+        requirement::default_unknown_types(&mut ast);
+
+        // Register function definitions for easier access later.
+        ast.register_definitions(&mut self.functions, &mut self.constants);
 
         // Register module sources for an easier access later.
         self.module_sources.insert(

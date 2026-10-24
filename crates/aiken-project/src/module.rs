@@ -2,9 +2,8 @@ use crate::{Error, Warning, stdlib};
 use aiken_lang::{
     IdGenerator,
     ast::{
-        DataType, DataTypeKey, Definition, Function, FunctionAccessKey, Located, ModuleConstant,
-        ModuleKind, Tracing, TypeAlias, TypedDataType, TypedFunction, TypedModule, TypedValidator,
-        UntypedModule, Validator,
+        DataType, Definition, Function, FunctionAccessKey, Located, ModuleConstant, ModuleKind,
+        Tracing, TypeAlias, TypedFunction, TypedModule, TypedValidator, UntypedModule, Validator,
     },
     builtins,
     expr::TypedExpr,
@@ -53,7 +52,6 @@ impl ParsedModule {
         module_types: &mut HashMap<String, TypeInfo>,
         functions: &mut IndexMap<FunctionAccessKey, TypedFunction>,
         constants: &mut IndexMap<FunctionAccessKey, TypedExpr>,
-        data_types: &mut IndexMap<DataTypeKey, TypedDataType>,
     ) -> Result<(CheckedModule, Vec<Warning>), Error> {
         let mut warnings = Vec::new();
 
@@ -107,8 +105,8 @@ impl ParsedModule {
         // imported into other modules.
         module_types.insert(self.name.clone(), ast.type_info.clone());
 
-        // Register function definitions & data-types for easier access later.
-        ast.register_definitions(functions, constants, data_types);
+        // Register function definitions for easier access later.
+        ast.register_definitions(functions, constants);
 
         Ok((
             CheckedModule {

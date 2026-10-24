@@ -139,7 +139,6 @@ impl TypedModule {
         &self,
         functions: &mut IndexMap<FunctionAccessKey, TypedFunction>,
         constants: &mut IndexMap<FunctionAccessKey, TypedExpr>,
-        data_types: &mut IndexMap<DataTypeKey, TypedDataType>,
     ) {
         for def in self.definitions() {
             match def {
@@ -173,16 +172,6 @@ impl TypedModule {
                     );
                 }
 
-                Definition::DataType(dt) => {
-                    data_types.insert(
-                        DataTypeKey {
-                            module_name: self.name.clone(),
-                            defined_type: dt.name.clone(),
-                        },
-                        dt.clone(),
-                    );
-                }
-
                 Definition::Validator(v) => {
                     let module_name = self.name.as_str();
 
@@ -201,7 +190,7 @@ impl TypedModule {
                     );
                 }
 
-                Definition::TypeAlias(_) | Definition::Use(_) => {}
+                Definition::DataType(_) | Definition::TypeAlias(_) | Definition::Use(_) => {}
             }
         }
     }
@@ -390,12 +379,6 @@ pub struct TypeAlias<T> {
     pub parameters: Vec<String>,
     pub public: bool,
     pub tipo: T,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DataTypeKey {
-    pub module_name: String,
-    pub defined_type: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -664,19 +647,38 @@ impl TypedValidator {
                             redeemer.location,
                         ));
 
-                        // Cast the datum, if any
+                        // Check the datum like the redeemer, unless it's an `Option<Data>`, which
+                        // any datum is.
                         if let Some(datum) = datum {
-                            // expect datum: tipo = __datum__
-                            then.push(TypedExpr::flexible_expect(
-                                TypedExpr::local_var(
-                                    var_datum,
-                                    Type::option(Type::data()),
+                            let pattern =
+                                TypedPattern::var(datum.get_variable_name().unwrap_or("_"));
+
+                            let holds_data = matches!(
+                                datum.tipo.arg_types().as_deref(),
+                                Some([inner]) if inner.is_data()
+                            );
+
+                            then.push(if holds_data {
+                                // let datum = __datum__
+                                TypedExpr::let_(
+                                    TypedExpr::local_var(
+                                        var_datum,
+                                        datum.tipo.clone(),
+                                        datum.location,
+                                    ),
+                                    pattern,
+                                    datum.tipo.clone(),
                                     datum.location,
-                                ),
-                                TypedPattern::var(datum.get_variable_name().unwrap_or("_")),
-                                datum.tipo.clone(),
-                                datum.location,
-                            ))
+                                )
+                            } else {
+                                // expect datum: tipo = __datum__
+                                TypedExpr::flexible_expect(
+                                    TypedExpr::local_var(var_datum, Type::data(), datum.location),
+                                    pattern,
+                                    datum.tipo.clone(),
+                                    datum.location,
+                                )
+                            })
                         }
 
                         // let purpose_arg = __purpose_arg__
@@ -818,6 +820,45 @@ impl TypedValidator {
 
 pub type TypedDefinition = Definition<Rc<Type>, TypedArg, TypedExpr, String>;
 pub type UntypedDefinition = Definition<(), UntypedArg, UntypedExpr, ()>;
+
+impl TypedDefinition {
+    /// Replaces every type the definition's signature and body hold with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Definition::Fn(function) => function.map_types(f),
+            Definition::Test(test) | Definition::Benchmark(test) => {
+                for argument in &mut test.arguments {
+                    argument.arg.tipo = f(&argument.arg.tipo);
+                    argument.via.map_types(f);
+                }
+                test.return_type = f(&test.return_type);
+                test.body.map_types(f);
+            }
+            Definition::Validator(validator) => {
+                for param in &mut validator.params {
+                    param.tipo = f(&param.tipo);
+                }
+                for handler in &mut validator.handlers {
+                    handler.map_types(f);
+                }
+                validator.fallback.map_types(f);
+            }
+            Definition::ModuleConstant(constant) => constant.value.map_types(f),
+            Definition::TypeAlias(_) | Definition::DataType(_) | Definition::Use(_) => {}
+        }
+    }
+}
+
+impl TypedFunction {
+    /// Replaces every type the function's signature and body hold with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        for argument in &mut self.arguments {
+            argument.tipo = f(&argument.tipo);
+        }
+        self.return_type = f(&self.return_type);
+        self.body.map_types(f);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Definition<T, Arg, Expr, PackageName> {
@@ -1549,6 +1590,42 @@ impl TypedPattern {
         TypedPattern::Var {
             name: name.to_string(),
             location: Span::empty(),
+        }
+    }
+
+    /// Replaces every type the pattern holds with `f` of it.
+    pub fn map_types(&mut self, f: &mut impl FnMut(&Rc<Type>) -> Rc<Type>) {
+        match self {
+            Pattern::Int { .. }
+            | Pattern::ByteArray { .. }
+            | Pattern::Var { .. }
+            | Pattern::Discard { .. } => {}
+            Pattern::Assign { pattern, .. } => pattern.map_types(f),
+            Pattern::List { elements, tail, .. } => {
+                for element in elements {
+                    element.map_types(f);
+                }
+                if let Some(tail) = tail {
+                    tail.map_types(f);
+                }
+            }
+            Pattern::Constructor {
+                arguments, tipo, ..
+            } => {
+                *tipo = f(tipo);
+                for argument in arguments {
+                    argument.value.map_types(f);
+                }
+            }
+            Pattern::Pair { fst, snd, .. } => {
+                fst.map_types(f);
+                snd.map_types(f);
+            }
+            Pattern::Tuple { elems, .. } => {
+                for elem in elems {
+                    elem.map_types(f);
+                }
+            }
         }
     }
 

@@ -16,8 +16,8 @@ description: "Code:\n\npub opaque type Thing {\n  a: Int\n}\n\npub fn add(a: Thi
  6 │     a.a + b
  7 │ }
    ╰────
-  help: Opaque types cannot appear in an exposed interface such as a validator's datum or redeemer type or an exported function. Indeed, an opaque type hides its implementation details, usually
-        because it enforces an invariant that cannot be safely reconstructed from arbitrary Plutus Data.
+  help: Opaque types cannot appear in an exposed interface such as a validator's parameter, datum or redeemer type or an exported function. Indeed, an opaque type hides its implementation details,
+        usually because it enforces an invariant that cannot be safely reconstructed from arbitrary Plutus Data.
         
         The problematic interface type is:
         

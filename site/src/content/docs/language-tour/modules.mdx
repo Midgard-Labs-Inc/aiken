@@ -145,11 +145,12 @@ unsafe to downcast any arbitrary pair of integer into a `Rational` since there's
 more than just a structural equivalence at play.
 
 For the same reasons, it isn't possible to use an opaque type (or any type
-holding an opaque type) as a validator's datum and/or redeemer.
+holding an opaque type) as a validator's datum, redeemer or parameter.
 :::
 
 There's a _special treatment_ for an opaque type with only one constructor,
-and if that constructor has only 1 field. Under the hood, it behaves like a
+and if that constructor has only 1 field, and neither the type nor the
+constructor has a decorator (such as `@tag`). Under the hood, it behaves like a
 Haskell's `newtype`. This matters when we're dealing with CBOR.
 
 For example:

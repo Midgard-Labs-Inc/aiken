@@ -1,12 +1,11 @@
 use super::{
     RecordAccessor, Type, ValueConstructor, ValueConstructorVariant,
-    environment::{
-        EntityKind, Environment, ScopeResetData, assert_no_labeled_arguments, generalise,
-    },
+    environment::{EntityKind, Environment, ScopeResetData, assert_no_labeled_arguments},
     error::{Error, Warning},
     hydrator::Hydrator,
     pattern::PatternTyper,
     pipe::PipeTyper,
+    requirement::Cast,
 };
 use crate::{
     IdGenerator,
@@ -22,10 +21,7 @@ use crate::{
     expr::{FnStyle, TypedExpr, UntypedExpr},
     format,
     parser::token::Base,
-    tipo::{
-        DefaultFunction, ModuleKind, PatternConstructor, TypeConstructor, environment::UnifyMode,
-        fields::FieldMap,
-    },
+    tipo::{DefaultFunction, ModuleKind, PatternConstructor, TypeConstructor, fields::FieldMap},
 };
 use std::{
     cmp::Ordering,
@@ -37,7 +33,6 @@ use vec1::Vec1;
 #[allow(clippy::result_large_err)]
 pub(crate) fn infer_function(
     fun: &UntypedFunction,
-    module_name: &str,
     hydrators: &mut HashMap<String, Hydrator>,
     environment: &mut Environment<'_>,
     tracing: Tracing,
@@ -97,8 +92,6 @@ pub(crate) fn infer_function(
         .get_variable(name)
         .unwrap_or_else(|| panic!("Could not find preregistered type for function: {name}"));
 
-    let field_map = preregistered_fn.field_map().cloned();
-
     let preregistered_type = preregistered_fn.tipo.clone();
 
     let (args_types, return_type) = preregistered_type
@@ -152,64 +145,34 @@ pub(crate) fn infer_function(
         // Backtrack and infer callee first.
         let temp_scope = environment.open_new_scope();
         environment.close_scope(top_level_scope.clone());
-        infer_function(
-            &function,
-            environment.current_module,
-            hydrators,
-            environment,
-            tracing,
-            top_level_scope,
-        )?;
+        infer_function(&function, hydrators, environment, tracing, top_level_scope)?;
 
         environment.open_new_scope();
         environment.close_scope(temp_scope);
 
         // Then, try again the entire function definition.
-        return infer_function(
-            fun,
-            module_name,
-            hydrators,
-            environment,
-            tracing,
-            top_level_scope,
-        );
+        return infer_function(fun, hydrators, environment, tracing, top_level_scope);
     }
 
     let (arguments, body, return_type) = inferred?;
 
     let args_types = arguments.iter().map(|a| a.tipo.clone()).collect();
 
-    let tipo = Type::function(args_types, return_type);
+    let tipo = Type::function(args_types, return_type.clone());
 
-    let safe_to_generalise = !expr_typer.ungeneralised_function_used;
+    expr_typer.environment.note_unreachable_variables(
+        name,
+        Some(&tipo),
+        expr_typer.hydrator.all_rigid_names(),
+    );
+
+    let used = std::mem::take(&mut expr_typer.ungeneralised_functions_used);
 
     environment.close_scope(initial_scope);
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
     // Assert that the inferred type matches the type of any recursive call
-    environment.unify(preregistered_type, tipo.clone(), *location)?;
-
-    // Generalise the function if safe to do so
-    let tipo = if safe_to_generalise {
-        environment.ungeneralised_functions.remove(name);
-
-        let tipo = generalise(tipo, 0);
-
-        let module_fn = ValueConstructorVariant::ModuleFn {
-            name: name.clone(),
-            field_map,
-            module: module_name.to_owned(),
-            arity: arguments.len(),
-            location: *location,
-            builtin: None,
-        };
-
-        environment.insert_variable(name.clone(), module_fn, tipo.clone());
-
-        tipo
-    } else {
-        tipo
-    };
+    environment.unify(preregistered_type, tipo, *location)?;
 
     let inferred_fn = Function {
         doc: doc.clone(),
@@ -218,9 +181,7 @@ pub(crate) fn infer_function(
         public: *public,
         arguments,
         return_annotation: return_annotation.clone(),
-        return_type: tipo
-            .return_type()
-            .expect("Could not find return type for fn"),
+        return_type,
         body,
         on_test_failure: on_test_failure.clone(),
         end_position: *end_position,
@@ -228,9 +189,15 @@ pub(crate) fn infer_function(
 
     environment
         .inferred_functions
-        .insert(name.to_string(), inferred_fn.clone());
+        .insert(name.to_string(), inferred_fn);
 
-    Ok(inferred_fn)
+    // Validator handlers and tests aren't called by other code: their unknown types become
+    // `Data` at the boundary.
+    if environment.function_names.contains(name) {
+        environment.generalise_inferred_groups(name, used);
+    }
+
+    Ok(environment.inferred_functions[name].clone())
 }
 
 #[derive(Debug)]
@@ -247,10 +214,9 @@ pub(crate) struct ExprTyper<'a, 'b> {
     // A static set of remaining function names that are known but not yet inferred
     pub(crate) not_yet_inferred: BTreeSet<String>,
 
-    // We keep track of whether any ungeneralised functions have been used
-    // to determine whether it is safe to generalise this expression after
-    // it has been inferred.
-    pub(crate) ungeneralised_function_used: bool,
+    // The functions used that weren't generalised yet: this function is generalised along with
+    // them, once all of them are inferred.
+    pub(crate) ungeneralised_functions_used: BTreeSet<String>,
 }
 
 impl<'a, 'b> ExprTyper<'a, 'b> {
@@ -260,7 +226,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             not_yet_inferred: BTreeSet::new(),
             environment,
             tracing,
-            ungeneralised_function_used: false,
+            ungeneralised_functions_used: BTreeSet::new(),
         }
     }
 
@@ -765,32 +731,21 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 let left = self.infer(left)?;
                 let right = self.infer(right)?;
 
-                self.unify_with(
-                    left.tipo(),
-                    right.tipo(),
-                    right.location(),
-                    UnifyMode::AllowUpCast,
-                )
-                .or_else(|err| {
-                    if name.is_symmetric() {
-                        return self
-                            .unify_with(
-                                right.tipo(),
-                                left.tipo(),
-                                left.location(),
-                                UnifyMode::AllowUpCast,
-                            )
-                            .or(Err(err));
-                    }
-
-                    Err(err)
-                })?;
-
-                for tipo in [left.tipo(), right.tipo()] {
+                // If either side is `Data`, both are compared as `Data`. Otherwise, the types
+                // must match, and allow comparison.
+                let (left, right) = if left.tipo().is_data() {
+                    let location = right.location();
+                    let right = self.upcast(left.tipo(), right, location)?;
+                    (left, right)
+                } else if right.tipo().is_data() {
+                    let location = left.location();
+                    (self.upcast(right.tipo(), left, location)?, right)
+                } else {
+                    self.unify(left.tipo(), right.tipo(), right.location())?;
                     self.environment
-                        .ensure_serialisable(tipo, location)
-                        .map_err(|_| Error::IllegalComparison { location })?;
-                }
+                        .require(&left.tipo(), Cast::Compare, location)?;
+                    (left, right)
+                };
 
                 return Ok(TypedExpr::BinOp {
                     location,
@@ -932,12 +887,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             // field in the record contained within the spread variable. We
             // need to check the spread, and not the constructor, in order
             // to handle polymorphic types.
-            self.unify_with(
-                spread_field.tipo(),
-                value.tipo(),
-                value.location(),
-                UnifyMode::AllowUpCast,
-            )?;
+            let value_location = value.location();
+            let value = self.upcast(spread_field.tipo(), value, value_location)?;
 
             match field_map.fields.get(&label) {
                 None => {
@@ -1491,7 +1442,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             );
         }
 
-        let typed_value = self.infer(untyped_value.clone())?;
+        let mut typed_value = self.infer(untyped_value.clone())?;
 
         let mut value_typ = typed_value.tipo();
 
@@ -1503,12 +1454,14 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 .type_from_annotation(ann)
                 .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
 
-            self.unify_with(
-                ann_typ.clone(),
-                value_typ.clone(),
-                typed_value.type_defining_location(),
-                kind.into(),
-            )?;
+            let value_location = typed_value.type_defining_location();
+
+            if value_is_data && !kind.is_let() && !ann_typ.is_data() {
+                self.environment
+                    .require(&ann_typ, Cast::from_data(&kind), value_location)?;
+            } else {
+                typed_value = self.upcast(ann_typ.clone(), typed_value, value_location)?;
+            }
 
             value_typ = ann_typ.clone();
 
@@ -1555,11 +1508,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     false,
                 ) {
                     Ok(pattern) if ann_typ.is_monomorphic() => {
-                        self.unify_with(
-                            ann_typ.clone(),
-                            value_typ.clone(),
+                        self.environment.require(
+                            &ann_typ,
+                            Cast::from_data(&kind),
                             typed_value.type_defining_location(),
-                            kind.into(),
                         )?;
 
                         value_typ = ann_typ.clone();
@@ -1701,31 +1653,15 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
 
         let typed_value = self.infer(untyped_value)?;
 
-        let value_type = typed_value.tipo();
-
-        if value_type.is_unbounded_list() {
-            return Err(Error::AmbiguousEmptyList {
-                location: typed_value.location(),
-            });
-        }
-
-        if !self.environment.is_data_like(&value_type) {
-            return Err(Error::IllegalCoerce {
-                location: typed_value.location(),
-                tipo: value_type,
-            });
-        }
+        self.environment
+            .require(&typed_value.tipo(), Cast::Coerce, typed_value.location())?;
 
         let tipo = self
             .type_from_annotation(annotation)
             .and_then(|t| self.instantiate(t, &mut HashMap::new(), location))?;
 
-        if !self.environment.is_data_like(&tipo) {
-            return Err(Error::IllegalCoerce {
-                location: annotation.location(),
-                tipo,
-            });
-        }
+        self.environment
+            .require(&tipo, Cast::Coerce, annotation.location())?;
 
         let pattern = PatternTyper::new(self.environment, &self.hydrator).unify(
             untyped_pattern,
@@ -1778,7 +1714,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             // about what the expected arguments are. This extra information
             // when type checking the function body means that the
             // `record.field` access syntax can be used, and improves error
-            // messages.
+            // messages. A capture gets the expected arguments too, as a lambda does.
             (
                 Type::Fn {
                     args: expected_arguments,
@@ -1792,29 +1728,22 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                     location,
                     fn_style,
                 },
-            ) if fn_style != FnStyle::Capture && expected_arguments.len() == arguments.len() => {
-                self.infer_fn(
-                    arguments,
-                    expected_arguments,
-                    *body,
-                    false,
-                    return_annotation,
-                    location,
-                )
-            }
+            ) if expected_arguments.len() == arguments.len() => self.infer_fn(
+                arguments,
+                expected_arguments,
+                *body,
+                fn_style == FnStyle::Capture,
+                return_annotation,
+                location,
+            ),
 
             // Otherwise just perform normal type inference.
             (_, value) => self.infer(value),
         }?;
 
-        self.unify_with(
-            tipo.clone(),
-            value.tipo(),
-            value.location(),
-            UnifyMode::AllowUpCast,
-        )?;
+        let location = value.location();
 
-        Ok(value)
+        self.upcast(tipo, value, location)
     }
 
     #[allow(clippy::result_large_err)]
@@ -2084,11 +2013,10 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         // Check that any return type is accurate.
         let return_type = match return_type {
             Some(return_type) => {
-                self.unify_with(
+                self.unify(
                     return_type.clone(),
                     body.tipo(),
                     body.type_defining_location(),
-                    UnifyMode::AllowUpCast,
                 )
                 .map_err(|e| {
                     e.return_annotation_mismatch()
@@ -2101,7 +2029,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         };
 
         self.environment
-            .ensure_serialisable_at_top_level(return_type.clone(), body.type_defining_location())?;
+            .require_stored(&return_type, body.type_defining_location())?;
 
         Ok((args, body, return_type))
     }
@@ -2135,9 +2063,7 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
             elems.push(element)
         }
 
-        // Ensure elements are serialisable to Data.
-        self.environment
-            .ensure_serialisable(tipo.clone(), location)?;
+        self.environment.require(&tipo, Cast::Store, location)?;
 
         // Type check the ..tail, if there is one
         let tipo = Type::list(tipo);
@@ -2552,11 +2478,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
     ) -> Result<TypedExpr, Error> {
         let typed_fst = self.infer(fst)?;
         self.environment
-            .ensure_serialisable(typed_fst.tipo(), location)?;
+            .require(&typed_fst.tipo(), Cast::Store, location)?;
 
         let typed_snd = self.infer(snd)?;
         self.environment
-            .ensure_serialisable(typed_snd.tipo(), location)?;
+            .require(&typed_snd.tipo(), Cast::Store, location)?;
 
         Ok(TypedExpr::Pair {
             location,
@@ -2573,9 +2499,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         for elem in elems {
             let typed_elem = self.infer(elem)?;
 
-            // Ensure elements are serialisable to Data.
             self.environment
-                .ensure_serialisable(typed_elem.tipo(), location)?;
+                .require(&typed_elem.tipo(), Cast::Store, location)?;
 
             typed_elems.push(typed_elem);
         }
@@ -2669,18 +2594,16 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                         .push(Warning::CompactTraceLabelIsNotstring { location });
                 }
 
-                self.unify_with(
-                    Type::data(),
-                    typed_arg.tipo(),
-                    typed_arg.location(),
-                    UnifyMode::AllowUpCast,
-                )
-                .map_err(|err| match err {
-                    Error::CouldNotUnify { location, .. } => {
-                        Error::IllegalTraceArgument { location }
-                    }
-                    err => err,
-                })?;
+                let arg_location = typed_arg.location();
+
+                let typed_arg = self.upcast(Type::data(), typed_arg, arg_location).map_err(
+                    |err| match err {
+                        Error::CouldNotUnify { location, .. } => {
+                            Error::IllegalTraceArgument { location }
+                        }
+                        err => err,
+                    },
+                )?;
 
                 diagnose_expr(typed_arg)
             }
@@ -2791,13 +2714,11 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
                 if let ValueConstructorVariant::ModuleFn { name: fn_name, .. } =
                     &constructor.variant
                 {
-                    // Note whether we are using an ungeneralised function so that we can
-                    // tell if it is safe to generalise this function after inference has
-                    // completed.
-                    let is_ungeneralised = self.environment.ungeneralised_functions.contains(name);
-
-                    self.ungeneralised_function_used =
-                        self.ungeneralised_function_used || is_ungeneralised;
+                    // This function is generalised along with the ungeneralised functions it
+                    // uses, once all of them are inferred.
+                    if self.environment.ungeneralised_functions.contains(name) {
+                        self.ungeneralised_functions_used.insert(name.to_string());
+                    }
 
                     // In case we use another function, infer it first before going further.
                     // This ensures we have as much information possible about the function
@@ -2958,8 +2879,8 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         location: Span,
     ) -> Result<Rc<Type>, Error> {
         let result = self.environment.instantiate(t, ids, &self.hydrator);
-        self.environment
-            .ensure_serialisable_at_top_level(result.clone(), location)?;
+        self.environment.require_stored(&result, location)?;
+        self.environment.require_instantiated(ids, location)?;
         Ok(result)
     }
 
@@ -2984,15 +2905,28 @@ impl<'a, 'b> ExprTyper<'a, 'b> {
         self.environment.unify(t1, t2, location)
     }
 
+    /// `value` where a value of type `expected` is expected, in a position that upcasts: there,
+    /// a value of another type is accepted where `Data` is expected, and converted to it.
     #[allow(clippy::result_large_err)]
-    pub(super) fn unify_with(
+    fn upcast(
         &mut self,
-        t1: Rc<Type>,
-        t2: Rc<Type>,
+        expected: Rc<Type>,
+        value: TypedExpr,
         location: Span,
-        unify_mode: UnifyMode,
-    ) -> Result<(), Error> {
-        self.environment.unify_with(t1, t2, location, unify_mode)
+    ) -> Result<TypedExpr, Error> {
+        if expected.is_data() && !value.tipo().is_data() {
+            self.environment
+                .require(&value.tipo(), Cast::Upcast, location)?;
+
+            return Ok(TypedExpr::Upcast {
+                location: value.location(),
+                value: Box::new(value),
+            });
+        }
+
+        self.unify(expected, value.tipo(), location)?;
+
+        Ok(value)
     }
 }
 

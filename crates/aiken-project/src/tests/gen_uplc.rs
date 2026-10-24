@@ -6808,7 +6808,9 @@ fn invalid_module_constant_returns_codegen_error() {
         .generate_raw(&test.body, &[], &checked_module.name)
         .unwrap_err();
 
-    let CodeGenError::CouldNotEvaluateConstant { name, error, .. } = error;
+    let CodeGenError::CouldNotEvaluateConstant { name, error, .. } = error else {
+        panic!("expected a constant evaluation error, got {error:?}")
+    };
 
     assert_eq!(name, "test_module.x");
     assert!(matches!(*error, uplc::machine::Error::DivideByZero(..)));

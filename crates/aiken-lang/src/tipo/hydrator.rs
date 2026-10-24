@@ -26,6 +26,9 @@ pub struct Hydrator {
     /// variable. This type_id => name map is used for reporting the original
     /// annotated name on error.
     rigid_type_names: HashMap<u64, String>,
+    /// Every rigid type variable created so far, in any scope: closing a scope forgets the
+    /// names it introduced, but not the variables, which its expressions still hold.
+    all_rigid_type_names: HashMap<u64, String>,
     permit_new_type_variables: bool,
 }
 
@@ -46,6 +49,7 @@ impl Hydrator {
         Hydrator {
             created_type_variables: HashMap::new(),
             rigid_type_names: HashMap::new(),
+            all_rigid_type_names: HashMap::new(),
             permit_new_type_variables: true,
         }
     }
@@ -78,6 +82,10 @@ impl Hydrator {
 
     pub fn rigid_names(&self) -> HashMap<u64, String> {
         self.rigid_type_names.clone()
+    }
+
+    pub fn all_rigid_names(&self) -> HashMap<u64, String> {
+        self.all_rigid_type_names.clone()
     }
 
     #[allow(clippy::result_large_err)]
@@ -209,6 +217,9 @@ impl Hydrator {
                     let var = environment.new_generic_var();
 
                     self.rigid_type_names
+                        .insert(environment.previous_uid(), name.clone());
+
+                    self.all_rigid_type_names
                         .insert(environment.previous_uid(), name.clone());
 
                     self.created_type_variables

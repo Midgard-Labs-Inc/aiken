@@ -19,30 +19,29 @@ use self::{
 use crate::{
     IdGenerator,
     ast::{
-        AssignmentKind, BinOp, Bls12_381Point, Curve, DataTypeKey, DecoratorKind,
-        FunctionAccessKey, Pattern, Span, TraceLevel, Tracing, TypedArg, TypedDataType,
-        TypedFunction, TypedPattern, TypedValidator, UnOp,
+        AssignmentKind, BinOp, Bls12_381Point, Curve, FunctionAccessKey, Pattern, Span, TraceLevel,
+        Tracing, TypedArg, TypedFunction, TypedPattern, TypedValidator, UnOp,
     },
     builtins::PRELUDE,
     expr::TypedExpr,
     gen_uplc::{
         air::ExpectLevel,
         builder::{
-            CodeGenFunction, erase_opaque_type_operations, get_generic_variant_name,
-            get_src_code_by_span, known_data_to_type, monomorphize, wrap_validator_condition,
+            CodeGenFunction, erase_opaque_types, get_generic_variant_name, get_src_code_by_span,
+            known_data_to_type, wrap_validator_condition,
         },
     },
     line_numbers::LineNumbers,
     plutus_version::PlutusVersion,
     tipo::{
-        ModuleValueConstructor, PatternConstructor, Type, TypeInfo, TypeVar, ValueConstructor,
-        ValueConstructorVariant, check_replaceable_opaque_type, convert_opaque_type,
-        find_and_replace_generics, get_generic_id_and_type, lookup_data_type_by_tipo,
+        DataLayout, ModuleValueConstructor, PatternConstructor, Type, TypeInfo, TypeVar,
+        ValueConstructor, ValueConstructorVariant, convert_opaque_type, find_and_replace_generics,
+        get_generic_id_and_type, layout::lookup_layout, requirement::Level,
     },
 };
 use builder::{
-    DISCARDED, get_constr_index_variant, introduce_name, introduce_pattern, pop_pattern,
-    softcast_data_to_type_otherwise, unknown_data_to_type,
+    DISCARDED, introduce_name, introduce_pattern, pop_pattern, softcast_data_to_type_otherwise,
+    unknown_data_to_type,
 };
 use decision_tree::{Assigned, CaseTest, DecisionTree, TreeGen, get_tipo_by_path};
 use indexmap::IndexMap;
@@ -51,7 +50,7 @@ use itertools::Itertools;
 use miette::{Diagnostic, NamedSource};
 use petgraph::{Graph, algo};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
 };
 use stick_break_set::{Builtins, TreeSet};
@@ -83,6 +82,71 @@ pub enum Error {
         #[source_code]
         source_code: NamedSource<String>,
     },
+
+    #[error("I can't compile {function}: it keeps reaching itself at new types.")]
+    #[diagnostic(
+        code("aiken::codegen::infinite_variants"),
+        help(
+            "{function} decodes or tests a value of one of its type parameters, so it needs a compiled variant for each type it's used at. Through polymorphic recursion, it reaches itself at ever larger types, here {types}, so there would be no end to its variants. Annotate the decoded value with a concrete type, or decode it outside the recursion."
+        )
+    )]
+    InfiniteVariants { function: String, types: String },
+}
+
+/// How many times a function can appear on the chain of variants that reached one of its
+/// variants, as rustc's recursion limit.
+const MAX_VARIANT_DEPTH: usize = 128;
+
+/// The largest type argument, counted in type constructors, that a variant may be built for, as
+/// rustc's type length limit. Polymorphic recursion through a decode reaches a function at a new
+/// type at each step, and can double a type each time, as from `a` to `(a, a)`. The variant's
+/// key, its decoder and every walk over its types grow with it, so the bound is checked before
+/// any of them.
+const MAX_VARIANT_TYPE_SIZE: usize = 256;
+
+/// Whether `tipo` has more than `limit` type constructors, counting each occurrence of a shared
+/// type. Stops counting past `limit`.
+fn type_size_exceeds(tipo: &Type, limit: usize) -> bool {
+    fn spend(budget: &mut usize) -> bool {
+        match budget.checked_sub(1) {
+            Some(rest) => {
+                *budget = rest;
+                false
+            }
+            None => true,
+        }
+    }
+
+    fn exceeds(tipo: &Type, budget: &mut usize) -> bool {
+        match tipo {
+            Type::Var { tipo, .. } => match &*tipo.borrow() {
+                TypeVar::Link { tipo } => exceeds(tipo, budget),
+                TypeVar::Unbound { .. } | TypeVar::Generic { .. } => false,
+            },
+            Type::App { args, .. } => spend(budget) || args.iter().any(|arg| exceeds(arg, budget)),
+            Type::Fn { args, ret, .. } => {
+                spend(budget) || args.iter().any(|arg| exceeds(arg, budget)) || exceeds(ret, budget)
+            }
+            Type::Tuple { elems, .. } => {
+                spend(budget) || elems.iter().any(|elem| exceeds(elem, budget))
+            }
+            Type::Pair { fst, snd, .. } => {
+                spend(budget) || exceeds(fst, budget) || exceeds(snd, budget)
+            }
+        }
+    }
+
+    let mut budget = limit;
+    exceeds(tipo, &mut budget)
+}
+
+/// The error for `function` reaching itself at ever larger types, here `mono_types`.
+/// `MAX_VARIANT_TYPE_SIZE` keeps those types small enough to print.
+fn infinite_variants(function: &FunctionAccessKey, mono_types: &IndexMap<u64, Rc<Type>>) -> Error {
+    Error::InfiniteVariants {
+        function: format!("{}.{}", function.module_name, function.function_name),
+        types: mono_types.values().map(|tipo| tipo.to_pretty(0)).join(", "),
+    }
 }
 
 const DELAY_ERROR: fn() -> AirTree =
@@ -207,14 +271,17 @@ fn remove_from_sorted(
 
 #[derive(Clone)]
 pub struct CodeGenerator<'a> {
-    #[allow(dead_code)]
     plutus_version: PlutusVersion,
     /// immutable index maps
     functions: IndexMap<&'a FunctionAccessKey, &'a TypedFunction>,
     constants: IndexMap<&'a FunctionAccessKey, &'a TypedExpr>,
-    data_types: IndexMap<&'a DataTypeKey, &'a TypedDataType>,
     module_types: IndexMap<&'a str, &'a TypeInfo>,
     module_src: IndexMap<&'a str, &'a (String, LineNumbers)>,
+    /// The generic variables whose values some function decodes or tests: their variants are
+    /// keyed by full type.
+    decoded_generics: HashSet<u64>,
+    /// The generic variables some cast constrains, whatever its level.
+    constrained_generics: HashSet<u64>,
     /// immutable option
     tracing: TraceLevel,
     /// mutable index maps that are reset
@@ -223,6 +290,10 @@ pub struct CodeGenerator<'a> {
     code_gen_functions: IndexMap<String, CodeGenFunction>,
     cyclic_functions:
         IndexMap<(FunctionAccessKey, Variant), (CycleFunctionNames, usize, FunctionAccessKey)>,
+    /// The function variant whose dependencies are being found, and the one that first
+    /// reached each variant: the chains `check_variant_depth` bounds.
+    hoisting_variant: Option<(FunctionAccessKey, Variant)>,
+    variant_parents: IndexMap<(FunctionAccessKey, Variant), (FunctionAccessKey, Variant)>,
     /// mutable and reset as well
     interner: AirInterner,
     id_gen: IdGenerator,
@@ -263,31 +334,70 @@ impl CachedConstant {
 }
 
 impl<'a> CodeGenerator<'a> {
-    pub fn data_types(&self) -> &IndexMap<&'a DataTypeKey, &'a TypedDataType> {
-        &self.data_types
+    pub fn module_types(&self) -> &IndexMap<&'a str, &'a TypeInfo> {
+        &self.module_types
+    }
+
+    fn layout(&self, tipo: &Type) -> Option<&'a DataLayout> {
+        lookup_layout(&self.module_types, tipo)
+    }
+
+    /// An erased constructor used as a function value is the identity: a value of the type is
+    /// its field.
+    fn erased_constructor_function(&mut self, constructor_tipo: &Rc<Type>) -> Option<AirTree> {
+        let (args, _) = constructor_tipo.function_types()?;
+
+        if !self.layout(constructor_tipo)?.is_erased() {
+            return None;
+        }
+
+        let field = "__erased_field".to_string();
+        let field_interned = introduce_name(&mut self.interner, &field);
+        let function = AirTree::anon_func(
+            vec![field_interned.clone()],
+            AirTree::local_var(&field_interned, args[0].clone()),
+            false,
+        );
+        self.interner.pop_text(field);
+
+        Some(function)
     }
 
     pub fn new(
         plutus_version: PlutusVersion,
         functions: IndexMap<&'a FunctionAccessKey, &'a TypedFunction>,
         constants: IndexMap<&'a FunctionAccessKey, &'a TypedExpr>,
-        data_types: IndexMap<&'a DataTypeKey, &'a TypedDataType>,
         module_types: IndexMap<&'a str, &'a TypeInfo>,
         module_src: IndexMap<&'a str, &'a (String, LineNumbers)>,
         tracing: Tracing,
     ) -> Self {
+        let decoded_generics = module_types
+            .values()
+            .flat_map(|info| &info.requirements)
+            .filter(|(_, requirement)| requirement.cast.level() >= Level::Decodable)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let constrained_generics = module_types
+            .values()
+            .flat_map(|info| info.requirements.keys().copied())
+            .collect();
+
         CodeGenerator {
             plutus_version,
             functions,
             constants,
-            data_types,
             module_types,
             module_src,
+            decoded_generics,
+            constrained_generics,
             tracing: tracing.trace_level(true),
             defined_functions: IndexMap::new(),
             special_functions: CodeGenSpecialFuncs::new(),
             code_gen_functions: IndexMap::new(),
             cyclic_functions: IndexMap::new(),
+            hoisting_variant: None,
+            variant_parents: IndexMap::new(),
             interner: AirInterner::new(),
             id_gen: IdGenerator::new(),
             cached_constants: HashMap::new(),
@@ -310,6 +420,25 @@ impl<'a> CodeGenerator<'a> {
         validator: &TypedValidator,
         module_name: &str,
     ) -> Result<Program<Name>, Error> {
+        self.generate_inner(validator, module_name, true)
+    }
+
+    /// Like [`Self::generate`], but skips the UPLC shrinker. `Program::lower` turns the
+    /// result into the baseline the optimized program must agree with.
+    pub fn generate_unoptimized(
+        &mut self,
+        validator: &TypedValidator,
+        module_name: &str,
+    ) -> Result<Program<Name>, Error> {
+        self.generate_inner(validator, module_name, false)
+    }
+
+    fn generate_inner(
+        &mut self,
+        validator: &TypedValidator,
+        module_name: &str,
+        optimize: bool,
+    ) -> Result<Program<Name>, Error> {
         let context_name = "__context__".to_string();
         let context_name_interned = introduce_name(&mut self.interner, &context_name);
         validator.params.iter().for_each(|arg| {
@@ -327,13 +456,10 @@ impl<'a> CodeGenerator<'a> {
 
         let validator_args_tree = AirTree::no_op(air_tree_fun);
 
-        let full_tree = self.hoist_functions_to_validator(validator_args_tree);
-
-        // optimizations on air tree
-
-        let full_vec = full_tree.to_vec();
-
-        let term = match self.uplc_code_gen(full_vec) {
+        let term = match self
+            .hoist_functions_to_validator(validator_args_tree)
+            .and_then(|full_tree| self.uplc_code_gen(full_tree.to_vec()))
+        {
             Ok(term) => term,
             Err(error) => {
                 self.reset(true);
@@ -341,7 +467,7 @@ impl<'a> CodeGenerator<'a> {
             }
         };
 
-        let term = cast_validator_args(term, &validator.params, &self.interner, &self.data_types);
+        let term = cast_validator_args(term, &validator.params, &self.interner, &self.module_types);
 
         self.interner.pop_text(context_name);
         validator.params.iter().for_each(|arg| {
@@ -350,7 +476,7 @@ impl<'a> CodeGenerator<'a> {
                 .for_each(|arg_name| self.interner.pop_text(arg_name.to_string()))
         });
 
-        Ok(self.finalize(term))
+        Ok(self.finalize_with(term, optimize))
     }
 
     pub fn generate_raw(
@@ -391,12 +517,10 @@ impl<'a> CodeGenerator<'a> {
 
         air_tree = AirTree::no_op(air_tree);
 
-        let full_tree = self.hoist_functions_to_validator(air_tree);
-
-        // optimizations on air tree
-        let full_vec = full_tree.to_vec();
-
-        let mut term = match self.uplc_code_gen(full_vec) {
+        let mut term = match self
+            .hoist_functions_to_validator(air_tree)
+            .and_then(|full_tree| self.uplc_code_gen(full_tree.to_vec()))
+        {
             Ok(term) => term,
             Err(error) => {
                 self.reset(true);
@@ -407,7 +531,7 @@ impl<'a> CodeGenerator<'a> {
         term = if args.is_empty() {
             term
         } else {
-            cast_validator_args(term, args, &self.interner, &self.data_types)
+            cast_validator_args(term, args, &self.interner, &self.module_types)
         };
 
         args.iter().for_each(|arg| {
@@ -426,10 +550,6 @@ impl<'a> CodeGenerator<'a> {
         };
 
         Program { version, term }
-    }
-
-    fn finalize(&mut self, term: Term<Name>) -> Program<Name> {
-        self.finalize_with(term, true)
     }
 
     fn finalize_with(&mut self, mut term: Term<Name>, optimize: bool) -> Program<Name> {
@@ -471,14 +591,18 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    // TODO: pass mono types to build so monomorphization
-    // happens as we build the AIR Tree rather than after
     fn build(
         &mut self,
         body: &TypedExpr,
         module_build_name: &str,
         context: &[TypedExpr],
     ) -> AirTree {
+        assert!(
+            !body.tipo().contains_unbound(),
+            "an unknown type reached code generation: {}",
+            body.tipo().to_pretty(0)
+        );
+
         stacker::maybe_grow(256 * 1024, 2 * 1024 * 1024, || {
             self.build_inner(body, module_build_name, context)
         })
@@ -593,6 +717,9 @@ impl<'a> CodeGenerator<'a> {
                             AirTree::var(constructor.clone(), name, "")
                         }
                     }
+                    ValueConstructorVariant::Record { .. } => self
+                        .erased_constructor_function(&constructor.tipo)
+                        .unwrap_or_else(|| AirTree::var(constructor.clone(), name, "")),
                     _ => AirTree::var(constructor.clone(), name, ""),
                 },
 
@@ -657,39 +784,29 @@ impl<'a> CodeGenerator<'a> {
                             },
                         ..
                     } => {
-                        let data_type = lookup_data_type_by_tipo(&self.data_types, tipo)
-                            .unwrap_or_else(||
-                                panic!(
-                                    "Creating a record of type {:?} with no record definition. Known definitions: {:?}",
-                                    tipo.to_pretty(0),
-                                    self.data_types.keys()
-                                )
-                            );
+                        let layout = self.layout(tipo).unwrap_or_else(|| {
+                            panic!(
+                                "Creating a record of type {} with no layout",
+                                tipo.to_pretty(0)
+                            )
+                        });
 
-                        let err = &format!("Missing constr variant {constr_name}");
-                        let (constr_index, _) =
-                            get_constr_index_variant(&data_type, constr_name).expect(err);
+                        let constr_index = layout
+                            .constructor(constr_name)
+                            .unwrap_or_else(|| panic!("Missing constr variant {constr_name}"))
+                            .index;
 
                         let constr_args = args
                             .iter()
-                            .zip(constr_tipo.arg_types().unwrap())
-                            .map(|(arg, tipo)| {
-                                if tipo.is_data() {
-                                    AirTree::cast_to_data(
-                                        self.build(&arg.value, module_build_name, &[]),
-                                        arg.value.tipo(),
-                                    )
-                                } else {
-                                    self.build(&arg.value, module_build_name, &[])
-                                }
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
-                        let index = if data_type
-                            .decorators
-                            .iter()
-                            .any(|dec| matches!(dec.kind, DecoratorKind::List))
-                        {
+                        if layout.is_erased() {
+                            // A newtype: the value is its field.
+                            return constr_args.into_iter().next().unwrap();
+                        }
+
+                        let index = if layout.is_list() {
                             None
                         } else {
                             Some(constr_index)
@@ -706,23 +823,9 @@ impl<'a> CodeGenerator<'a> {
                             },
                         ..
                     } => {
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         if let Some(func) = builtin {
@@ -749,24 +852,9 @@ impl<'a> CodeGenerator<'a> {
                             unreachable!("Missing module function definition")
                         };
 
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         if let Some(func) = builtin {
@@ -780,23 +868,9 @@ impl<'a> CodeGenerator<'a> {
                         }
                     }
                     _ => {
-                        let fun_arg_types = fun
-                            .tipo()
-                            .arg_types()
-                            .expect("Expected a function type with arguments");
-
-                        assert!(args.len() == fun_arg_types.len());
-
                         let func_args = args
                             .iter()
-                            .zip(fun_arg_types)
-                            .map(|(arg, arg_tipo)| {
-                                let mut arg_val = self.build(&arg.value, module_build_name, &[]);
-                                if arg_tipo.is_data() && !arg.value.tipo().is_data() {
-                                    arg_val = AirTree::cast_to_data(arg_val, arg.value.tipo())
-                                }
-                                arg_val
-                            })
+                            .map(|arg| self.build(&arg.value, module_build_name, &[]))
                             .collect_vec();
 
                         AirTree::call(
@@ -883,16 +957,20 @@ impl<'a> CodeGenerator<'a> {
                             location: Span::empty(),
                         };
 
-                        let tree_gen =
-                            TreeGen::new(&mut self.interner, &self.data_types, &wild_card);
+                        // The tree's paths walk runtime types: an erased type's value is its field.
+                        let subject_tipo =
+                            convert_opaque_type(&subject.tipo(), &self.module_types, true);
 
-                        let tree = tree_gen.build_tree(&subject.tipo(), clauses);
+                        let tree_gen =
+                            TreeGen::new(&mut self.interner, &self.module_types, &wild_card);
+
+                        let tree = tree_gen.build_tree(clauses);
 
                         let stick_set = TreeSet::new();
 
                         let clauses = self.handle_decision_tree(
                             &subject_name_interned,
-                            subject.tipo(),
+                            subject_tipo,
                             tipo.clone(),
                             module_build_name,
                             tree,
@@ -943,7 +1021,8 @@ impl<'a> CodeGenerator<'a> {
                                                 value_type: branch.condition.tipo(),
                                                 kind: AssignmentKind::Expect { backpassing: () },
                                                 remove_unused: false,
-                                                full_check: true,
+                                                full_check: branch.condition.tipo().is_data()
+                                                    && !tipo.is_data(),
                                                 otherwise: Some(AirTree::local_var(
                                                     &acc_var,
                                                     tipo.clone(),
@@ -978,7 +1057,11 @@ impl<'a> CodeGenerator<'a> {
                         "illegal record access on a Pair. This should have been a pair-index access."
                     );
 
-                    if check_replaceable_opaque_type(&record.tipo(), &self.data_types) {
+                    let layout = self
+                        .layout(&record.tipo())
+                        .unwrap_or_else(|| panic!("Missing layout for type: {:#?}", record.tipo()));
+
+                    if layout.is_erased() {
                         self.build(record, module_build_name, &[])
                     } else {
                         let function_name = format!("__access_index_{}", *index);
@@ -1009,18 +1092,7 @@ impl<'a> CodeGenerator<'a> {
                             );
                         }
 
-                        let err =
-                            format!("Missing record data type for type: {:#?}", record.tipo());
-
-                        let record_data_type =
-                            lookup_data_type_by_tipo(self.data_types(), &record.tipo())
-                                .expect(&err);
-
-                        let list_of_fields = if record_data_type
-                            .decorators
-                            .iter()
-                            .any(|dec| matches!(dec.kind, DecoratorKind::List))
-                        {
+                        let list_of_fields = if layout.is_list() {
                             self.build(record, module_build_name, &[])
                         } else {
                             AirTree::call(
@@ -1048,8 +1120,14 @@ impl<'a> CodeGenerator<'a> {
                         field_map,
                         ..
                     } => {
+                        if let Some(function) = self.erased_constructor_function(tipo) {
+                            return function;
+                        }
+
                         let val_constructor = {
-                            let data_type = lookup_data_type_by_tipo(&self.data_types, tipo);
+                            let layout = self
+                                .layout(tipo)
+                                .expect("Created a module type without a definition?");
 
                             ValueConstructor::public(
                                 tipo.clone(),
@@ -1059,11 +1137,7 @@ impl<'a> CodeGenerator<'a> {
                                     field_map: field_map.clone(),
                                     location: Span::empty(),
                                     module: module_name.clone(),
-                                    constructors_count: data_type
-                                        .expect("Created a module type without a definition?")
-                                        .constructors
-                                        .len()
-                                        as u16,
+                                    constructors_count: layout.constructors.len() as u16,
                                 },
                             )
                         };
@@ -1188,6 +1262,25 @@ impl<'a> CodeGenerator<'a> {
                 TypedExpr::RecordUpdate {
                     tipo, spread, args, ..
                 } => {
+                    if let Some(layout) = self.layout(tipo)
+                        && layout.is_erased()
+                    {
+                        let spread = self.build(spread, module_build_name, &[]);
+
+                        let Some(arg) = args.first() else {
+                            return spread;
+                        };
+
+                        let value = self.build(&arg.value, module_build_name, &[]);
+
+                        // The spread is still evaluated: it may be a check that fails.
+                        let spread_name = "__erased_spread".to_string();
+                        let spread_interned = introduce_name(&mut self.interner, &spread_name);
+                        self.interner.pop_text(spread_name);
+
+                        return AirTree::let_assignment(spread_interned, spread, value);
+                    }
+
                     let mut index_types = vec![];
                     let mut update_args = vec![];
 
@@ -1219,6 +1312,9 @@ impl<'a> CodeGenerator<'a> {
                     AirTree::unop(*op, self.build(value, module_build_name, &[]))
                 }
                 TypedExpr::CurvePoint { point, .. } => AirTree::curve(*point.as_ref()),
+                TypedExpr::Upcast { value, .. } => {
+                    AirTree::cast_to_data(self.build(value, module_build_name, &[]), value.tipo())
+                }
             }
         }
     }
@@ -1282,12 +1378,6 @@ impl<'a> CodeGenerator<'a> {
                         then,
                     )
                 }
-            } else if !props.value_type.is_data() && tipo.is_data() {
-                AirTree::let_assignment(
-                    name,
-                    AirTree::cast_to_data(value, props.value_type.clone()),
-                    then,
-                )
             } else {
                 AirTree::let_assignment(name, value, then)
             }
@@ -1355,7 +1445,7 @@ impl<'a> CodeGenerator<'a> {
                 if props.full_check {
                     let mut index_map = IndexMap::new();
 
-                    let non_opaque_tipo = convert_opaque_type(tipo, &self.data_types, true);
+                    let non_opaque_tipo = convert_opaque_type(tipo, &self.module_types, true);
 
                     let val = AirTree::local_var(&name, tipo.clone());
 
@@ -1408,7 +1498,7 @@ impl<'a> CodeGenerator<'a> {
 
                     let mut index_map = IndexMap::new();
 
-                    let non_opaque_tipo = convert_opaque_type(tipo, &self.data_types, true);
+                    let non_opaque_tipo = convert_opaque_type(tipo, &self.module_types, true);
 
                     let val = AirTree::local_var(&name_interned, tipo.clone());
 
@@ -1923,15 +2013,13 @@ impl<'a> CodeGenerator<'a> {
 
                 let local_value = AirTree::local_var(&constructor_name_interned, tipo.clone());
 
-                let data_type = lookup_data_type_by_tipo(&self.data_types, tipo)
-                    .unwrap_or_else(|| unreachable!("Failed to find definition for {}", name));
+                let layout = self
+                    .layout(tipo)
+                    .unwrap_or_else(|| unreachable!("Failed to find a layout for {}", name));
 
-                let list_decorator = data_type
-                    .decorators
-                    .iter()
-                    .any(|dec| matches!(dec.kind, DecoratorKind::List));
+                let is_never = tipo.is_never();
 
-                let then = if check_replaceable_opaque_type(tipo, &self.data_types) {
+                let then = if layout.is_erased() {
                     AirTree::let_assignment(&fields[0].1, local_value.clone(), then)
                 } else {
                     AirTree::fields_expose(
@@ -1940,21 +2028,21 @@ impl<'a> CodeGenerator<'a> {
                         props.full_check,
                         then,
                         otherwise.clone(),
-                        list_decorator,
+                        layout.is_list(),
                     )
                 };
 
                 let then = if props.kind.is_expect()
-                    && !list_decorator
-                    && (data_type.constructors.len() > 1
-                        || props.full_check
-                        // Never check is not needed in theory since never has 2 constr variants
-                        || data_type.is_never())
+                    && !layout.is_list()
+                    && !layout.is_erased()
+                    && (layout.constructors.len() > 1 || props.full_check || is_never)
                 {
-                    let (index, _) =
-                        get_constr_index_variant(&data_type, name).unwrap_or_else(|| {
+                    let index = layout
+                        .constructor(name)
+                        .unwrap_or_else(|| {
                             panic!("Found constructor type {name} with 0 matching constructors")
-                        });
+                        })
+                        .index;
 
                     AirTree::when(
                         &subject_name_interned,
@@ -1971,8 +2059,8 @@ impl<'a> CodeGenerator<'a> {
                     )
                 } else {
                     assert!(
-                        data_type.constructors.len() == 1 || data_type.is_never(),
-                        "attempted let-assignment on a type with more or less than 1 constructor: \nis_expect? {}\nfull_check? {}\ndata_type={data_type:#?}\n{}",
+                        layout.constructors.len() == 1,
+                        "attempted let-assignment on a type with more than 1 constructor: \nis_expect? {}\nfull_check? {}\n{}",
                         props.kind.is_expect(),
                         props.full_check,
                         name,
@@ -2120,7 +2208,7 @@ impl<'a> CodeGenerator<'a> {
         );
         // Shouldn't be needed but still here just in case
         // this function is called from anywhere else besides assignment
-        let tipo = &convert_opaque_type(tipo, &self.data_types, true);
+        let tipo = &convert_opaque_type(tipo, &self.module_types, true);
 
         let uplc_type = tipo.get_uplc_type();
 
@@ -2514,24 +2602,11 @@ impl<'a> CodeGenerator<'a> {
 
             // Constr type
             None => {
-                let data_type =
-                    lookup_data_type_by_tipo(&self.data_types, tipo).unwrap_or_else(|| {
-                        unreachable!("We need a data type definition for type {:#?}", tipo)
-                    });
+                let layout = self.layout(tipo).unwrap_or_else(|| {
+                    unreachable!("We need a data type layout for type {:#?}", tipo)
+                });
 
-                assert!(data_type.typed_parameters.len() == tipo.arg_types().unwrap().len());
-
-                let mono_types: IndexMap<u64, Rc<Type>> = if !data_type.typed_parameters.is_empty()
-                {
-                    data_type
-                        .typed_parameters
-                        .iter()
-                        .zip(tipo.arg_types().unwrap())
-                        .flat_map(|item| get_generic_id_and_type(item.0, &item.1))
-                        .collect()
-                } else {
-                    IndexMap::new()
-                };
+                let type_args = tipo.arg_types().unwrap();
 
                 let data_type_name = expect_decoder_function_name(tipo, otherwise.is_some());
                 let function = self.code_gen_functions.get(&data_type_name);
@@ -2550,45 +2625,21 @@ impl<'a> CodeGenerator<'a> {
                         .as_ref()
                         .map(|_| AirTree::local_var("otherwise_delayed", Type::void()));
 
-                    let is_never = data_type.is_never();
-
-                    let list_decorator = data_type
-                        .decorators
-                        .iter()
-                        .any(|dec| matches!(dec.kind, DecoratorKind::List));
-
-                    let constr_clauses = data_type.constructors.iter().enumerate().rfold(
+                    let constr_clauses = layout.constructors.iter().rfold(
                         otherwise_delayed.clone().unwrap_or_else(DELAY_ERROR),
-                        |acc, (index, constr)| {
-                            // NOTE: For the Never type, we have an placeholder first constructor
-                            // that must be ignored. The Never type is considered to have only one
-                            // constructor starting at index 1 so it shouldn't be possible to
-                            // cast from Data into the first constructor. There's virtually no
-                            // constructor at index 0.
-                            if is_never && index == 0 {
-                                return acc;
-                            }
-
-                            let index = if let Some(tag) =
-                                constr.decorators.iter().find_map(|d| match &d.kind {
-                                    DecoratorKind::Tag { value, .. } => Some(value),
-                                    _ => None,
-                                }) {
-                                *tag
-                            } else {
-                                index
-                            };
+                        |acc, constr| {
+                            let index = constr.index;
 
                             let mut constr_args = vec![];
 
-                            let constr_then = constr.arguments.iter().enumerate().rfold(
-                                var_then.clone(),
-                                |then, (index, arg)| {
+                            let constr_then = layout
+                                .field_types(constr, &type_args)
+                                .into_iter()
+                                .zip(&constr.labels)
+                                .enumerate()
+                                .rfold(var_then.clone(), |then, (index, (arg_tipo, label))| {
                                     let arg_name =
-                                        arg.label.clone().unwrap_or(format!("__field_{index}"));
-
-                                    let arg_tipo =
-                                        find_and_replace_generics(&arg.tipo, &mono_types);
+                                        label.clone().unwrap_or(format!("__field_{index}"));
 
                                     constr_args.push((index, arg_name.clone(), arg_tipo.clone()));
 
@@ -2600,8 +2651,7 @@ impl<'a> CodeGenerator<'a> {
                                         then,
                                         otherwise_delayed.clone(),
                                     )
-                                },
-                            );
+                                });
                             constr_args.reverse();
 
                             let then = if constr_args.is_empty() {
@@ -2615,7 +2665,7 @@ impl<'a> CodeGenerator<'a> {
                                     ),
                                     constr_then,
                                     otherwise_delayed.clone().unwrap_or_else(DELAY_ERROR),
-                                    list_decorator,
+                                    layout.is_list(),
                                 )
                             } else {
                                 AirTree::fields_expose(
@@ -2630,11 +2680,11 @@ impl<'a> CodeGenerator<'a> {
                                     true,
                                     constr_then,
                                     otherwise_delayed.clone().unwrap_or_else(DELAY_ERROR),
-                                    list_decorator,
+                                    layout.is_list(),
                                 )
                             };
 
-                            if list_decorator {
+                            if layout.is_list() {
                                 AirTree::anon_func(vec![], then, true)
                             } else {
                                 AirTree::anon_func(
@@ -2760,16 +2810,14 @@ impl<'a> CodeGenerator<'a> {
                     .last()
                     .map_or(subject_tipo.clone(), |last| last.tipo());
 
-                let data_type = lookup_data_type_by_tipo(&self.data_types, &current_tipo);
+                let layout = self.layout(&current_tipo);
 
-                let last_clause = if data_type
-                    .as_ref()
-                    .is_none_or(|d| d.constructors.len() != cases.len())
-                {
-                    *default.unwrap()
-                } else {
-                    cases.pop().unwrap().1
-                };
+                let last_clause =
+                    if layout.is_none_or(|layout| layout.constructors.len() != cases.len()) {
+                        *default.unwrap()
+                    } else {
+                        cases.pop().unwrap().1
+                    };
 
                 let last_clause = self.handle_decision_tree(
                     subject_name,
@@ -2780,7 +2828,7 @@ impl<'a> CodeGenerator<'a> {
                     stick_set.clone(),
                 );
 
-                let test_subject_name = if data_type.is_some() {
+                let test_subject_name = if layout.is_some() {
                     format!("{}_index", current_subject_name.clone(),)
                 } else {
                     current_subject_name.clone()
@@ -3063,16 +3111,22 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
-    fn hoist_functions_to_validator(&mut self, mut air_tree: AirTree) -> AirTree {
+    /// Hoists the functions `air_tree` uses, and their variants, into it. Fails when a function
+    /// would need variants without end (see `check_variant_depth`).
+    fn hoist_functions_to_validator(&mut self, mut air_tree: AirTree) -> Result<AirTree, Error> {
         let mut functions_to_hoist = IndexMap::new();
         let mut used_functions = vec![];
         let mut defined_functions = vec![];
         let mut hoisted_functions = vec![];
         let mut validator_hoistable;
 
+        // Each program has its own chains: a constant is hoisted as a program of its own.
+        self.hoisting_variant = None;
+        self.variant_parents.clear();
+
         // TODO change subsequent tree traversals to be more like a stream.
         air_tree.traverse_tree_with(&mut |air_tree: &mut AirTree, _| {
-            erase_opaque_type_operations(air_tree, &self.data_types);
+            erase_opaque_types(air_tree, &self.module_types);
         });
 
         self.find_function_vars_and_depth(
@@ -3082,7 +3136,7 @@ impl<'a> CodeGenerator<'a> {
             &mut TreePath::new(),
             0,
             Fields::FirstField,
-        );
+        )?;
 
         validator_hoistable = used_functions.clone();
 
@@ -3104,6 +3158,8 @@ impl<'a> CodeGenerator<'a> {
                     let params = params.clone();
                     let tree_path = tree_path.clone();
 
+                    self.hoisting_variant = Some((key.clone(), variant_name.clone()));
+
                     self.define_dependent_functions(
                         &mut hoist_body,
                         &mut functions_to_hoist,
@@ -3111,7 +3167,7 @@ impl<'a> CodeGenerator<'a> {
                         &defined_functions,
                         &mut hoist_deps,
                         tree_path,
-                    );
+                    )?;
 
                     let function_variants = functions_to_hoist
                         .get_mut(&key)
@@ -3441,7 +3497,7 @@ impl<'a> CodeGenerator<'a> {
             );
         }
 
-        air_tree
+        Ok(air_tree)
     }
 
     fn hoist_function(
@@ -3723,9 +3779,9 @@ impl<'a> CodeGenerator<'a> {
         defined_functions: &[(FunctionAccessKey, String)],
         current_function_deps: &mut Vec<(FunctionAccessKey, String)>,
         mut function_tree_path: TreePath,
-    ) {
+    ) -> Result<(), Error> {
         let Some((depth, index)) = function_tree_path.pop() else {
-            return;
+            return Ok(());
         };
 
         function_tree_path.push(depth, index);
@@ -3737,7 +3793,7 @@ impl<'a> CodeGenerator<'a> {
             &mut function_tree_path,
             depth + 1,
             Fields::FirstField,
-        );
+        )?;
 
         for (generic_function_key, variant_name) in current_function_deps.iter() {
             if !used_functions
@@ -3750,6 +3806,8 @@ impl<'a> CodeGenerator<'a> {
                 used_functions.push((generic_function_key.clone(), variant_name.clone()));
             }
         }
+
+        Ok(())
     }
 
     fn find_function_vars_and_depth(
@@ -3763,12 +3821,19 @@ impl<'a> CodeGenerator<'a> {
         path: &mut TreePath,
         current_depth: usize,
         depth_index: Fields,
-    ) {
+    ) -> Result<(), Error> {
+        let mut result = Ok(());
+
         air_tree.traverse_tree_with_path(
             path,
             current_depth,
             depth_index,
             &mut |air_tree, tree_path| {
+                // The traversal can't stop early: skip the rest of the tree after an error.
+                if result.is_err() {
+                    return;
+                }
+
                 if let AirTree::Var {
                     constructor,
                     variant_name,
@@ -3785,14 +3850,19 @@ impl<'a> CodeGenerator<'a> {
                         return;
                     };
 
-                    let function_var_tipo = &constructor.tipo;
+                    // Erasing opaque types drops generics that only appear as their phantom
+                    // arguments, so the function's generics are paired with the call's types
+                    // before the type is erased.
+                    let function_var_tipo = constructor.tipo.clone();
+                    constructor.tipo =
+                        convert_opaque_type(&function_var_tipo, &self.module_types, true);
 
                     let generic_function_key = FunctionAccessKey {
                         module_name: module.clone(),
                         function_name: func_name.clone(),
                     };
 
-                    let function_def = self.functions.get(&generic_function_key);
+                    let function_def = self.functions.get(&generic_function_key).copied();
 
                     let Some(function_def) = function_def else {
                         let code_gen_func = self
@@ -3829,7 +3899,7 @@ impl<'a> CodeGenerator<'a> {
                             let mut body = AirTree::no_op(body.clone());
 
                             body.traverse_tree_with(&mut |air_tree, _| {
-                                erase_opaque_type_operations(air_tree, &self.data_types);
+                                erase_opaque_types(air_tree, &self.module_types);
                             });
 
                             function_variant_path.insert(
@@ -3862,34 +3932,80 @@ impl<'a> CodeGenerator<'a> {
                     let mut function_def_types = function_def
                         .arguments
                         .iter()
-                        .map(|arg| convert_opaque_type(&arg.tipo, &self.data_types, true))
+                        .map(|arg| arg.tipo.clone())
                         .collect_vec();
 
-                    function_def_types.push(convert_opaque_type(
-                        &function_def.return_type,
-                        &self.data_types,
-                        true,
-                    ));
+                    function_def_types.push(function_def.return_type.clone());
 
-                    let mono_types: IndexMap<u64, Rc<Type>> = if !function_def_types.is_empty() {
+                    let mut mono_types: IndexMap<u64, Rc<Type>> = if !function_def_types.is_empty()
+                    {
                         function_def_types
                             .iter()
                             .zip(function_var_types.iter())
                             .flat_map(|(func_tipo, var_tipo)| {
                                 get_generic_id_and_type(func_tipo, var_tipo)
+                                    .into_iter()
+                                    .map(|(id, tipo)| {
+                                        (id, convert_opaque_type(&tipo, &self.module_types, true))
+                                    })
                             })
                             .collect()
                     } else {
                         IndexMap::new()
                     };
 
+                    // A generic that erasure drops from the signature, and that no cast constrains,
+                    // can't change the code: it stands for `Data`, and isn't part of the variant.
+                    let erased_generics: HashSet<u64> = function_def_types
+                        .iter()
+                        .flat_map(|tipo| {
+                            convert_opaque_type(tipo, &self.module_types, true).collect_generics()
+                        })
+                        .filter_map(|generic| generic.get_generic_id())
+                        .collect();
+
+                    let unconstrained = mono_types
+                        .keys()
+                        .copied()
+                        .filter(|id| {
+                            !erased_generics.contains(id) && !self.constrained_generics.contains(id)
+                        })
+                        .collect_vec();
+
+                    for id in &unconstrained {
+                        mono_types.insert(*id, Type::data());
+                    }
+
+                    // Polymorphic recursion without a decode never gets past this: its variants
+                    // are keyed by shape, so it soon reaches a variant that's already built.
+                    if mono_types
+                        .values()
+                        .any(|tipo| type_size_exceeds(tipo, MAX_VARIANT_TYPE_SIZE))
+                    {
+                        result = Err(infinite_variants(&generic_function_key, &mono_types));
+                        return;
+                    }
+
                     // Don't sort here. Mono types map is already in argument order.
                     let variant = mono_types
                         .iter()
-                        .map(|(_, tipo)| get_generic_variant_name(tipo))
+                        .filter(|(id, _)| !unconstrained.contains(id))
+                        .map(|(id, tipo)| self.variant_key(*id, tipo))
                         .join("");
 
                     variant_name.clone_from(&variant);
+
+                    let built = function_usage
+                        .get(&generic_function_key)
+                        .is_some_and(|variants| variants.contains_key(&variant));
+
+                    if !built
+                        && let Err(error) =
+                            self.check_variant_depth(&generic_function_key, &mono_types)
+                    {
+                        result = Err(error);
+                        return;
+                    }
 
                     if !dependency_functions
                         .iter()
@@ -3898,103 +4014,116 @@ impl<'a> CodeGenerator<'a> {
                         dependency_functions.push((generic_function_key.clone(), variant.clone()));
                     }
 
-                    if let Some(func_variants) = function_usage.get_mut(&generic_function_key) {
-                        if let Some((path, _)) = func_variants.get_mut(&variant) {
-                            *path = path.common_ancestor(tree_path);
-                        } else {
-                            let args = function_def.arguments.clone();
-
-                            let params = args
-                                .iter()
-                                .map(|arg| {
-                                    arg.arg_name
-                                        .get_variable_name()
-                                        .map(|arg| {
-                                            introduce_name(&mut self.interner, &arg.to_string())
-                                        })
-                                        .unwrap_or_else(|| DISCARDED.to_string())
-                                })
-                                .collect_vec();
-
-                            let mut function_air_tree_body = AirTree::no_op(self.build(
-                                &function_def.body,
-                                &generic_function_key.module_name,
-                                &[],
-                            ));
-
-                            function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                                erase_opaque_type_operations(air_tree, &self.data_types);
-                                monomorphize(air_tree, &mono_types);
-                            });
-
-                            args.iter().for_each(|arg| {
-                                arg.arg_name.get_variable_name().iter().for_each(|arg| {
-                                    self.interner.pop_text(arg.to_string());
-                                })
-                            });
-
-                            func_variants.insert(
-                                variant,
-                                (
-                                    tree_path.clone(),
-                                    HoistableFunction::Function {
-                                        body: function_air_tree_body,
-                                        deps: vec![],
-                                        params,
-                                    },
-                                ),
-                            );
-                        }
-                    } else {
-                        let args = function_def.arguments.clone();
-
-                        let params = args
-                            .iter()
-                            .map(|arg| {
-                                arg.arg_name
-                                    .get_variable_name()
-                                    .map(|arg| introduce_name(&mut self.interner, &arg.to_string()))
-                                    .unwrap_or_else(|| DISCARDED.to_string())
-                            })
-                            .collect_vec();
-
-                        let mut function_air_tree_body = AirTree::no_op(self.build(
-                            &function_def.body,
-                            &generic_function_key.module_name,
-                            &[],
-                        ));
-
-                        function_air_tree_body.traverse_tree_with(&mut |air_tree, _| {
-                            erase_opaque_type_operations(air_tree, &self.data_types);
-                            monomorphize(air_tree, &mono_types);
-                        });
-
-                        let mut function_variant_path = IndexMap::new();
-
-                        args.iter().for_each(|arg| {
-                            arg.arg_name
-                                .get_variable_name()
-                                .iter()
-                                .for_each(|arg| self.interner.pop_text(arg.to_string()))
-                        });
-
-                        function_variant_path.insert(
-                            variant,
-                            (
-                                tree_path.clone(),
-                                HoistableFunction::Function {
-                                    body: function_air_tree_body,
-                                    deps: vec![],
-                                    params,
-                                },
-                            ),
-                        );
-
-                        function_usage.insert(generic_function_key, function_variant_path);
+                    if built {
+                        let (path, _) = function_usage
+                            .get_mut(&generic_function_key)
+                            .and_then(|variants| variants.get_mut(&variant))
+                            .expect("a built variant");
+                        *path = path.common_ancestor(tree_path);
+                        return;
                     }
+
+                    if let Some(parent) = &self.hoisting_variant {
+                        self.variant_parents.insert(
+                            (generic_function_key.clone(), variant.clone()),
+                            parent.clone(),
+                        );
+                    }
+
+                    let function = self.build_function_variant(
+                        function_def,
+                        &generic_function_key.module_name,
+                        &mono_types,
+                    );
+
+                    function_usage
+                        .entry(generic_function_key)
+                        .or_default()
+                        .insert(variant, (tree_path.clone(), function));
                 }
             },
         );
+
+        result
+    }
+
+    /// A type argument's part of a variant key: its runtime shape, or its full type when the
+    /// function decodes or tests values of it, since the conversion then depends on the type.
+    fn variant_key(&self, generic: u64, tipo: &Rc<Type>) -> String {
+        if self.decoded_generics.contains(&generic) {
+            let mut key = "_type".to_string();
+            push_type_identity(&mut key, tipo);
+            key
+        } else {
+            get_generic_variant_name(tipo, &self.module_types)
+        }
+    }
+
+    /// Checks that `function` may get one more variant, reached from the variant being hoisted.
+    /// Polymorphic recursion through a decode needs a variant per type, without end: like
+    /// rustc's recursion limit, this bounds how many times a function can appear on the chain
+    /// of variants that reached it.
+    fn check_variant_depth(
+        &self,
+        function: &FunctionAccessKey,
+        mono_types: &IndexMap<u64, Rc<Type>>,
+    ) -> Result<(), Error> {
+        let mut depth = 1;
+        let mut ancestor = self.hoisting_variant.as_ref();
+
+        while let Some(variant) = ancestor {
+            if &variant.0 == function {
+                depth += 1;
+            }
+            ancestor = self.variant_parents.get(variant);
+        }
+
+        if depth > MAX_VARIANT_DEPTH {
+            return Err(infinite_variants(function, mono_types));
+        }
+
+        Ok(())
+    }
+
+    /// Compiles the variant of a function for the concrete types in `mono_types`, from a copy of
+    /// its typed body where those types replace the function's generics.
+    fn build_function_variant(
+        &mut self,
+        function_def: &TypedFunction,
+        module_name: &str,
+        mono_types: &IndexMap<u64, Rc<Type>>,
+    ) -> HoistableFunction {
+        let params = function_def
+            .arguments
+            .iter()
+            .map(|arg| {
+                arg.arg_name
+                    .get_variable_name()
+                    .map(|arg| introduce_name(&mut self.interner, &arg.to_string()))
+                    .unwrap_or_else(|| DISCARDED.to_string())
+            })
+            .collect_vec();
+
+        let mut typed_body = function_def.body.clone();
+        typed_body.map_types(&mut |tipo| find_and_replace_generics(tipo, mono_types));
+
+        let mut body = AirTree::no_op(self.build(&typed_body, module_name, &[]));
+
+        body.traverse_tree_with(&mut |air_tree, _| {
+            erase_opaque_types(air_tree, &self.module_types);
+        });
+
+        for arg in &function_def.arguments {
+            if let Some(name) = arg.arg_name.get_variable_name() {
+                self.interner.pop_text(name.to_string());
+            }
+        }
+
+        HoistableFunction::Function {
+            body,
+            deps: vec![],
+            params,
+        }
     }
 
     fn uplc_code_gen(&mut self, mut ir_stack: Vec<Air>) -> Result<Term<Name>, Error> {
@@ -4079,7 +4208,7 @@ impl<'a> CodeGenerator<'a> {
                         AirTree::no_op(self.build(definition, &access_key.module_name, &[]));
 
                     value.traverse_tree_with(&mut |air_tree, _| {
-                        erase_opaque_type_operations(air_tree, &self.data_types);
+                        erase_opaque_types(air_tree, &self.module_types);
                     });
 
                     // Constant compilation is re-entrant: it happens while the enclosing
@@ -4087,9 +4216,9 @@ impl<'a> CodeGenerator<'a> {
                     // constant's dependency graph cannot overwrite the enclosing graph.
                     let outer_cyclic_functions = std::mem::take(&mut self.cyclic_functions);
 
-                    value = self.hoist_functions_to_validator(value);
-
-                    let term = self.uplc_code_gen(value.to_vec());
+                    let term = self
+                        .hoist_functions_to_validator(value)
+                        .and_then(|value| self.uplc_code_gen(value.to_vec()));
 
                     self.cyclic_functions = outer_cyclic_functions;
 
@@ -4223,40 +4352,31 @@ impl<'a> CodeGenerator<'a> {
                                 .apply(convert_type_to_data(
                                     Term::var("left".to_string()),
                                     arg_left,
-                                    &self.data_types,
+                                    &self.module_types,
                                 ))
                                 .apply(convert_type_to_data(
                                     Term::var("right".to_string()),
                                     arg_right,
-                                    &self.data_types,
+                                    &self.module_types,
                                 ))
                                 .lambda("right".to_string())
                                 .lambda("left".to_string()),
                         )
                     } else {
-                        let data_type = crate::tipo::lookup_data_type_by_tipo(
-                            &self.data_types,
-                            &constructor.tipo,
-                        )
-                        .unwrap_or_else(|| {
+                        let layout = self.layout(&constructor.tipo).unwrap_or_else(|| {
                             panic!(
-                                "could not find data-type definition for {} within known set: {:?}",
+                                "could not find a layout for {}",
                                 constructor.tipo.to_pretty(0),
-                                self.data_types.keys()
                             )
                         });
 
-                        let (constr_index, constr_type) =
-                            get_constr_index_variant(&data_type, constr_name).unwrap();
-
-                        let list_decorator = data_type
-                            .decorators
-                            .iter()
-                            .any(|dec| matches!(dec.kind, DecoratorKind::List));
+                        let constr = layout.constructor(constr_name).unwrap();
+                        let constr_index = constr.index;
+                        let list_decorator = layout.is_list();
 
                         let mut term = Term::empty_list();
 
-                        if constr_type.arguments.is_empty() {
+                        if constr.fields.is_empty() {
                             if !list_decorator {
                                 term = Term::constr_data()
                                     .apply(Term::integer(constr_index.into()))
@@ -4291,7 +4411,7 @@ impl<'a> CodeGenerator<'a> {
                                     .apply(convert_type_to_data(
                                         Term::var(format!("arg_{index}")),
                                         arg,
-                                        &self.data_types,
+                                        &self.module_types,
                                     ))
                                     .apply(term);
                             }
@@ -4301,7 +4421,7 @@ impl<'a> CodeGenerator<'a> {
                                     .apply(term);
                             }
 
-                            for (index, _) in constr_type.arguments.iter().enumerate().rev() {
+                            for index in (0..constr.fields.len()).rev() {
                                 term = term.lambda(format!("arg_{index}"))
                             }
                         }
@@ -4396,7 +4516,11 @@ impl<'a> CodeGenerator<'a> {
                         let list_item = if tipo.is_map() {
                             arg
                         } else {
-                            builder::convert_type_to_data(arg, &list_element_type, &self.data_types)
+                            builder::convert_type_to_data(
+                                arg,
+                                &list_element_type,
+                                &self.module_types,
+                            )
                         };
                         term = Term::mk_cons().apply(list_item).apply(term);
                     }
@@ -4448,7 +4572,7 @@ impl<'a> CodeGenerator<'a> {
                     true,
                     expect_level,
                     otherwise,
-                    &self.data_types,
+                    &self.module_types,
                 )
                 .apply(value);
 
@@ -4516,14 +4640,18 @@ impl<'a> CodeGenerator<'a> {
                     | DefaultFunction::ChooseList
                     | DefaultFunction::ChooseData
                     | DefaultFunction::MkCons
-                    | DefaultFunction::UnConstrData => {
-                        builder::special_case_builtin(&func, tipo, count, arg_vec, &self.data_types)
-                    }
+                    | DefaultFunction::UnConstrData => builder::special_case_builtin(
+                        &func,
+                        tipo,
+                        count,
+                        arg_vec,
+                        &self.module_types,
+                    ),
                     DefaultFunction::FstPair | DefaultFunction::SndPair => {
-                        builder::undata_builtin(&func, count, ret_tipo, arg_vec, &self.data_types)
+                        builder::undata_builtin(&func, count, ret_tipo, arg_vec, &self.module_types)
                     }
                     DefaultFunction::HeadList if !tipo.is_pair() => {
-                        builder::undata_builtin(&func, count, ret_tipo, arg_vec, &self.data_types)
+                        builder::undata_builtin(&func, count, ret_tipo, arg_vec, &self.module_types)
                     }
                     _ => {
                         let mut term: Term<Name> = func.into();
@@ -4596,12 +4724,12 @@ impl<'a> CodeGenerator<'a> {
                                 left = builder::convert_type_to_data(
                                     left,
                                     &left_tipo,
-                                    &self.data_types,
+                                    &self.module_types,
                                 );
                                 right = builder::convert_type_to_data(
                                     right,
                                     &right_tipo,
-                                    &self.data_types,
+                                    &self.module_types,
                                 );
                                 Term::equals_data()
                             }
@@ -4610,7 +4738,7 @@ impl<'a> CodeGenerator<'a> {
                             }
                         };
 
-                        let binop_eq = match uplc_type {
+                        let binop_eq = match &uplc_type {
                             Some(UplcType::Unit) => {
                                 left.choose_unit(right.choose_unit(Term::bool(true)))
                             }
@@ -4644,7 +4772,8 @@ impl<'a> CodeGenerator<'a> {
                             Some(_) | None => builtin.apply(left).apply(right),
                         };
 
-                        if !left_tipo.is_bool() && matches!(op, BinOp::NotEq) {
+                        if !matches!(uplc_type, Some(UplcType::Bool)) && matches!(op, BinOp::NotEq)
+                        {
                             binop_eq.if_then_else(Term::bool(false), Term::bool(true))
                         } else {
                             binop_eq
@@ -4835,9 +4964,9 @@ impl<'a> CodeGenerator<'a> {
                 let mut term = arg_stack.pop().unwrap();
 
                 term = if full_cast {
-                    unknown_data_to_type(term, &tipo, &self.data_types)
+                    unknown_data_to_type(term, &tipo, &self.module_types)
                 } else {
-                    known_data_to_type(term, &tipo, &self.data_types)
+                    known_data_to_type(term, &tipo, &self.module_types)
                 };
 
                 if extract_constant(term.pierce_no_inlines_ref()).is_some() {
@@ -4864,7 +4993,7 @@ impl<'a> CodeGenerator<'a> {
                 let term = arg_stack.pop().unwrap();
                 let fold_constant = extract_constant(term.pierce_no_inlines_ref()).is_some();
                 let mut converted_term =
-                    builder::convert_type_to_data(term, &tipo, &self.data_types);
+                    builder::convert_type_to_data(term, &tipo, &self.module_types);
 
                 if fold_constant
                     && let Some(evaluated_term) = self.try_fold_constant(converted_term.clone())
@@ -4915,15 +5044,9 @@ impl<'a> CodeGenerator<'a> {
                     Some(UplcType::Data) => subject,
 
                     None => {
-                        let data_type = lookup_data_type_by_tipo(&self.data_types, &tipo)
-                            .expect("Found constr with no data type?");
+                        let layout = self.layout(&tipo).expect("Found constr with no layout?");
 
-                        let list_decorator = data_type
-                            .decorators
-                            .iter()
-                            .any(|dec| matches!(dec.kind, DecoratorKind::List));
-
-                        if list_decorator {
+                        if layout.is_list() {
                             subject
                         } else {
                             Term::var(CONSTR_INDEX_EXPOSER).apply(subject)
@@ -5050,7 +5173,7 @@ impl<'a> CodeGenerator<'a> {
                         .apply(builder::convert_type_to_data(
                             arg.clone(),
                             &tipo.arg_types().unwrap()[index],
-                            &self.data_types,
+                            &self.module_types,
                         ))
                         .apply(term);
                 }
@@ -5116,7 +5239,7 @@ impl<'a> CodeGenerator<'a> {
                         false,
                         is_expect.into(),
                         otherwise,
-                        &self.data_types,
+                        &self.module_types,
                     );
 
                     if !list_decorator {
@@ -5191,7 +5314,11 @@ impl<'a> CodeGenerator<'a> {
                     let mut term = Term::empty_list();
                     for (arg, tipo) in args.into_iter().zip(tuple_sub_types).rev() {
                         term = Term::mk_cons()
-                            .apply(builder::convert_type_to_data(arg, &tipo, &self.data_types))
+                            .apply(builder::convert_type_to_data(
+                                arg,
+                                &tipo,
+                                &self.module_types,
+                            ))
                             .apply(term);
                     }
                     Some(term)
@@ -5224,12 +5351,12 @@ impl<'a> CodeGenerator<'a> {
                         .apply(builder::convert_type_to_data(
                             fst,
                             &tipo.get_inner_types()[0],
-                            &self.data_types,
+                            &self.module_types,
                         ))
                         .apply(builder::convert_type_to_data(
                             snd,
                             &tipo.get_inner_types()[1],
-                            &self.data_types,
+                            &self.module_types,
                         ));
 
                     Some(term)
@@ -5242,22 +5369,15 @@ impl<'a> CodeGenerator<'a> {
             } => {
                 let tail_name_prefix = "__tail_index";
 
-                let data_type =
-                    lookup_data_type_by_tipo(&self.data_types, &tipo).unwrap_or_else(|| {
-                        panic!("Attempted record update on an unknown type!\ntype: {tipo:#?}")
-                    });
+                let layout = self.layout(&tipo).unwrap_or_else(|| {
+                    panic!("Attempted record update on an unknown type!\ntype: {tipo:#?}")
+                });
 
-                assert!(
-                    !data_type.is_never(),
-                    "Attempted record update on a Never type.",
-                );
+                let [constructor] = &layout.constructors[..] else {
+                    panic!("Attempted record update on a type with several constructors.")
+                };
 
-                let list_decorator = data_type
-                    .decorators
-                    .iter()
-                    .any(|dec| matches!(dec.kind, DecoratorKind::List));
-
-                let constructor_field_count = data_type.constructors[0].arguments.len();
+                let constructor_field_count = constructor.fields.len();
                 let mut record = arg_stack.pop().unwrap();
 
                 let mut args = IndexMap::new();
@@ -5293,7 +5413,7 @@ impl<'a> CodeGenerator<'a> {
                             .apply(builder::convert_type_to_data(
                                 arg.clone(),
                                 tipo,
-                                &self.data_types,
+                                &self.module_types,
                             ))
                             .apply(term);
                     } else {
@@ -5303,9 +5423,9 @@ impl<'a> CodeGenerator<'a> {
                     }
                 }
 
-                if !list_decorator {
+                if !layout.is_list() {
                     term = Term::constr_data()
-                        .apply(Term::integer(0.into()))
+                        .apply(Term::integer(constructor.index.into()))
                         .apply(term);
                 }
 
@@ -5336,7 +5456,7 @@ impl<'a> CodeGenerator<'a> {
                     }
                 }
 
-                if !list_decorator {
+                if !layout.is_list() {
                     record = Term::var(CONSTR_FIELDS_EXPOSER).apply(record)
                 }
 
@@ -5405,7 +5525,7 @@ impl<'a> CodeGenerator<'a> {
                     false,
                     is_expect.into(),
                     otherwise,
-                    &self.data_types,
+                    &self.module_types,
                 )
                 .apply(value);
 
@@ -5436,7 +5556,7 @@ impl<'a> CodeGenerator<'a> {
                             term.lambda(name).apply(unknown_data_to_type(
                                 value,
                                 &inner_types[1],
-                                &self.data_types,
+                                &self.module_types,
                             ))
                         } else {
                             softcast_data_to_type_otherwise(
@@ -5445,14 +5565,14 @@ impl<'a> CodeGenerator<'a> {
                                 &inner_types[1],
                                 term,
                                 otherwise.clone(),
-                                &self.data_types,
+                                &self.module_types,
                             )
                         }
                     } else {
                         term.lambda(name).apply(known_data_to_type(
                             value,
                             &inner_types[1],
-                            &self.data_types,
+                            &self.module_types,
                         ))
                     }
                 }
@@ -5464,7 +5584,7 @@ impl<'a> CodeGenerator<'a> {
                             term.lambda(name).apply(unknown_data_to_type(
                                 value,
                                 &inner_types[0],
-                                &self.data_types,
+                                &self.module_types,
                             ))
                         } else {
                             softcast_data_to_type_otherwise(
@@ -5473,14 +5593,14 @@ impl<'a> CodeGenerator<'a> {
                                 &inner_types[0],
                                 term,
                                 otherwise,
-                                &self.data_types,
+                                &self.module_types,
                             )
                         }
                     } else {
                         term.lambda(name).apply(known_data_to_type(
                             value,
                             &inner_types[0],
-                            &self.data_types,
+                            &self.module_types,
                         ))
                     }
                 }
@@ -5516,7 +5636,7 @@ impl<'a> CodeGenerator<'a> {
                     Some(then.lambda(name).apply(unknown_data_to_type(
                         value,
                         &tipo,
-                        &self.data_types,
+                        &self.module_types,
                     )))
                 } else {
                     Some(softcast_data_to_type_otherwise(
@@ -5525,7 +5645,7 @@ impl<'a> CodeGenerator<'a> {
                         &tipo,
                         then,
                         otherwise,
-                        &self.data_types,
+                        &self.module_types,
                     ))
                 }
             }
@@ -5535,7 +5655,7 @@ impl<'a> CodeGenerator<'a> {
                 Some(known_data_to_type(
                     Term::head_list().apply(arg),
                     &tipo,
-                    &self.data_types,
+                    &self.module_types,
                 ))
             }
         })
@@ -5610,7 +5730,6 @@ mod tests {
             IndexMap::new(),
             IndexMap::new(),
             IndexMap::new(),
-            IndexMap::new(),
             Tracing::silent(),
         );
 
@@ -5629,7 +5748,6 @@ mod tests {
     fn empty_generator() -> CodeGenerator<'static> {
         CodeGenerator::new(
             PlutusVersion::V3,
-            IndexMap::new(),
             IndexMap::new(),
             IndexMap::new(),
             IndexMap::new(),
